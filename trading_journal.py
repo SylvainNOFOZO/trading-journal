@@ -77,52 +77,87 @@ GH_FILE  = st.secrets.get("DATA_FILE",    "trades_data.json")
 GH_API   = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_FILE}"
 GH_HDR   = {"Authorization": f"token {GH_TOKEN}", "Accept":"application/vnd.github.v3+json"}
 
+def gh_get_file():
+    """Retourne (sha, trades_list) depuis GitHub. Toujours fetch le SHA frais."""
+    try:
+        r = requests.get(GH_API, headers=GH_HDR, timeout=10)
+        if r.status_code == 404:
+            # Fichier n'existe pas encore — le créer
+            gh_create_file()
+            return None, []
+        r.raise_for_status()
+        d   = r.json()
+        sha = d.get("sha")
+        raw = base64.b64decode(d.get("content","")).decode("utf-8").strip()
+        if not raw or raw == "null":
+            return sha, []
+        parsed = json.loads(raw)
+        return sha, parsed if isinstance(parsed, list) else []
+    except json.JSONDecodeError:
+        return None, []
+    except Exception as e:
+        raise RuntimeError(f"Impossible de charger les données : {e}")
+
+def gh_create_file():
+    """Crée trades_data.json vide si absent."""
+    content = base64.b64encode(b"[]").decode()
+    requests.put(GH_API, headers=GH_HDR,
+        json={"message":"Init trades_data.json","content":content}, timeout=10)
+
 def gh_load():
+    """Charge les trades — affiche erreur Streamlit si échec."""
     try:
-        r = requests.get(GH_API, headers=GH_HDR, timeout=8)
-        r.raise_for_status()
-        d = r.json()
-        raw = base64.b64decode(d["content"]).decode("utf-8").strip()
-        # Fichier vide ou invalide → retourner liste vide sans crash
-        if not raw or raw in ("", "null"):
-            return [], d["sha"]
-        trades = json.loads(raw)
-        if not isinstance(trades, list):
-            return [], d["sha"]
-        return trades, d["sha"]
-    except requests.exceptions.RequestException as e:
-        st.warning(f"⚠️ Impossible de joindre GitHub : {e}")
-        return [], None
-    except (json.JSONDecodeError, ValueError):
-        # Fichier corrompu sur GitHub — on repart de zéro sans crasher
-        st.warning("⚠️ Fichier de données vide ou corrompu sur GitHub. Repartez de zéro.")
-        return [], None
+        sha, trades = gh_get_file()
+        return trades, sha
     except Exception as e:
-        st.error(f"Erreur chargement GitHub : {e}")
+        st.error(f"❌ {e}")
         return [], None
 
-def gh_save(trades, sha):
+def gh_save(trades):
+    """Sauvegarde les trades — récupère TOUJOURS le SHA frais avant d'écrire."""
     try:
-        content = base64.b64encode(json.dumps(trades, ensure_ascii=False, indent=2).encode()).decode()
-        r = requests.put(GH_API, headers=GH_HDR,
-            json={"message":f"Update trades ({len(trades)} total)","content":content,"sha":sha}, timeout=10)
+        # 1. Récupérer le SHA actuel (évite les conflits)
+        sha, _ = gh_get_file()
+        # 2. Écrire
+        content = base64.b64encode(
+            json.dumps(trades, ensure_ascii=False, indent=2).encode()
+        ).decode()
+        body = {"message": f"Update trades ({len(trades)} total)", "content": content}
+        if sha:
+            body["sha"] = sha
+        r = requests.put(GH_API, headers=GH_HDR, json=body, timeout=15)
         r.raise_for_status()
-        return r.json()["content"]["sha"], True
+        new_sha = r.json()["content"]["sha"]
+        st.session_state.gh_sha = new_sha
+        return True
     except Exception as e:
-        st.error(f"Erreur sync GitHub : {e}"); return sha, False
+        st.error(f"❌ Erreur sauvegarde : {e}")
+        return False
 
+# ── INIT SESSION ───────────────────────────────────────────────────────────────
 if "trades"      not in st.session_state:
-    t, s = gh_load(); st.session_state.trades = t; st.session_state.gh_sha = s
-if "page"        not in st.session_state: st.session_state.page     = "dashboard"
-if "edit_id"     not in st.session_state: st.session_state.edit_id  = None
+    with st.spinner("Chargement des données depuis GitHub..."):
+        trades, sha = gh_load()
+    st.session_state.trades     = trades
+    st.session_state.gh_sha     = sha
+    st.session_state.loaded_ok  = True
+if "page"        not in st.session_state: st.session_state.page        = "dashboard"
+if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
 if "mode_filter" not in st.session_state: st.session_state.mode_filter = "Tous"
 
 def cloud_save(trades):
-    sha, ok = gh_save(trades, st.session_state.gh_sha)
-    st.session_state.gh_sha = sha; return ok
+    """Sauvegarde + met à jour session."""
+    ok = gh_save(trades)
+    if ok:
+        st.session_state.trades = trades
+    return ok
 
 def force_reload():
-    t, s = gh_load(); st.session_state.trades = t; st.session_state.gh_sha = s
+    """Forcer rechargement depuis GitHub."""
+    with st.spinner("Synchronisation..."):
+        trades, sha = gh_load()
+    st.session_state.trades = trades
+    st.session_state.gh_sha = sha
 
 def get_pnl(t): return float(t.get("pnl", 0))
 
