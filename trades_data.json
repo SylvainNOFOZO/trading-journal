@@ -13,5 +13,20 @@
     "strategy": "Breakout",
     "mood": "Confiant",
     "notes": "Breaker block"
+  },
+  {
+    "id": 1779457324188,
+    "date": "2026-05-22",
+    "symbol": "NAS100",
+    "direction": "SHORT",
+    "entry": 23000.0,
+    "exit": 23100.0,
+    "qty": 1.0,
+    "fees": 0.0,
+    "sl": 23100.0,
+    "tp": 22800.0,
+    "strategy": "Breakout",
+    "mood": "Confiant",
+    "notes": ""
   }
 ]
