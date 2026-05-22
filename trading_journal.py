@@ -471,193 +471,251 @@ elif st.session_state.page == "add":
 elif st.session_state.page == "import":
     st.markdown("# 📂 Importer depuis MetaTrader 5")
     if st.button("← Retour"):
-        st.session_state.page="journal"; st.rerun()
+        st.session_state.page = "journal"; st.rerun()
     st.divider()
 
-    # Choix mode import
-    imp_col1, imp_col2 = st.columns([2,3])
-    with imp_col1:
-        imp_mode = st.radio("Type de compte MT5", ["Réel 💰","Démo 🧪"],
-            horizontal=True, help="Tous les trades importés seront étiquetés avec ce mode")
-    with imp_col2:
-        mc = "mode-banner-real" if imp_mode=="Réel 💰" else "mode-banner-demo"
+    # ── Choix du mode ────────────────────────────────────────────────────────
+    ic1, ic2 = st.columns([2, 3])
+    with ic1:
+        imp_mode = st.radio("Type de compte", ["Réel 💰", "Démo 🧪"], horizontal=True)
+    with ic2:
+        mc = "mode-banner-real" if imp_mode == "Réel 💰" else "mode-banner-demo"
         st.markdown(f'<div class="{mc}" style="margin-top:8px">Trades importés étiquetés : {imp_mode}</div>',
-            unsafe_allow_html=True)
+                    unsafe_allow_html=True)
 
     st.markdown("---")
 
     with st.expander("📖 Comment exporter depuis MT5 ?", expanded=False):
         st.markdown("""
         1. MT5 → **Affichage → Historique des transactions**
-        2. Clic droit → **Enregistrer en tant que rapport** → **Detailed Report**  
-           → Format **XLSX** ou **CSV**
-        3. Uploadez le fichier ci-dessous
+        2. Clic droit → **Enregistrer en tant que rapport** → **Detailed Report** → **XLSX** ou **CSV**
         
-        **Colonnes attendues** : `Time · Position · Symbol · Type · Volume · Price · S/L · T/P · Time · Price · Commission · Swap · Profit`
+        **Colonnes attendues** :  
+        `Time · Position · Symbol · Type · Volume · Price · S/L · T/P · Time · Price · Commission · Swap · Profit`
         """)
 
     uploaded = st.file_uploader(
-        "Choisir le fichier MT5 (CSV ou XLSX)",
-        type=["csv","txt","xlsx","xls"],
+        "Choisir le fichier MT5 (CSV, TXT ou XLSX)",
+        type=["csv", "txt", "xlsx", "xls"],
         label_visibility="collapsed"
     )
 
     if uploaded:
-        fname = uploaded.name.lower()
+        fname      = uploaded.name.lower()
+        file_bytes = uploaded.getvalue()   # lire UNE SEULE FOIS en mémoire
 
-        # ── Lecture selon format ──────────────────────────────────────────────
+        # ── 1. Lecture brute ─────────────────────────────────────────────────
         try:
-            if fname.endswith((".xlsx",".xls")):
-                # XLSX : essayer plusieurs en-têtes
-                xls_raw = pd.read_excel(uploaded, header=None, dtype=str)
+            if fname.endswith((".xlsx", ".xls")):
+                # Trouver la ligne d'en-tête (peut y avoir des titres au-dessus)
+                xls_scan = pd.read_excel(io.BytesIO(file_bytes), header=None, dtype=str)
                 header_row = 0
-                for i, row in xls_raw.iterrows():
+                for i, row in xls_scan.iterrows():
                     vals = [str(v).strip().lower() for v in row.values]
-                    if any(k in vals for k in ["symbol","time","profit","type","position"]):
-                        header_row = i; break
-                df_raw = pd.read_excel(
-                    io.BytesIO(uploaded.getvalue()) if hasattr(uploaded,"getvalue") else uploaded,
-                    skiprows=header_row, dtype=str
-                )
+                    if any(k in vals for k in ["symbol", "time", "profit", "type", "position"]):
+                        header_row = i
+                        break
+                df_raw = pd.read_excel(io.BytesIO(file_bytes), skiprows=header_row, dtype=str)
+
             else:
-                raw = uploaded.read().decode("utf-8", errors="replace")
-                sep = "	" if raw.count("	") > raw.count(",") else ","
-                tmp = pd.read_csv(io.StringIO(raw), sep=sep, header=None, dtype=str)
+                raw_text = file_bytes.decode("utf-8", errors="replace")
+                # Détecter séparateur
+                counts = {"\t": raw_text.count("\t"), ";": raw_text.count(";"), ",": raw_text.count(",")}
+                sep = max(counts, key=counts.get)
+
+                # Trouver ligne d'en-tête
+                tmp = pd.read_csv(io.StringIO(raw_text), sep=sep, header=None,
+                                  dtype=str, on_bad_lines="skip")
                 header_row = 0
                 for i, row in tmp.iterrows():
                     vals = [str(v).strip().lower() for v in row.values]
-                    if any(k in vals for k in ["symbol","time","profit","type","position"]):
-                        header_row = i; break
-                df_raw = pd.read_csv(io.StringIO(raw), sep=sep, skiprows=header_row, dtype=str)
+                    if any(k in vals for k in ["symbol", "time", "profit", "type", "position"]):
+                        header_row = i
+                        break
+                df_raw = pd.read_csv(io.StringIO(raw_text), sep=sep, skiprows=header_row,
+                                     dtype=str, on_bad_lines="skip")
+
         except Exception as e:
-            st.error(f"Erreur lecture fichier : {e}"); st.stop()
-
-        # Nettoyer colonnes
-        cols_orig = list(df_raw.columns)
-        df_raw.columns = [str(c).strip() for c in df_raw.columns]
-
-        # Gérer les colonnes dupliquées (Time x2, Price x2)
-        # MT5 format: Time|Position|Symbol|Type|Volume|Price|S/L|T/P|Time|Price|Commission|Swap|Profit
-        seen = {}; new_cols = []
-        for c in df_raw.columns:
-            cl = c.lower().strip()
-            if cl in seen:
-                seen[cl] += 1
-                new_cols.append(f"{c}_{seen[cl]}")
-            else:
-                seen[cl] = 1
-                new_cols.append(c)
-        df_raw.columns = new_cols
-
-        # Normaliser en minuscules pour le mapping
-        col_map = {c.lower().strip().replace(" ","_").replace("/","_"): c for c in df_raw.columns}
-
-        def fc(candidates):
-            for cand in candidates:
-                if cand in col_map: return col_map[cand]
-            return None
-
-        # Colonnes MT5 standard
-        col_open_time  = fc(["time","time_1","open_time","date"])
-        col_close_time = fc(["time_2","close_time"])
-        col_position   = fc(["position","deal","ticket","order"])
-        col_symbol     = fc(["symbol","asset","instrument"])
-        col_type       = fc(["type","action","order_type"])
-        col_volume     = fc(["volume","vol","lots","size","quantity"])
-        col_open_price = fc(["price","price_1","open_price","entry_price"])
-        col_close_price= fc(["price_2","close_price","exit_price"])
-        col_sl         = fc(["s_l","sl","stop_loss","stoploss","s/l"])
-        col_tp         = fc(["t_p","tp","take_profit","takeprofit","t/p"])
-        col_commission = fc(["commission","comm","fee"])
-        col_swap       = fc(["swap","rollover"])
-        col_profit     = fc(["profit","p&l","result","net_profit"])
-
-        with st.expander(f"Colonnes détectées ({len(df_raw.columns)})", expanded=False):
-            mapping_info = {
-                "Open Time": col_open_time, "Close Time": col_close_time,
-                "Symbol": col_symbol, "Type": col_type, "Volume": col_volume,
-                "Entry Price": col_open_price, "Exit Price": col_close_price,
-                "S/L": col_sl, "T/P": col_tp, "Commission": col_commission,
-                "Swap": col_swap, "Profit": col_profit
-            }
-            for k,v in mapping_info.items():
-                color = "✅" if v else "❌"
-                st.markdown(f"{color} **{k}** → `{v or "Non trouvé"}`")
-
-        if not col_profit:
-            st.error("❌ Colonne Profit introuvable.")
-            st.write("Colonnes disponibles :", list(df_raw.columns))
+            st.error(f"❌ Erreur lecture fichier : {e}")
+            st.exception(e)
             st.stop()
 
-        # Filtrer lignes trades valides
+        # ── 2. Nettoyage colonnes ────────────────────────────────────────────
+        df_raw.columns = [str(c).strip() for c in df_raw.columns]
+        df_raw = df_raw.dropna(axis=1, how="all")
+        df_raw = df_raw.loc[df_raw.astype(str).apply(
+            lambda r: r.str.strip().ne("").any(), axis=1)]
+
+        # Renommer colonnes dupliquées : Time→Time, Time→Time_2 / Price→Price, Price→Price_2
+        seen_cols = {}
+        renamed   = []
+        for c in df_raw.columns:
+            key = c.strip().lower()
+            if key in seen_cols:
+                seen_cols[key] += 1
+                renamed.append(f"{c}_{seen_cols[key]}")
+            else:
+                seen_cols[key] = 1
+                renamed.append(c)
+        df_raw.columns = renamed
+
+        # ── 3. Mapping colonnes ───────────────────────────────────────────────
+        def norm_col(s):
+            import re
+            return re.sub(r'[\s/_\\-]+', '_', str(s).strip().lower())
+
+        col_index = {norm_col(c): c for c in df_raw.columns}
+
+        def find_col(*candidates):
+            # Recherche exacte puis partielle
+            for cand in candidates:
+                key = norm_col(cand)
+                if key in col_index:
+                    return col_index[key]
+            for cand in candidates:
+                key = norm_col(cand)
+                for k, v in col_index.items():
+                    if key in k or k in key:
+                        return v
+            return None
+
+        col_open_time   = find_col("time", "time_1", "open_time", "open time", "date")
+        col_close_time  = find_col("time_2", "close_time", "close time")
+        col_symbol      = find_col("symbol", "asset", "instrument", "pair")
+        col_type        = find_col("type", "action", "order_type", "operation")
+        col_volume      = find_col("volume", "vol", "lots", "size", "quantity")
+        col_open_price  = find_col("price", "price_1", "open_price", "entry_price", "entry price")
+        col_close_price = find_col("price_2", "close_price", "exit_price", "exit price")
+        col_sl          = find_col("s / l", "s/l", "sl", "stop_loss", "stoploss", "stop loss")
+        col_tp          = find_col("t / p", "t/p", "tp", "take_profit", "takeprofit", "take profit")
+        col_commission  = find_col("commission", "comm", "fee", "fees")
+        col_swap        = find_col("swap", "rollover")
+        col_profit      = find_col("profit", "p&l", "result", "net_profit", "net profit")
+
+        # Afficher le diagnostic
+        with st.expander(f"🔍 Colonnes détectées ({len(df_raw.columns)})", expanded=True):
+            d1, d2 = st.columns(2)
+            mapping_info = [
+                ("Open Time",    col_open_time),
+                ("Close Time",   col_close_time),
+                ("Symbol",       col_symbol),
+                ("Type",         col_type),
+                ("Volume",       col_volume),
+                ("Entry Price",  col_open_price),
+                ("Exit Price",   col_close_price),
+                ("S/L",          col_sl),
+                ("T/P",          col_tp),
+                ("Commission",   col_commission),
+                ("Swap",         col_swap),
+                ("Profit",       col_profit),
+            ]
+            half = len(mapping_info) // 2
+            with d1:
+                for k, v in mapping_info[:half]:
+                    st.markdown(f"{'✅' if v else '❌'} **{k}** → `{v or 'Non trouvé'}`")
+            with d2:
+                for k, v in mapping_info[half:]:
+                    st.markdown(f"{'✅' if v else '❌'} **{k}** → `{v or 'Non trouvé'}`")
+            st.caption(f"Toutes les colonnes : {list(df_raw.columns)}")
+            st.dataframe(df_raw.head(3))
+
+        if not col_profit:
+            st.error("❌ Colonne Profit introuvable. Vérifiez les colonnes affichées ci-dessus.")
+            st.stop()
+
+        if not col_symbol:
+            st.error("❌ Colonne Symbol introuvable.")
+            st.stop()
+
+        # ── 4. Filtrage lignes valides ────────────────────────────────────────
         df_work = df_raw.copy()
 
-        # Supprimer dépôts/retraits
+        # Supprimer dépôts / retraits / balance
         if col_type:
             df_work = df_work[~df_work[col_type].str.lower().str.contains(
                 "balance|deposit|withdrawal|credit|bonus", na=False)]
 
-        # Garder lignes avec profit non nul (trades fermés)
+        # Garder lignes avec profit non nul
         def has_value(x):
-            try: return float(str(x).replace(" ","").replace(",",".")) != 0
-            except: return False
+            try:
+                return float(str(x).replace(" ", "").replace(",", ".")) != 0
+            except:
+                return False
 
         df_closed = df_work[df_work[col_profit].apply(has_value)].copy()
+        if df_closed.empty:
+            df_closed = df_work.dropna(subset=[col_profit]).copy()
 
         if df_closed.empty:
-            # Essayer sans filtre profit
-            df_closed = df_work.copy()
+            st.warning("⚠️ Aucun trade fermé détecté. Vérifiez le fichier.")
+            st.stop()
 
-        if df_closed.empty:
-            st.warning("Aucun trade fermé détecté."); st.stop()
+        st.success(f"✅ {len(df_closed)} lignes de trades détectées")
 
-        # Construire les trades
-        new_trades = []; skipped = 0
+        # ── 5. Construction des trades ────────────────────────────────────────
+        SYM_MAP_LOCAL = {
+            "EURUSD":"EUR/USD","GBPUSD":"GBP/USD","USDJPY":"USD/JPY","USDCHF":"USD/CHF",
+            "AUDUSD":"AUD/USD","NZDUSD":"NZD/USD","USDCAD":"USD/CAD","EURGBP":"EUR/GBP",
+            "EURJPY":"EUR/JPY","GBPJPY":"GBP/JPY","EURCAD":"EUR/CAD","AUDCAD":"AUD/CAD",
+            "XAUUSD":"GOLD","XAGUSD":"SILVER","BTCUSD":"BTC/USD","ETHUSD":"ETH/USD",
+            "US30":"DOW30","US500":"SP500","SP500":"SP500","USTEC":"NAS100","NAS100":"NAS100",
+            "UK100":"FTSE100","GER40":"DAX40","FRA40":"CAC40","USOIL":"OIL","UKOIL":"OIL",
+        }
+
+        new_trades = []
+        skipped    = 0
 
         for _, row in df_closed.iterrows():
             try:
-                def rv(col):
-                    if not col: return "0"
-                    return str(row.get(col,"0"))
+                def rv(col, default="0"):
+                    if not col: return default
+                    v = row.get(col, default)
+                    return str(v) if v is not None and str(v).lower() != "nan" else default
 
-                # Date ouverture
-                raw_date = rv(col_open_time)
-                try: parsed_date = pd.to_datetime(raw_date).strftime("%Y-%m-%d")
-                except: parsed_date = str(date.today())
+                def rfloat(col):
+                    try:
+                        return float(rv(col).replace(" ", "").replace(",", "."))
+                    except:
+                        return 0.0
+
+                # Date
+                try:
+                    parsed_date = pd.to_datetime(rv(col_open_time, str(date.today()))).strftime("%Y-%m-%d")
+                except:
+                    parsed_date = str(date.today())
 
                 # Symbole
-                sym_raw = rv(col_symbol).strip().upper()
-                symbol  = SYM_MAP.get(sym_raw, sym_raw)
-                if symbol not in SYMBOLS: SYMBOLS.append(symbol)
+                sym_raw = rv(col_symbol, "UNKNOWN").strip().upper()
+                symbol  = SYM_MAP_LOCAL.get(sym_raw, sym_raw)
 
                 # Direction
                 direction = "LONG"
                 if col_type:
                     tv = rv(col_type).strip().lower()
-                    if any(k in tv for k in ["sell","short","s","vente","bid"]):
+                    if any(k in tv for k in ["sell", "short", "s", "vente"]):
                         direction = "SHORT"
 
                 # Prix
-                entry_price = safe_float(rv(col_open_price))
-                exit_price  = safe_float(rv(col_close_price))
-                sl_val      = safe_float(rv(col_sl))
-                tp_val      = safe_float(rv(col_tp))
-                volume      = safe_float(rv(col_volume))
+                entry_price = rfloat(col_open_price)
+                exit_price  = rfloat(col_close_price)
+                sl_val      = rfloat(col_sl)
+                tp_val      = rfloat(col_tp)
+                volume      = rfloat(col_volume)
 
-                # P&L réel = profit + commission + swap
-                profit    = safe_float(rv(col_profit))
-                comm      = safe_float(rv(col_commission))
-                swap      = safe_float(rv(col_swap))
-                pnl_reel  = round(profit + comm + swap, 2)
+                # P&L net = profit + commission + swap
+                profit   = rfloat(col_profit)
+                comm     = rfloat(col_commission)
+                swap_v   = rfloat(col_swap)
+                pnl_reel = round(profit + comm + swap_v, 2)
 
-                notes_parts = []
-                if volume:  notes_parts.append(f"vol:{volume}")
-                if comm:    notes_parts.append(f"comm:{comm:.2f}")
-                if swap:    notes_parts.append(f"swap:{swap:.2f}")
-                notes_str = "Import MT5" + (" · "+" · ".join(notes_parts) if notes_parts else "")
+                parts = []
+                if volume:  parts.append(f"vol:{volume}")
+                if comm:    parts.append(f"comm:{comm:.2f}")
+                if swap_v:  parts.append(f"swap:{swap_v:.2f}")
+                notes_str = "Import MT5" + (" · " + " · ".join(parts) if parts else "")
 
                 new_trades.append({
-                    "id":         int(datetime.now().timestamp()*1000000) + len(new_trades),
+                    "id":         int(datetime.now().timestamp() * 1000000) + len(new_trades),
                     "date":       parsed_date,
                     "symbol":     symbol,
                     "direction":  direction,
@@ -671,30 +729,31 @@ elif st.session_state.page == "import":
                     "mood":       "Neutre",
                     "notes":      notes_str,
                 })
-            except Exception:
+            except Exception as ex:
                 skipped += 1
 
         if not new_trades:
-            st.error("Aucun trade valide extrait."); st.stop()
+            st.error("❌ Aucun trade valide extrait. Vérifiez le diagnostic des colonnes.")
+            st.stop()
 
-        # Résumé
+        # ── 6. Résumé + aperçu ────────────────────────────────────────────────
         total_imp = round(sum(t["pnl"] for t in new_trades), 2)
         wins_imp  = [t for t in new_trades if t["pnl"] > 0]
         col_t     = "#00d4aa" if total_imp >= 0 else "#ff4d6d"
 
-        st.markdown(f"### ✅ {len(new_trades)} trades prêts à importer" + (f" · {skipped} ignorés" if skipped else ""))
-        s1,s2,s3 = st.columns(3)
-        with s1: kpi("💰","P&L Total", fmt(total_imp), "Résultat global",          col_t)
-        with s2: kpi("✅","Gagnants",  str(len(wins_imp)), f"{len(wins_imp)/len(new_trades)*100:.0f}% win","#00d4aa")
-        with s3: kpi("❌","Perdants",  str(len(new_trades)-len(wins_imp)),"Trades négatifs","#ff4d6d")
+        st.markdown(f"### ✅ {len(new_trades)} trades prêts à importer" +
+                    (f" · {skipped} ignorés" if skipped else ""))
+        s1, s2, s3 = st.columns(3)
+        with s1: kpi("💰", "P&L Total",  fmt(total_imp),  "Résultat global",           col_t)
+        with s2: kpi("✅", "Gagnants",   str(len(wins_imp)), f"{len(wins_imp)/len(new_trades)*100:.0f}% win", "#00d4aa")
+        with s3: kpi("❌", "Perdants",   str(len(new_trades)-len(wins_imp)), "Trades négatifs", "#ff4d6d")
         st.markdown(" ")
 
-        # Aperçu tableau
         rows_html = ""
-        for t in new_trades[:25]:
-            c  = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
-            dc = "b-win" if t["direction"]=="LONG" else "b-loss"
-            mc = "b-real" if t["trade_mode"]=="Réel 💰" else "b-demo"
+        for t in new_trades[:30]:
+            c  = "#00d4aa" if t["pnl"] >= 0 else "#ff4d6d"
+            dc = "b-win" if t["direction"] == "LONG" else "b-loss"
+            mc = "b-real" if t["trade_mode"] == "Réel 💰" else "b-demo"
             rows_html += f"""<tr>
                 <td style="color:#6b7894;font-family:monospace">{t["date"]}</td>
                 <td>{badge(t["symbol"],"b-sym")}</td>
@@ -705,8 +764,8 @@ elif st.session_state.page == "import":
                 <td style="font-family:monospace;font-weight:800;color:{c}">{fmt(t["pnl"])}</td>
                 <td style="color:#6b7894;font-size:11px">{t["notes"]}</td>
             </tr>"""
-        if len(new_trades) > 25:
-            rows_html += f"<tr><td colspan='8' style='color:#6b7894;text-align:center;padding:12px'>... et {len(new_trades)-25} autres trades</td></tr>"
+        if len(new_trades) > 30:
+            rows_html += f"<tr><td colspan='8' style='color:#6b7894;text-align:center;padding:10px'>... et {len(new_trades)-30} autres</td></tr>"
 
         st.markdown(f"""<div style="overflow-x:auto"><table class="tj-table"><thead><tr>
             <th>Date</th><th>Symbole</th><th>Dir.</th><th>Mode</th>
@@ -714,7 +773,9 @@ elif st.session_state.page == "import":
         </tr></thead><tbody>{rows_html}</tbody></table></div>""", unsafe_allow_html=True)
 
         st.markdown("---")
-        add_mode = st.radio("Mode d'import", ["➕ Ajouter aux trades existants","🔄 Remplacer tous les trades"], horizontal=True)
+        add_mode = st.radio("Mode d'import",
+            ["➕ Ajouter aux trades existants", "🔄 Remplacer tous les trades"],
+            horizontal=True)
 
         if st.button("✅  Confirmer l'import", use_container_width=True):
             if "Remplacer" in add_mode:
@@ -723,5 +784,7 @@ elif st.session_state.page == "import":
                 existing_ids = {t["id"] for t in st.session_state.trades}
                 st.session_state.trades += [t for t in new_trades if t["id"] not in existing_ids]
             ok = cloud_save(st.session_state.trades)
-            st.success(f"✅ {len(new_trades)} trades importés ({imp_mode}) — {'synchronisés !' if ok else 'erreur sync.'}") 
-            st.session_state.page="dashboard"; st.rerun()
+            st.success(f"✅ {len(new_trades)} trades importés ({imp_mode}) — " +
+                       ("synchronisés !" if ok else "erreur sync GitHub."))
+            st.session_state.page = "dashboard"
+            st.rerun()
