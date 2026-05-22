@@ -4,15 +4,8 @@ import plotly.graph_objects as go
 from datetime import date, datetime
 import json, os, base64, requests
 
-# ── PAGE CONFIG ────────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Trading Journal Pro",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="Trading Journal Pro", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
-# ── CSS ────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
@@ -40,11 +33,9 @@ h1,h2,h3,h4,h5,h6,p,label,.stMarkdown { color: #e8ecf4 !important; }
 .b-sym  { color:#7c6aff;background:rgba(124,106,255,.15);border:1px solid rgba(124,106,255,.3); }
 .b-str  { color:#ff9f43;background:rgba(255,159,67,.15);border:1px solid rgba(255,159,67,.3); }
 hr { border-color:#1e2535 !important; }
-.preview { background:#0d111d;border:1px solid #1e2535;border-radius:12px;padding:14px 20px;display:flex;gap:40px;align-items:center;margin:12px 0; }
-.preview-label { font-size:10px;color:#6b7894;letter-spacing:1px;text-transform:uppercase; }
-.preview-value { font-size:22px;font-weight:800;font-family:'JetBrains Mono',monospace;margin-top:2px; }
-.sync-ok  { background:#00d4aa18;border:1px solid #00d4aa44;border-radius:8px;padding:6px 14px;font-size:12px;color:#00d4aa; }
-.sync-err { background:#ff4d6d18;border:1px solid #ff4d6d44;border-radius:8px;padding:6px 14px;font-size:12px;color:#ff4d6d; }
+.pnl-input-box { background:#0d111d;border:1px solid #1e2535;border-radius:12px;padding:16px 20px;margin:10px 0; }
+.pnl-input-title { font-size:11px;color:#6b7894;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;margin-bottom:8px; }
+.sync-ok { background:#00d4aa18;border:1px solid #00d4aa44;border-radius:8px;padding:6px 14px;font-size:12px;color:#00d4aa; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -71,11 +62,10 @@ GH_API   = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_FILE}"
 GH_HDR   = {"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"}
 
 def gh_load():
-    """Charge les trades depuis GitHub."""
     try:
         r = requests.get(GH_API, headers=GH_HDR, timeout=8)
         r.raise_for_status()
-        data = r.json()
+        data    = r.json()
         content = base64.b64decode(data["content"]).decode("utf-8")
         return json.loads(content), data["sha"]
     except Exception as e:
@@ -83,11 +73,10 @@ def gh_load():
         return [], None
 
 def gh_save(trades, sha):
-    """Sauvegarde les trades sur GitHub et retourne le nouveau SHA."""
     try:
         content = base64.b64encode(json.dumps(trades, ensure_ascii=False, indent=2).encode()).decode()
-        body = {"message": f"Update trades ({len(trades)} total)", "content": content, "sha": sha}
-        r = requests.put(GH_API, headers=GH_HDR, json=body, timeout=10)
+        body    = {"message": f"Update trades ({len(trades)} total)", "content": content, "sha": sha}
+        r       = requests.put(GH_API, headers=GH_HDR, json=body, timeout=10)
         r.raise_for_status()
         return r.json()["content"]["sha"], True
     except Exception as e:
@@ -95,45 +84,44 @@ def gh_save(trades, sha):
         return sha, False
 
 # ── SESSION STATE ──────────────────────────────────────────────────────────────
-if "trades" not in st.session_state:
+if "trades"  not in st.session_state:
     trades, sha = gh_load()
     st.session_state.trades  = trades
     st.session_state.gh_sha  = sha
 if "page"    not in st.session_state: st.session_state.page    = "dashboard"
 if "edit_id" not in st.session_state: st.session_state.edit_id = None
 
-def save(trades):
-    """Sauvegarde + met à jour le SHA."""
+def cloud_save(trades):
     new_sha, ok = gh_save(trades, st.session_state.gh_sha)
     st.session_state.gh_sha = new_sha
     return ok
 
 def force_reload():
-    """Force rechargement depuis GitHub."""
     trades, sha = gh_load()
     st.session_state.trades = trades
     st.session_state.gh_sha = sha
 
 # ── HELPERS ────────────────────────────────────────────────────────────────────
-def calc_pnl(t):
-    raw = (t["exit"]-t["entry"])*t["qty"] if t["direction"]=="LONG" else (t["entry"]-t["exit"])*t["qty"]
-    return round(raw - t.get("fees",0), 2)
+# P&L est maintenant saisi directement par l'utilisateur — plus de calcul automatique
+def get_pnl(t):
+    """Retourne le P&L tel que saisi par l'utilisateur (réel broker)."""
+    return float(t.get("pnl", 0))
 
 def calc_rr(t):
-    sl,tp,entry = t.get("sl",0),t.get("tp",0),t["entry"]
-    if not sl or not tp: return None
-    risk = abs(entry-sl)
-    return round(abs(tp-entry)/risk, 2) if risk else None
+    sl, tp, entry = t.get("sl",0), t.get("tp",0), t.get("entry",0)
+    if not sl or not tp or not entry: return None
+    risk = abs(entry - sl)
+    return round(abs(tp - entry) / risk, 2) if risk else None
 
 def fmt(n):
     if n is None: return "—"
-    return f'+${n:,.0f}' if n>=0 else f'-${abs(n):,.0f}'
+    return f'+${n:,.2f}' if n >= 0 else f'-${abs(n):,.2f}'
 
 def get_df():
-    rows = [dict(t, pnl=calc_pnl(t), rr=calc_rr(t)) for t in st.session_state.trades]
+    rows = [dict(t, pnl=get_pnl(t), rr=calc_rr(t)) for t in st.session_state.trades]
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
-def kpi(icon,label,value,sub,color):
+def kpi(icon, label, value, sub, color):
     st.markdown(f"""<div class="kpi">
         <div class="kpi-bar" style="background:{color}"></div>
         <div class="kpi-icon">{icon}</div>
@@ -142,11 +130,11 @@ def kpi(icon,label,value,sub,color):
         <div class="kpi-sub">{sub}</div>
     </div>""", unsafe_allow_html=True)
 
-def badge(text,cls):
+def badge(text, cls):
     return f'<span class="badge {cls}">{text}</span>'
 
-def ev(key,default):
-    ex = next((t for t in st.session_state.trades if t["id"]==st.session_state.edit_id), None)
+def ev(key, default):
+    ex = next((t for t in st.session_state.trades if t["id"] == st.session_state.edit_id), None)
     return ex[key] if ex else default
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
@@ -157,8 +145,8 @@ with st.sidebar:
 
     df_side = get_df()
     total   = df_side["pnl"].sum() if not df_side.empty else 0
-    wr      = (len(df_side[df_side["pnl"]>0])/len(df_side)*100) if not df_side.empty else 0
-    col_pnl = "#00d4aa" if total>=0 else "#ff4d6d"
+    wr      = (len(df_side[df_side["pnl"] > 0]) / len(df_side) * 100) if not df_side.empty else 0
+    col_pnl = "#00d4aa" if total >= 0 else "#ff4d6d"
 
     st.markdown(f"""<div style="margin-bottom:20px;padding:12px 0">
         <div style="font-size:10px;color:#6b7894;letter-spacing:1px;text-transform:uppercase">Capital Net</div>
@@ -173,14 +161,13 @@ with st.sidebar:
     if st.button("➕  Nouveau Trade", use_container_width=True):
         st.session_state.page="add";       st.session_state.edit_id=None; st.rerun()
     if st.button("🔄  Synchroniser",  use_container_width=True):
-        force_reload(); st.success("✅ Données rechargées depuis GitHub !"); st.rerun()
+        force_reload(); st.success("✅ Rechargé depuis GitHub !"); st.rerun()
 
     st.divider()
     if not df_side.empty:
         csv = df_side.to_csv(index=False).encode("utf-8")
         st.download_button("⬇️ Exporter CSV", csv, "trades.csv", "text/csv", use_container_width=True)
 
-    # Indicateur sync
     sha_display = st.session_state.get("gh_sha","")[:7] if st.session_state.get("gh_sha") else "—"
     st.markdown(f'<div class="sync-ok">☁️ GitHub sync · {sha_display}</div>', unsafe_allow_html=True)
 
@@ -194,46 +181,46 @@ if st.session_state.page == "dashboard":
 
     df = get_df()
     if df.empty:
-        st.warning("Aucun trade enregistré. Cliquez sur **➕ Nouveau Trade** pour commencer.")
+        st.warning("Aucun trade. Cliquez sur **➕ Nouveau Trade** pour commencer.")
     else:
-        wins   = df[df["pnl"]>0]
-        losses = df[df["pnl"]<=0]
+        wins   = df[df["pnl"] > 0]
+        losses = df[df["pnl"] <= 0]
         avg_w  = wins["pnl"].mean()   if len(wins)   else 0
         avg_l  = losses["pnl"].mean() if len(losses) else 0
-        pf     = round(abs(avg_w/avg_l),2) if avg_l else None
+        pf     = round(abs(avg_w / avg_l), 2) if avg_l else None
         rr_df  = df[df["rr"].notna()]
         avg_rr = rr_df["rr"].mean() if len(rr_df) else None
-        wr_val = len(wins)/len(df)*100
+        wr_val = len(wins) / len(df) * 100
         df_s   = df.sort_values("date")
         cumul  = df_s["pnl"].cumsum()
-        mdd    = (cumul.cummax()-cumul).max()
-        df["month"] = pd.to_datetime(df["date"]).dt.to_period("M").astype(str)
-        monthly = df.groupby("month")["pnl"].sum().reset_index()
-        monthly["label"] = monthly["month"].str[5:]+"/"+monthly["month"].str[2:4]
+        mdd    = (cumul.cummax() - cumul).max()
+        df["month"]  = pd.to_datetime(df["date"]).dt.to_period("M").astype(str)
+        monthly      = df.groupby("month")["pnl"].sum().reset_index()
+        monthly["label"] = monthly["month"].str[5:] + "/" + monthly["month"].str[2:4]
 
         c1,c2,c3,c4 = st.columns(4)
-        with c1: kpi("💰","P&L Net",      fmt(total),      f"{len(df)} trades total",    "#00d4aa" if total>=0 else "#ff4d6d")
-        with c2: kpi("🎯","Win Rate",     f"{wr_val:.1f}%",f"{len(wins)}W · {len(losses)}L","#00d4aa" if wr_val>=50 else "#ff4d6d")
-        with c3: kpi("⚖️","Profit Factor",f"{pf:.2f}" if pf else "—","Gain / Perte",    "#00d4aa" if (pf or 0)>=1.5 else "#ff9f43")
-        with c4: kpi("📉","Max Drawdown", f"${mdd:,.0f}",  "Perte max cumulée",           "#ff4d6d")
+        with c1: kpi("💰","P&L Net",      fmt(total),       f"{len(df)} trades total",      "#00d4aa" if total>=0 else "#ff4d6d")
+        with c2: kpi("🎯","Win Rate",     f"{wr_val:.1f}%", f"{len(wins)}W · {len(losses)}L","#00d4aa" if wr_val>=50 else "#ff4d6d")
+        with c3: kpi("⚖️","Profit Factor",f"{pf:.2f}" if pf else "—","Gain / Perte",        "#00d4aa" if (pf or 0)>=1.5 else "#ff9f43")
+        with c4: kpi("📉","Max Drawdown", f"${mdd:,.2f}",   "Perte max cumulée",             "#ff4d6d")
         st.markdown(" ")
         c1,c2,c3,c4 = st.columns(4)
-        freq = len(df)/max(1,len(monthly))
-        with c1: kpi("📈","Gain moyen",   fmt(avg_w), "Par trade gagnant",  "#00d4aa")
-        with c2: kpi("📉","Perte moyenne",fmt(avg_l), "Par trade perdant",  "#ff4d6d")
+        freq = len(df) / max(1, len(monthly))
+        with c1: kpi("📈","Gain moyen",   fmt(avg_w),                      "Par trade gagnant",  "#00d4aa")
+        with c2: kpi("📉","Perte moyenne",fmt(avg_l),                      "Par trade perdant",  "#ff4d6d")
         with c3: kpi("⚡","R:R Moyen",   f"{avg_rr:.2f}R" if avg_rr else "—","Risque/Récompense","#7c6aff")
-        with c4: kpi("📆","Trades/Mois", f"{freq:.1f}","Fréquence moyenne", "#ff9f43")
+        with c4: kpi("📆","Trades/Mois", f"{freq:.1f}",                    "Fréquence moyenne",  "#ff9f43")
         st.markdown(" ")
 
-        col_l,col_r = st.columns([3,2])
+        col_l, col_r = st.columns([3, 2])
         with col_l:
             st.markdown("#### 📊 Courbe de Capital")
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=df_s["date"].tolist(), y=cumul.tolist(), mode="lines+markers",
-                line=dict(color="#00d4aa",width=2.5), marker=dict(color="#00d4aa",size=5),
+                line=dict(color="#00d4aa", width=2.5), marker=dict(color="#00d4aa", size=5),
                 fill="tozeroy", fillcolor="rgba(0,212,170,0.07)",
-                hovertemplate="<b>%{x}</b><br>%{y:+,.0f} $<extra></extra>",
+                hovertemplate="<b>%{x}</b><br>%{y:+,.2f} $<extra></extra>",
             ))
             fig.update_layout(**PLOTLY_LAYOUT, height=240)
             st.plotly_chart(fig, use_container_width=True)
@@ -241,23 +228,23 @@ if st.session_state.page == "dashboard":
         with col_r:
             st.markdown("#### 🎯 Win / Loss")
             fig2 = go.Figure(go.Pie(
-                values=[len(wins),len(losses)], labels=["Gagnants","Perdants"], hole=0.62,
-                marker=dict(colors=["#00d4aa","#ff4d6d"],line=dict(color="#111520",width=3)),
+                values=[len(wins), len(losses)], labels=["Gagnants","Perdants"], hole=0.62,
+                marker=dict(colors=["#00d4aa","#ff4d6d"], line=dict(color="#111520", width=3)),
                 hovertemplate="<b>%{label}</b>: %{value} trades<extra></extra>",
             ))
-            fig2.add_annotation(text=f"{wr_val:.0f}%",x=0.5,y=0.58,font=dict(size=26,color="#00d4aa",family="JetBrains Mono"),showarrow=False)
-            fig2.add_annotation(text="Win Rate",x=0.5,y=0.38,font=dict(size=12,color="#6b7894"),showarrow=False)
-            fig2.update_layout(**PLOTLY_LAYOUT,height=240,showlegend=True,
-                legend=dict(orientation="h",yanchor="bottom",y=-0.05,font=dict(color="#8892a4")))
+            fig2.add_annotation(text=f"{wr_val:.0f}%", x=0.5, y=0.58, font=dict(size=26,color="#00d4aa",family="JetBrains Mono"), showarrow=False)
+            fig2.add_annotation(text="Win Rate",        x=0.5, y=0.38, font=dict(size=12,color="#6b7894"), showarrow=False)
+            fig2.update_layout(**PLOTLY_LAYOUT, height=240, showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=-0.05, font=dict(color="#8892a4")))
             st.plotly_chart(fig2, use_container_width=True)
 
-        col_l2,col_r2 = st.columns(2)
+        col_l2, col_r2 = st.columns(2)
         with col_l2:
             st.markdown("#### 📅 P&L Mensuel")
             fig3 = go.Figure(go.Bar(
                 x=monthly["label"].tolist(), y=monthly["pnl"].tolist(),
                 marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in monthly["pnl"]],
-                marker_opacity=0.85, hovertemplate="<b>%{x}</b><br>%{y:+,.0f} $<extra></extra>",
+                marker_opacity=0.85, hovertemplate="<b>%{x}</b><br>%{y:+,.2f} $<extra></extra>",
             ))
             fig3.update_layout(**PLOTLY_LAYOUT, height=220)
             st.plotly_chart(fig3, use_container_width=True)
@@ -268,29 +255,29 @@ if st.session_state.page == "dashboard":
             fig4 = go.Figure(go.Bar(
                 y=bs["strategy"].tolist(), x=bs["pnl"].tolist(), orientation="h",
                 marker_color=CHART_COLORS[:len(bs)], marker_opacity=0.85,
-                hovertemplate="<b>%{y}</b>: %{x:+,.0f} $<extra></extra>",
+                hovertemplate="<b>%{y}</b>: %{x:+,.2f} $<extra></extra>",
             ))
             fig4.update_layout(**PLOTLY_LAYOUT, height=220)
             st.plotly_chart(fig4, use_container_width=True)
 
         st.markdown("#### 🕐 Derniers Trades")
-        recent = df.sort_values("date",ascending=False).head(5)
-        rows_html=""
-        for _,t in recent.iterrows():
-            c="#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
-            dc="b-win" if t["direction"]=="LONG" else "b-loss"
-            rows_html+=f"""<tr>
+        recent    = df.sort_values("date", ascending=False).head(5)
+        rows_html = ""
+        for _, t in recent.iterrows():
+            c  = "#00d4aa" if t["pnl"] >= 0 else "#ff4d6d"
+            dc = "b-win" if t["direction"] == "LONG" else "b-loss"
+            rows_html += f"""<tr>
                 <td style="color:#6b7894;font-family:monospace">{t['date']}</td>
                 <td>{badge(t['symbol'],'b-sym')}</td>
                 <td>{badge(t['direction'],dc)}</td>
-                <td style="font-family:monospace">{t['entry']}</td>
-                <td style="font-family:monospace">{t['exit']}</td>
+                <td style="font-family:monospace">{t.get('entry','—')}</td>
+                <td style="font-family:monospace">{t.get('exit','—')}</td>
                 <td style="font-family:monospace;font-weight:800;color:{c}">{fmt(t['pnl'])}</td>
-                <td style="color:#6b7894;font-size:12px">{str(t['notes'])[:45]}{'…' if len(str(t['notes']))>45 else ''}</td>
+                <td style="color:#6b7894;font-size:12px">{str(t.get('notes',''))[:45]}</td>
             </tr>"""
         st.markdown(f"""<table class="tj-table"><thead><tr>
             <th>Date</th><th>Symbole</th><th>Dir.</th>
-            <th>Entrée</th><th>Sortie</th><th>P&L</th><th>Notes</th>
+            <th>Entrée</th><th>Sortie</th><th>P&L Réel</th><th>Notes</th>
         </tr></thead><tbody>{rows_html}</tbody></table>""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -305,59 +292,59 @@ elif st.session_state.page == "journal":
         st.info("Aucun trade. Ajoutez-en un avec **➕ Nouveau Trade**.")
     else:
         f1,f2,f3,f4 = st.columns(4)
-        with f1: fs  = st.selectbox("Symbole",   ["Tous"]+sorted(df["symbol"].unique().tolist()))
+        with f1: fs  = st.selectbox("Symbole",   ["Tous"] + sorted(df["symbol"].unique().tolist()))
         with f2: fd  = st.selectbox("Direction", ["Tous","LONG","SHORT"])
-        with f3: fst = st.selectbox("Stratégie", ["Toutes"]+STRATEGIES)
+        with f3: fst = st.selectbox("Stratégie", ["Toutes"] + STRATEGIES)
         with f4: srt = st.selectbox("Trier par", ["Date ↓","Date ↑","P&L ↓","P&L ↑"])
 
-        if fs !="Tous":   df=df[df["symbol"]   ==fs]
-        if fd !="Tous":   df=df[df["direction"]==fd]
-        if fst!="Toutes": df=df[df["strategy"] ==fst]
-        sm={"Date ↓":("date",False),"Date ↑":("date",True),"P&L ↓":("pnl",False),"P&L ↑":("pnl",True)}
-        sc,sa=sm[srt]; df=df.sort_values(sc,ascending=sa)
+        if fs  != "Tous":   df = df[df["symbol"]    == fs]
+        if fd  != "Tous":   df = df[df["direction"] == fd]
+        if fst != "Toutes": df = df[df["strategy"]  == fst]
+        sm = {"Date ↓":("date",False),"Date ↑":("date",True),"P&L ↓":("pnl",False),"P&L ↑":("pnl",True)}
+        sc, sa = sm[srt]; df = df.sort_values(sc, ascending=sa)
 
         st.caption(f"{len(df)} trades affichés")
-        rows_html=""
-        for _,t in df.iterrows():
-            c="#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
-            dc="b-win" if t["direction"]=="LONG" else "b-loss"
-            rr_v=t["rr"]; rr_c="#00d4aa" if (rr_v or 0)>=2 else "#ff9f43" if (rr_v or 0)>=1 else "#ff4d6d"
-            rows_html+=f"""<tr>
+        rows_html = ""
+        for _, t in df.iterrows():
+            c    = "#00d4aa" if t["pnl"] >= 0 else "#ff4d6d"
+            dc   = "b-win" if t["direction"] == "LONG" else "b-loss"
+            rr_v = t["rr"]
+            rr_c = "#00d4aa" if (rr_v or 0) >= 2 else "#ff9f43" if (rr_v or 0) >= 1 else "#ff4d6d"
+            rows_html += f"""<tr>
                 <td style="color:#6b7894;font-family:monospace;white-space:nowrap">{t['date']}</td>
                 <td>{badge(t['symbol'],'b-sym')}</td>
                 <td>{badge(t['direction'],dc)}</td>
-                <td style="font-family:monospace">{t['entry']}</td>
-                <td style="font-family:monospace">{t['exit']}</td>
-                <td style="font-family:monospace">{t['qty']}</td>
+                <td style="font-family:monospace">{t.get('entry','—')}</td>
+                <td style="font-family:monospace">{t.get('exit','—')}</td>
                 <td style="font-family:monospace;font-weight:800;color:{c};white-space:nowrap">{fmt(t['pnl'])}</td>
                 <td style="font-family:monospace;color:{rr_c}">{rr_v if rr_v else '—'}</td>
                 <td>{badge(t['strategy'],'b-str')}</td>
                 <td title="{t['mood']}" style="font-size:16px">{MOOD_EMOJI.get(t['mood'],'😐')}</td>
-                <td style="color:#6b7894;font-size:12px;max-width:180px">{str(t['notes'])[:50]}</td>
+                <td style="color:#6b7894;font-size:12px;max-width:180px">{str(t.get('notes',''))[:50]}</td>
             </tr>"""
         st.markdown(f"""<div style="overflow-x:auto;margin-top:10px">
         <table class="tj-table"><thead><tr>
             <th>Date</th><th>Symbole</th><th>Dir.</th><th>Entrée</th><th>Sortie</th>
-            <th>Qté</th><th>P&L</th><th>R:R</th><th>Stratégie</th><th>Mood</th><th>Notes</th>
+            <th>P&L Réel $</th><th>R:R</th><th>Stratégie</th><th>Mood</th><th>Notes</th>
         </tr></thead><tbody>{rows_html}</tbody></table></div>""", unsafe_allow_html=True)
 
         st.divider()
-        st.markdown("##### Modifier / Supprimer un trade")
-        df_full = get_df().sort_values("date",ascending=False)
-        labels  = [f"{r['date']}  ·  {r['symbol']}  ·  {fmt(r['pnl'])}" for _,r in df_full.iterrows()]
+        st.markdown("##### Modifier / Supprimer")
+        df_full = get_df().sort_values("date", ascending=False)
+        labels  = [f"{r['date']}  ·  {r['symbol']}  ·  {fmt(r['pnl'])}" for _, r in df_full.iterrows()]
         ids     = df_full["id"].tolist()
         if labels:
-            sel_lbl = st.selectbox("Sélectionner",labels,label_visibility="collapsed")
+            sel_lbl = st.selectbox("Sélectionner", labels, label_visibility="collapsed")
             sel_id  = ids[labels.index(sel_lbl)]
-            ce,cd,_ = st.columns([1,1,5])
+            ce, cd, _ = st.columns([1, 1, 5])
             with ce:
                 if st.button("✏️ Modifier"):
-                    st.session_state.edit_id=sel_id; st.session_state.page="add"; st.rerun()
+                    st.session_state.edit_id = sel_id; st.session_state.page = "add"; st.rerun()
             with cd:
                 if st.button("🗑️ Supprimer"):
-                    st.session_state.trades=[t for t in st.session_state.trades if t["id"]!=sel_id]
-                    ok = save(st.session_state.trades)
-                    st.success("✅ Supprimé et synchronisé." if ok else "⚠️ Supprimé localement (erreur sync).")
+                    st.session_state.trades = [t for t in st.session_state.trades if t["id"] != sel_id]
+                    ok = cloud_save(st.session_state.trades)
+                    st.success("✅ Supprimé et synchronisé." if ok else "⚠️ Supprimé (erreur sync).")
                     st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -367,42 +354,71 @@ elif st.session_state.page == "add":
     is_edit = st.session_state.edit_id is not None
     st.markdown(f"# {'✏️ Modifier' if is_edit else '➕ Nouveau Trade'}")
     if st.button("← Retour"):
-        st.session_state.page="journal"; st.session_state.edit_id=None; st.rerun()
+        st.session_state.page = "journal"; st.session_state.edit_id = None; st.rerun()
     st.divider()
 
     with st.form("form_trade"):
-        r1c1,r1c2,r1c3 = st.columns(3)
-        with r1c1: d_date = st.date_input("Date",      value=date.fromisoformat(ev("date",str(date.today()))))
-        with r1c2: d_sym  = st.selectbox("Symbole",    SYMBOLS,         index=SYMBOLS.index(ev("symbol","EUR/USD")))
-        with r1c3: d_dir  = st.selectbox("Direction",  ["LONG","SHORT"],index=["LONG","SHORT"].index(ev("direction","LONG")))
 
-        r2c1,r2c2,r2c3,r2c4 = st.columns(4)
-        with r2c1: d_entry = st.number_input("Prix d'entrée",  value=float(ev("entry",0)), format="%.5f",step=0.0001)
-        with r2c2: d_exit  = st.number_input("Prix de sortie", value=float(ev("exit",0)),  format="%.5f",step=0.0001)
-        with r2c3: d_qty   = st.number_input("Quantité",       value=float(ev("qty",1)),   format="%.4f",step=0.1)
-        with r2c4: d_fees  = st.number_input("Frais ($)",      value=float(ev("fees",0)),  format="%.2f",step=0.5)
+        # ── Ligne 1 : date, symbole, direction ──
+        r1c1, r1c2, r1c3 = st.columns(3)
+        with r1c1: d_date = st.date_input("Date", value=date.fromisoformat(ev("date", str(date.today()))))
+        with r1c2: d_sym  = st.selectbox("Symbole",   SYMBOLS,          index=SYMBOLS.index(ev("symbol","EUR/USD")))
+        with r1c3: d_dir  = st.selectbox("Direction", ["LONG","SHORT"],  index=["LONG","SHORT"].index(ev("direction","LONG")))
 
-        r3c1,r3c2,r3c3,r3c4 = st.columns(4)
-        with r3c1: d_sl    = st.number_input("Stop Loss",   value=float(ev("sl",0)),  format="%.5f",step=0.0001)
-        with r3c2: d_tp    = st.number_input("Take Profit", value=float(ev("tp",0)),  format="%.5f",step=0.0001)
-        with r3c3: d_strat = st.selectbox("Stratégie",   STRATEGIES,index=STRATEGIES.index(ev("strategy","Breakout")))
-        with r3c4: d_mood  = st.selectbox("État d'esprit",MOODS,    index=MOODS.index(ev("mood","Confiant")))
+        # ── Ligne 2 : entrée, sortie (optionnels, pour info) ──
+        r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+        with r2c1: d_entry = st.number_input("Prix d'entrée",  value=float(ev("entry",0.0)), format="%.5f", step=0.0001)
+        with r2c2: d_exit  = st.number_input("Prix de sortie", value=float(ev("exit",0.0)),  format="%.5f", step=0.0001)
+        with r2c3: d_sl    = st.number_input("Stop Loss",      value=float(ev("sl",0.0)),    format="%.5f", step=0.0001)
+        with r2c4: d_tp    = st.number_input("Take Profit",    value=float(ev("tp",0.0)),    format="%.5f", step=0.0001)
 
-        d_notes = st.text_area("Notes & Analyse",value=ev("notes",""),
-                               placeholder="Raison du trade, contexte, leçons...",height=100)
+        # ── Ligne 3 : stratégie, mood ──
+        r3c1, r3c2, r3c3, r3c4 = st.columns(4)
+        with r3c1: d_strat = st.selectbox("Stratégie",    STRATEGIES, index=STRATEGIES.index(ev("strategy","Breakout")))
+        with r3c2: d_mood  = st.selectbox("État d'esprit",MOODS,      index=MOODS.index(ev("mood","Confiant")))
+        with r3c3: pass
+        with r3c4: pass
 
-        if d_entry and d_exit and d_qty:
-            raw     = (d_exit-d_entry)*d_qty if d_dir=="LONG" else (d_entry-d_exit)*d_qty
-            est_pnl = round(raw-d_fees,2)
-            est_rr  = None
-            if d_sl and d_tp:
-                risk=abs(d_entry-d_sl); est_rr=round(abs(d_tp-d_entry)/risk,2) if risk else None
-            pc  = "#00d4aa" if est_pnl>=0 else "#ff4d6d"
-            rh  = f'<div><div class="preview-label">R:R</div><div class="preview-value" style="color:#7c6aff">{est_rr}R</div></div>' if est_rr else ""
-            st.markdown(f"""<div class="preview">
-                <div><div class="preview-label">P&L ESTIMÉ</div>
-                <div class="preview-value" style="color:{pc}">{fmt(est_pnl)}</div></div>{rh}
-            </div>""", unsafe_allow_html=True)
+        # ── P&L RÉEL — champ principal ──────────────────────────────────────
+        st.markdown("""
+        <div style="background:#0d111d;border:2px solid #00d4aa44;border-radius:12px;padding:16px 20px;margin:14px 0 4px">
+            <div style="font-size:11px;color:#00d4aa;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;margin-bottom:4px">
+                💰 P&L Réel (tel qu'affiché par votre broker)
+            </div>
+            <div style="font-size:12px;color:#6b7894;margin-bottom:10px">
+                Saisissez le profit ou la perte exacte · spread, commission et swap déjà inclus · positif = gain · négatif = perte
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        pnl_col1, pnl_col2 = st.columns([1, 3])
+        with pnl_col1:
+            d_pnl = st.number_input(
+                "P&L ($)",
+                value=float(ev("pnl", 0.0)),
+                format="%.2f",
+                step=0.01,
+                help="Copiez exactement le montant affiché par votre broker (ex: +45.30 ou -22.50)"
+            )
+        with pnl_col2:
+            if d_pnl != 0:
+                color = "#00d4aa" if d_pnl >= 0 else "#ff4d6d"
+                sign  = "✅ GAIN" if d_pnl >= 0 else "❌ PERTE"
+                # Calcul R:R si SL et TP renseignés
+                rr_preview = ""
+                if d_entry and d_sl and d_tp:
+                    risk = abs(d_entry - d_sl)
+                    if risk:
+                        rr_val = round(abs(d_tp - d_entry) / risk, 2)
+                        rr_preview = f"&nbsp;&nbsp;·&nbsp;&nbsp;<span style='color:#7c6aff'>R:R {rr_val}</span>"
+                st.markdown(f"""
+                <div style="margin-top:28px;font-size:26px;font-weight:800;
+                    font-family:'JetBrains Mono',monospace;color:{color}">
+                    {sign} &nbsp; {fmt(d_pnl)}{rr_preview}
+                </div>""", unsafe_allow_html=True)
+
+        d_notes = st.text_area("Notes & Analyse", value=ev("notes",""),
+                               placeholder="Raison du trade, contexte de marché, leçons apprises...", height=90)
 
         submitted = st.form_submit_button(
             "✓  Sauvegarder" if is_edit else "✓  Enregistrer le Trade",
@@ -410,26 +426,30 @@ elif st.session_state.page == "add":
         )
 
         if submitted:
-            if not d_entry or not d_exit or not d_qty:
-                st.error("Entrée, sortie et quantité sont obligatoires.")
+            ex    = next((t for t in st.session_state.trades if t["id"] == st.session_state.edit_id), None)
+            new_t = {
+                "id":        ex["id"] if is_edit else int(datetime.now().timestamp() * 1000),
+                "date":      str(d_date),
+                "symbol":    d_sym,
+                "direction": d_dir,
+                "entry":     d_entry,
+                "exit":      d_exit,
+                "sl":        d_sl,
+                "tp":        d_tp,
+                "pnl":       d_pnl,          # ← P&L réel broker
+                "strategy":  d_strat,
+                "mood":      d_mood,
+                "notes":     d_notes,
+            }
+            if is_edit:
+                st.session_state.trades = [new_t if t["id"] == ex["id"] else t for t in st.session_state.trades]
             else:
-                ex = next((t for t in st.session_state.trades if t["id"]==st.session_state.edit_id),None)
-                new_t = {
-                    "id":        ex["id"] if is_edit else int(datetime.now().timestamp()*1000),
-                    "date":      str(d_date), "symbol": d_sym, "direction": d_dir,
-                    "entry":     d_entry,     "exit":   d_exit,"qty":       d_qty,
-                    "fees":      d_fees,      "sl":     d_sl,  "tp":        d_tp,
-                    "strategy":  d_strat,     "mood":   d_mood,"notes":     d_notes,
-                }
-                if is_edit:
-                    st.session_state.trades = [new_t if t["id"]==ex["id"] else t for t in st.session_state.trades]
-                else:
-                    st.session_state.trades.append(new_t)
+                st.session_state.trades.append(new_t)
 
-                ok = save(st.session_state.trades)
-                if ok:
-                    st.success("✅ Trade sauvegardé et synchronisé sur GitHub !")
-                else:
-                    st.warning("⚠️ Sauvegardé localement mais erreur de synchronisation GitHub.")
+            ok = cloud_save(st.session_state.trades)
+            if ok:
+                st.success("✅ Trade sauvegardé et synchronisé sur GitHub !")
+            else:
+                st.warning("⚠️ Sauvegardé localement mais erreur de synchronisation.")
 
-                st.session_state.page="journal"; st.session_state.edit_id=None; st.rerun()
+            st.session_state.page = "journal"; st.session_state.edit_id = None; st.rerun()
