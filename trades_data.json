@@ -1,1 +1,16 @@
-[]
+[
+  {
+    "id": 1779457951636,
+    "date": "2026-05-22",
+    "symbol": "GOLD",
+    "direction": "LONG",
+    "entry": 4100.0,
+    "exit": 4200.0,
+    "sl": 4000.0,
+    "tp": 4400.0,
+    "pnl": 200.0,
+    "strategy": "Scalping",
+    "mood": "Anxieux",
+    "notes": ""
+  }
+]
