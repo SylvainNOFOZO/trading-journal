@@ -261,106 +261,321 @@ if st.session_state.page == "dashboard":
     st.markdown("# Dashboard")
     st.caption(datetime.now().strftime("%A %d %B %Y"))
     mode_banner()
-    st.divider()
 
+    # ── FILTRES GLOBAUX ──────────────────────────────────────────────────────
+    with st.container():
+        st.markdown('<div style="background:#111520;border:1px solid #1e2535;border-radius:14px;padding:16px 20px;margin:12px 0 20px">', unsafe_allow_html=True)
+        fc1,fc2,fc3,fc4,fc5 = st.columns(5)
+        df_all_f = get_df("Tous")
+        syms_avail  = sorted(df_all_f["symbol"].unique().tolist()) if not df_all_f.empty else []
+        moods_avail = sorted(df_all_f["mood"].unique().tolist())   if not df_all_f.empty else []
+        strat_avail = sorted(df_all_f["strategy"].unique().tolist()) if not df_all_f.empty else []
+        with fc1: f_sym   = st.selectbox("🪙 Actif",     ["Tous"] + syms_avail,  key="d_sym")
+        with fc2: f_mood  = st.selectbox("😊 Émotion",   ["Toutes"] + moods_avail, key="d_mood")
+        with fc3: f_strat = st.selectbox("🎯 Stratégie", ["Toutes"] + strat_avail, key="d_strat")
+        with fc4:
+            dates = sorted(df_all_f["date"].tolist()) if not df_all_f.empty else []
+            d_min = date.fromisoformat(dates[0])  if dates else date(2024,1,1)
+            d_max = date.fromisoformat(dates[-1]) if dates else date.today()
+            f_date_from = st.date_input("📅 Depuis", value=d_min, key="d_from")
+        with fc5:
+            f_date_to = st.date_input("📅 Jusqu'au", value=d_max, key="d_to")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Appliquer filtres
     df = get_df(st.session_state.mode_filter)
+    if not df.empty:
+        if f_sym   != "Tous":   df = df[df["symbol"]   == f_sym]
+        if f_mood  != "Toutes": df = df[df["mood"]     == f_mood]
+        if f_strat != "Toutes": df = df[df["strategy"] == f_strat]
+        df = df[df["date"].between(str(f_date_from), str(f_date_to))]
+
     if df.empty:
-        st.warning("Aucun trade. Cliquez sur **➕ Nouveau Trade** ou **📂 Importer MT5**.")
+        st.warning("Aucun trade pour ces filtres. Ajoutez des trades ou modifiez les filtres.")
     else:
         wins   = df[df["pnl"]>0]; losses = df[df["pnl"]<=0]
+        total  = df["pnl"].sum()
         avg_w  = wins["pnl"].mean()   if len(wins)   else 0
         avg_l  = losses["pnl"].mean() if len(losses) else 0
         pf     = round(abs(avg_w/avg_l),2) if avg_l else None
         rr_df  = df[df["rr"].notna()]
         avg_rr = rr_df["rr"].mean() if len(rr_df) else None
         wr_val = len(wins)/len(df)*100
-        df_s   = df.sort_values("date"); cumul = df_s["pnl"].cumsum()
+        df_s   = df.sort_values("date")
+        cumul  = df_s["pnl"].cumsum()
         mdd    = (cumul.cummax()-cumul).max()
-        df["month"]  = pd.to_datetime(df["date"]).dt.to_period("M").astype(str)
-        monthly      = df.groupby("month")["pnl"].sum().reset_index()
+        df["month"] = pd.to_datetime(df["date"]).dt.to_period("M").astype(str)
+        monthly = df.groupby("month")["pnl"].sum().reset_index()
         monthly["label"] = monthly["month"].str[5:]+"/"+monthly["month"].str[2:4]
 
-        c1,c2,c3,c4 = st.columns(4)
+        # ── KPIs ─────────────────────────────────────────────────────────────
+        c1,c2,c3,c4,c5,c6 = st.columns(6)
         with c1: kpi("💰","P&L Net",      fmt(total),       f"{len(df)} trades",             "#00d4aa" if total>=0 else "#ff4d6d")
         with c2: kpi("🎯","Win Rate",     f"{wr_val:.1f}%", f"{len(wins)}W · {len(losses)}L","#00d4aa" if wr_val>=50 else "#ff4d6d")
         with c3: kpi("⚖️","Profit Factor",f"{pf:.2f}" if pf else "—","Gain/Perte",          "#00d4aa" if (pf or 0)>=1.5 else "#ff9f43")
-        with c4: kpi("📉","Max Drawdown", f"${mdd:,.2f}",   "Perte max cumulée",             "#ff4d6d")
-        st.markdown(" ")
-        c1,c2,c3,c4 = st.columns(4)
-        freq = len(df)/max(1,len(monthly))
-        with c1: kpi("📈","Gain moyen",   fmt(avg_w),                        "Par trade gagnant",  "#00d4aa")
-        with c2: kpi("📉","Perte moyenne",fmt(avg_l),                        "Par trade perdant",  "#ff4d6d")
-        with c3: kpi("⚡","R:R Moyen",   f"{avg_rr:.2f}R" if avg_rr else "—","Risque/Récompense", "#7c6aff")
-        with c4: kpi("📆","Trades/Mois", f"{freq:.1f}",                      "Fréquence",          "#ff9f43")
+        with c4: kpi("📉","Max Drawdown", f"${mdd:,.2f}",   "Perte cumulée max",             "#ff4d6d")
+        with c5: kpi("⚡","R:R Moyen",   f"{avg_rr:.2f}R" if avg_rr else "—","Risque/Récomp","#7c6aff")
+        with c6: kpi("📈","Gain moyen",   fmt(avg_w),       "Par trade gagnant",             "#00d4aa")
         st.markdown(" ")
 
-        # Comparaison Réel vs Démo si "Tous"
-        if st.session_state.mode_filter == "Tous":
-            df_all = get_df("Tous")
-            if "trade_mode" in df_all.columns:
-                df_real = df_all[df_all["trade_mode"]=="Réel 💰"]
-                df_demo = df_all[df_all["trade_mode"]=="Démo 🧪"]
-                if not df_real.empty and not df_demo.empty:
-                    st.markdown("#### ⚡ Comparaison Réel vs Démo")
-                    cr1,cr2,cr3,cr4 = st.columns(4)
-                    wr_r = len(df_real[df_real["pnl"]>0])/len(df_real)*100 if len(df_real) else 0
-                    wr_d = len(df_demo[df_demo["pnl"]>0])/len(df_demo)*100 if len(df_demo) else 0
-                    with cr1: kpi("💰","P&L Réel",   fmt(df_real["pnl"].sum()), f"{len(df_real)} trades","#00d4aa")
-                    with cr2: kpi("🧪","P&L Démo",   fmt(df_demo["pnl"].sum()), f"{len(df_demo)} trades","#ff9f43")
-                    with cr3: kpi("🎯","Win Rate Réel",f"{wr_r:.1f}%","Compte réel","#00d4aa")
-                    with cr4: kpi("🎯","Win Rate Démo",f"{wr_d:.1f}%","Compte démo","#ff9f43")
-                    st.markdown(" ")
+        # ── Comparaison Réel/Démo si mode Tous ───────────────────────────────
+        if st.session_state.mode_filter == "Tous" and "trade_mode" in df.columns:
+            df_r = df[df["trade_mode"]=="Réel 💰"]; df_d = df[df["trade_mode"]=="Démo 🧪"]
+            if not df_r.empty and not df_d.empty:
+                st.markdown("#### ⚡ Réel vs Démo")
+                cr1,cr2,cr3,cr4 = st.columns(4)
+                wr_r = len(df_r[df_r["pnl"]>0])/len(df_r)*100 if len(df_r) else 0
+                wr_d = len(df_d[df_d["pnl"]>0])/len(df_d)*100 if len(df_d) else 0
+                with cr1: kpi("💰","P&L Réel",     fmt(df_r["pnl"].sum()),f"{len(df_r)} trades","#00d4aa")
+                with cr2: kpi("🧪","P&L Démo",     fmt(df_d["pnl"].sum()),f"{len(df_d)} trades","#ff9f43")
+                with cr3: kpi("🎯","Win Rate Réel",f"{wr_r:.1f}%","Compte réel","#00d4aa")
+                with cr4: kpi("🎯","Win Rate Démo",f"{wr_d:.1f}%","Compte démo","#ff9f43")
+                st.markdown(" ")
 
-        col_l,col_r = st.columns([3,2])
-        with col_l:
-            st.markdown("#### 📊 Courbe de Capital")
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df_s["date"].tolist(), y=cumul.tolist(), mode="lines+markers",
-                line=dict(color="#00d4aa",width=2.5), marker=dict(color="#00d4aa",size=5),
+        # ══════════════════════════════════════════════════════════════════════
+        # ROW 1 : Courbe capital + Distribution trades
+        # ══════════════════════════════════════════════════════════════════════
+        st.markdown("### 📊 Performance dans le temps")
+        r1c1, r1c2 = st.columns([3,2])
+
+        with r1c1:
+            st.markdown("#### Courbe de Capital")
+            fig_eq = go.Figure()
+            # Zone sous la courbe
+            fig_eq.add_trace(go.Scatter(
+                x=df_s["date"].tolist(), y=cumul.tolist(),
+                mode="lines+markers",
+                line=dict(color="#00d4aa", width=2.5),
+                marker=dict(color="#00d4aa", size=5, line=dict(color="#0a0c12",width=1)),
                 fill="tozeroy", fillcolor="rgba(0,212,170,0.07)",
-                hovertemplate="<b>%{x}</b><br>%{y:+,.2f} $<extra></extra>",
+                name="Capital cumulé",
+                hovertemplate="<b>%{x}</b><br>Capital: %{y:+,.2f}$<extra></extra>",
             ))
-            fig.update_layout(**PLOTLY_LAYOUT, height=240)
-            st.plotly_chart(fig, use_container_width=True)
+            # Ligne zéro
+            fig_eq.add_hline(y=0, line_dash="dot", line_color="#1e2535", line_width=1)
+            fig_eq.update_layout(**PLOTLY_LAYOUT, height=260,
+                showlegend=False,
+                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", showgrid=True),
+                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535",
+                           tickprefix="$", showgrid=True))
+            st.plotly_chart(fig_eq, use_container_width=True)
 
-        with col_r:
-            st.markdown("#### 🎯 Win / Loss")
-            fig2 = go.Figure(go.Pie(
-                values=[len(wins),len(losses)], labels=["Gagnants","Perdants"], hole=0.62,
-                marker=dict(colors=["#00d4aa","#ff4d6d"],line=dict(color="#111520",width=3)),
-                hovertemplate="<b>%{label}</b>: %{value} trades<extra></extra>",
+        with r1c2:
+            st.markdown("#### Répartition Win/Loss")
+            fig_pie = go.Figure(go.Pie(
+                values=[len(wins), len(losses)],
+                labels=["Gagnants","Perdants"], hole=0.62,
+                marker=dict(colors=["#00d4aa","#ff4d6d"], line=dict(color="#111520",width=3)),
+                hovertemplate="<b>%{label}</b>: %{value} trades (%{percent})<extra></extra>",
             ))
-            fig2.add_annotation(text=f"{wr_val:.0f}%",x=0.5,y=0.58,font=dict(size=26,color="#00d4aa",family="JetBrains Mono"),showarrow=False)
-            fig2.add_annotation(text="Win Rate",x=0.5,y=0.38,font=dict(size=12,color="#6b7894"),showarrow=False)
-            fig2.update_layout(**PLOTLY_LAYOUT,height=240,showlegend=True,
-                legend=dict(orientation="h",yanchor="bottom",y=-0.05,font=dict(color="#8892a4")))
-            st.plotly_chart(fig2, use_container_width=True)
+            fig_pie.add_annotation(text=f"{wr_val:.0f}%", x=0.5, y=0.58,
+                font=dict(size=28,color="#00d4aa",family="JetBrains Mono"), showarrow=False)
+            fig_pie.add_annotation(text="Win Rate", x=0.5, y=0.38,
+                font=dict(size=12,color="#6b7894"), showarrow=False)
+            fig_pie.update_layout(**PLOTLY_LAYOUT, height=260, showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=-0.05, font=dict(color="#8892a4")))
+            st.plotly_chart(fig_pie, use_container_width=True)
 
-        col_l2,col_r2 = st.columns(2)
-        with col_l2:
-            st.markdown("#### 📅 P&L Mensuel")
-            fig3 = go.Figure(go.Bar(
+        # ══════════════════════════════════════════════════════════════════════
+        # ROW 2 : Timeline des trades + P&L mensuel
+        # ══════════════════════════════════════════════════════════════════════
+        r2c1, r2c2 = st.columns([3,2])
+
+        with r2c1:
+            st.markdown("#### Timeline des Trades")
+            colors_trades = ["#00d4aa" if p>0 else "#ff4d6d" for p in df_s["pnl"]]
+            fig_tl = go.Figure()
+            fig_tl.add_trace(go.Bar(
+                x=df_s["date"].tolist(),
+                y=df_s["pnl"].tolist(),
+                marker_color=colors_trades,
+                marker_opacity=0.85,
+                name="P&L par trade",
+                hovertemplate="<b>%{x}</b><br>%{customdata[0]} · %{customdata[1]}<br>P&L: %{y:+,.2f}$<extra></extra>",
+                customdata=list(zip(df_s["symbol"].tolist(), df_s["direction"].tolist())),
+            ))
+            fig_tl.add_hline(y=0, line_dash="dot", line_color="#1e2535", line_width=1)
+            fig_tl.update_layout(**PLOTLY_LAYOUT, height=220,
+                showlegend=False,
+                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535"),
+                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$"))
+            st.plotly_chart(fig_tl, use_container_width=True)
+
+        with r2c2:
+            st.markdown("#### P&L Mensuel")
+            fig_mo = go.Figure(go.Bar(
                 x=monthly["label"].tolist(), y=monthly["pnl"].tolist(),
                 marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in monthly["pnl"]],
-                marker_opacity=0.85, hovertemplate="<b>%{x}</b><br>%{y:+,.2f} $<extra></extra>",
+                marker_opacity=0.85,
+                hovertemplate="<b>%{x}</b><br>%{y:+,.2f}$<extra></extra>",
             ))
-            fig3.update_layout(**PLOTLY_LAYOUT,height=220); st.plotly_chart(fig3,use_container_width=True)
+            fig_mo.add_hline(y=0, line_dash="dot", line_color="#1e2535", line_width=1)
+            fig_mo.update_layout(**PLOTLY_LAYOUT, height=220,
+                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535"),
+                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$"))
+            st.plotly_chart(fig_mo, use_container_width=True)
 
-        with col_r2:
-            st.markdown("#### 🎲 P&L par Stratégie")
-            bs = df.groupby("strategy")["pnl"].sum().reset_index().sort_values("pnl")
-            fig4 = go.Figure(go.Bar(
-                y=bs["strategy"].tolist(), x=bs["pnl"].tolist(), orientation="h",
-                marker_color=CHART_COLORS[:len(bs)], marker_opacity=0.85,
-                hovertemplate="<b>%{y}</b>: %{x:+,.2f} $<extra></extra>",
+        # ══════════════════════════════════════════════════════════════════════
+        # ROW 3 : Classement actifs + P&L par stratégie
+        # ══════════════════════════════════════════════════════════════════════
+        st.markdown("### 🏆 Analyse par Actif & Stratégie")
+        r3c1, r3c2 = st.columns(2)
+
+        with r3c1:
+            st.markdown("#### Classement des Actifs (rentabilité décroissante)")
+            by_sym = df.groupby("symbol").agg(
+                pnl=("pnl","sum"),
+                trades=("pnl","count"),
+                wins=("pnl", lambda x: (x>0).sum()),
+            ).reset_index()
+            by_sym["win_rate"] = (by_sym["wins"]/by_sym["trades"]*100).round(1)
+            by_sym = by_sym.sort_values("pnl", ascending=False)
+
+            colors_sym = ["#00d4aa" if v>=0 else "#ff4d6d" for v in by_sym["pnl"]]
+            fig_sym = go.Figure(go.Bar(
+                y=by_sym["symbol"].tolist(),
+                x=by_sym["pnl"].tolist(),
+                orientation="h",
+                marker_color=colors_sym,
+                marker_opacity=0.85,
+                text=[f"{fmt(v)}  ({wr}% win)" for v,wr in zip(by_sym["pnl"], by_sym["win_rate"])],
+                textposition="outside",
+                textfont=dict(color="#8892a4", size=11),
+                hovertemplate="<b>%{y}</b><br>P&L: %{x:+,.2f}$<br>%{customdata[0]} trades · %{customdata[1]}% win<extra></extra>",
+                customdata=list(zip(by_sym["trades"].tolist(), by_sym["win_rate"].tolist())),
             ))
-            fig4.update_layout(**PLOTLY_LAYOUT,height=220); st.plotly_chart(fig4,use_container_width=True)
+            fig_sym.add_vline(x=0, line_dash="dot", line_color="#1e2535", line_width=1)
+            h_sym = max(280, len(by_sym)*45)
+            fig_sym.update_layout(**PLOTLY_LAYOUT, height=h_sym,
+                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$"),
+                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535",
+                           categoryorder="total ascending"))
+            st.plotly_chart(fig_sym, use_container_width=True)
 
-        st.markdown("#### 🕐 Derniers Trades")
-        recent = df.sort_values("date",ascending=False).head(5)
+        with r3c2:
+            st.markdown("#### P&L par Stratégie")
+            by_strat = df.groupby("strategy").agg(
+                pnl=("pnl","sum"),
+                trades=("pnl","count"),
+                wins=("pnl", lambda x: (x>0).sum()),
+            ).reset_index()
+            by_strat["win_rate"] = (by_strat["wins"]/by_strat["trades"]*100).round(1)
+            by_strat = by_strat.sort_values("pnl", ascending=False)
+
+            fig_st = go.Figure(go.Bar(
+                y=by_strat["strategy"].tolist(),
+                x=by_strat["pnl"].tolist(),
+                orientation="h",
+                marker_color=CHART_COLORS[:len(by_strat)],
+                marker_opacity=0.85,
+                text=[f"{fmt(v)}  ({wr}% win)" for v,wr in zip(by_strat["pnl"], by_strat["win_rate"])],
+                textposition="outside",
+                textfont=dict(color="#8892a4", size=11),
+                hovertemplate="<b>%{y}</b><br>P&L: %{x:+,.2f}$<br>%{customdata[0]} trades · %{customdata[1]}% win<extra></extra>",
+                customdata=list(zip(by_strat["trades"].tolist(), by_strat["win_rate"].tolist())),
+            ))
+            fig_st.add_vline(x=0, line_dash="dot", line_color="#1e2535", line_width=1)
+            h_st = max(280, len(by_strat)*45)
+            fig_st.update_layout(**PLOTLY_LAYOUT, height=h_st,
+                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$"),
+                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535",
+                           categoryorder="total ascending"))
+            st.plotly_chart(fig_st, use_container_width=True)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # ROW 4 : Heatmap Actif × Émotion + Stats émotions
+        # ══════════════════════════════════════════════════════════════════════
+        st.markdown("### 🧠 Psychologie de Trading")
+        r4c1, r4c2 = st.columns([3,2])
+
+        with r4c1:
+            st.markdown("#### Heatmap Rentabilité : Actif × Émotion")
+            if len(df["symbol"].unique()) >= 1 and len(df["mood"].unique()) >= 1:
+                pivot = df.pivot_table(
+                    values="pnl", index="mood", columns="symbol",
+                    aggfunc="sum", fill_value=0
+                )
+                # Ordonner les émotions
+                mood_order = [m for m in ["Euphorique","Confiant","Neutre","Anxieux","Peureux","Frustré"]
+                              if m in pivot.index]
+                pivot = pivot.reindex(mood_order)
+
+                # Ajouter emoji aux labels
+                y_labels = [f"{MOOD_EMOJI.get(m,'')} {m}" for m in pivot.index]
+
+                fig_hm = go.Figure(go.Heatmap(
+                    z=pivot.values.tolist(),
+                    x=pivot.columns.tolist(),
+                    y=y_labels,
+                    colorscale=[
+                        [0.0,  "#ff4d6d"],
+                        [0.45, "#2d1a2e"],
+                        [0.5,  "#1e2535"],
+                        [0.55, "#1a2d25"],
+                        [1.0,  "#00d4aa"],
+                    ],
+                    zmid=0,
+                    text=[[f"${v:+,.0f}" for v in row] for row in pivot.values],
+                    texttemplate="%{text}",
+                    textfont=dict(size=11, color="white"),
+                    hovertemplate="<b>%{y} · %{x}</b><br>P&L: %{z:+,.2f}$<extra></extra>",
+                    showscale=True,
+                    colorbar=dict(
+                        tickprefix="$", tickfont=dict(color="#6b7894"),
+                        bgcolor="#111520", bordercolor="#1e2535",
+                    ),
+                ))
+                fig_hm.update_layout(**PLOTLY_LAYOUT,
+                    height=max(280, len(pivot)*55),
+                    margin=dict(l=120, r=60, t=20, b=60),
+                    xaxis=dict(side="bottom", tickangle=-30,
+                               gridcolor="#1e2535", linecolor="#1e2535"),
+                    yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535"),
+                )
+                st.plotly_chart(fig_hm, use_container_width=True)
+            else:
+                st.info("Pas assez de données pour la heatmap.")
+
+        with r4c2:
+            st.markdown("#### P&L par Émotion")
+            by_mood = df.groupby("mood").agg(
+                pnl=("pnl","sum"),
+                trades=("pnl","count"),
+                wins=("pnl", lambda x: (x>0).sum()),
+            ).reset_index()
+            by_mood["win_rate"] = (by_mood["wins"]/by_mood["trades"]*100).round(1)
+            by_mood["emoji"]    = by_mood["mood"].map(MOOD_EMOJI).fillna("😐")
+            by_mood["label"]    = by_mood["emoji"] + " " + by_mood["mood"]
+            by_mood = by_mood.sort_values("pnl", ascending=False)
+
+            fig_mood = go.Figure(go.Bar(
+                y=by_mood["label"].tolist(),
+                x=by_mood["pnl"].tolist(),
+                orientation="h",
+                marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in by_mood["pnl"]],
+                marker_opacity=0.85,
+                text=[f"{fmt(v)}  ({wr}% win  ·  {n} trades)"
+                      for v,wr,n in zip(by_mood["pnl"], by_mood["win_rate"], by_mood["trades"])],
+                textposition="outside",
+                textfont=dict(color="#8892a4", size=10),
+                hovertemplate="<b>%{y}</b><br>P&L: %{x:+,.2f}$<br>%{customdata[0]} trades · %{customdata[1]}% win<extra></extra>",
+                customdata=list(zip(by_mood["trades"].tolist(), by_mood["win_rate"].tolist())),
+            ))
+            fig_mood.add_vline(x=0, line_dash="dot", line_color="#1e2535", line_width=1)
+            fig_mood.update_layout(**PLOTLY_LAYOUT,
+                height=max(280, len(by_mood)*55),
+                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$"),
+                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535"),
+            )
+            st.plotly_chart(fig_mood, use_container_width=True)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # ROW 5 : Derniers trades
+        # ══════════════════════════════════════════════════════════════════════
+        st.markdown("### 🕐 Derniers Trades")
+        recent = df.sort_values("date", ascending=False).head(8)
         rows_html = ""
-        for _,t in recent.iterrows():
+        for _, t in recent.iterrows():
             c  = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
             dc = "b-win" if t["direction"]=="LONG" else "b-loss"
             mc = "b-real" if t.get("trade_mode","Réel 💰")=="Réel 💰" else "b-demo"
@@ -369,12 +584,17 @@ if st.session_state.page == "dashboard":
                 <td>{badge(t["symbol"],"b-sym")}</td>
                 <td>{badge(t["direction"],dc)}</td>
                 <td>{badge(t.get("trade_mode","Réel 💰"),mc)}</td>
+                <td style="font-size:16px" title="{t["mood"]}">{MOOD_EMOJI.get(t["mood"],"😐")}</td>
+                <td>{badge(t["strategy"],"b-str")}</td>
                 <td style="font-family:monospace;font-weight:800;color:{c}">{fmt(t["pnl"])}</td>
                 <td style="color:#6b7894;font-size:12px">{str(t.get("notes",""))[:40]}</td>
             </tr>"""
         st.markdown(f"""<table class="tj-table"><thead><tr>
-            <th>Date</th><th>Symbole</th><th>Dir.</th><th>Mode</th><th>P&L Réel $</th><th>Notes</th>
+            <th>Date</th><th>Symbole</th><th>Dir.</th><th>Mode</th>
+            <th>Mood</th><th>Stratégie</th><th>P&L $</th><th>Notes</th>
         </tr></thead><tbody>{rows_html}</tbody></table>""", unsafe_allow_html=True)
+
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : JOURNAL
