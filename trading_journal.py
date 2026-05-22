@@ -160,6 +160,8 @@ with st.sidebar:
         st.session_state.page="journal";   st.session_state.edit_id=None; st.rerun()
     if st.button("➕  Nouveau Trade", use_container_width=True):
         st.session_state.page="add";       st.session_state.edit_id=None; st.rerun()
+    if st.button("📂  Importer MT5",   use_container_width=True):
+        st.session_state.page="import";    st.session_state.edit_id=None; st.rerun()
     if st.button("🔄  Synchroniser",  use_container_width=True):
         force_reload(); st.success("✅ Rechargé depuis GitHub !"); st.rerun()
 
@@ -453,3 +455,245 @@ elif st.session_state.page == "add":
                 st.warning("⚠️ Sauvegardé localement mais erreur de synchronisation.")
 
             st.session_state.page = "journal"; st.session_state.edit_id = None; st.rerun()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE : IMPORT MT5
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE : IMPORT MT5
+# ══════════════════════════════════════════════════════════════════════════════
+elif st.session_state.page == "import":
+    import io
+    st.markdown("# 📂 Importer depuis MetaTrader 5")
+    if st.button("← Retour"):
+        st.session_state.page = "journal"; st.rerun()
+    st.divider()
+
+    with st.expander("📖 Comment exporter depuis MT5 ?", expanded=False):
+        st.markdown("""
+        1. Ouvrez **MetaTrader 5**
+        2. Allez dans **Affichage → Historique des transactions** (ou onglet *History*)
+        3. Clic droit dans le tableau → **Enregistrer sous** → choisir **CSV**
+        4. Uploadez ce fichier ci-dessous
+        
+        > ✅ Les colonnes détectées automatiquement : Time, Symbol, Type, Direction, Price, Commission, Swap, Profit
+        """)
+
+    uploaded = st.file_uploader("Choisir le fichier CSV MT5", type=["csv","txt"], label_visibility="collapsed")
+
+    if uploaded:
+        raw = uploaded.read().decode("utf-8", errors="replace")
+        sep = "	" if raw.count("	") > raw.count(",") else ","
+
+        try:
+            df_raw = pd.read_csv(io.StringIO(raw), sep=sep, header=None, dtype=str)
+        except Exception as e:
+            st.error(f"Erreur lecture CSV : {e}")
+            st.stop()
+
+        # Trouver la ligne d en-tete
+        header_row = 0
+        for i, row in df_raw.iterrows():
+            vals = [str(v).strip().lower() for v in row.values]
+            if any(k in vals for k in ["symbol","time","deal","profit","type"]):
+                header_row = i
+                break
+
+        try:
+            df_raw = pd.read_csv(io.StringIO(raw), sep=sep, skiprows=header_row, dtype=str)
+        except Exception as e:
+            st.error(f"Erreur parsing : {e}")
+            st.stop()
+
+        df_raw.columns = [str(c).strip().lower().replace(" ","_") for c in df_raw.columns]
+
+        with st.expander(f"Colonnes détectées ({len(df_raw.columns)})", expanded=False):
+            st.write(list(df_raw.columns))
+            st.dataframe(df_raw.head(5))
+
+        def find_col(df, candidates):
+            for c in candidates:
+                if c in df.columns:
+                    return c
+            return None
+
+        col_time   = find_col(df_raw, ["time","open_time","date","timestamp"])
+        col_symbol = find_col(df_raw, ["symbol","asset","instrument","pair"])
+        col_type   = find_col(df_raw, ["type","action","operation","order_type"])
+        col_dir    = find_col(df_raw, ["direction","in/out","entry","in_out"])
+        col_price  = find_col(df_raw, ["price","open_price","entry_price"])
+        col_profit = find_col(df_raw, ["profit","p&l","result","net_profit"])
+        col_comm   = find_col(df_raw, ["commission","comm","fee"])
+        col_swap   = find_col(df_raw, ["swap","rollover"])
+        col_sl     = find_col(df_raw, ["s/l","sl","stop_loss","stoploss"])
+        col_tp     = find_col(df_raw, ["t/p","tp","take_profit","takeprofit"])
+
+        if not col_profit:
+            st.error("❌ Colonne Profit introuvable. Colonnes disponibles : " + str(list(df_raw.columns)))
+            st.stop()
+
+        # Filtrer les trades fermes
+        df_work = df_raw.copy()
+
+        # Supprimer lignes balance/depot
+        if col_type:
+            df_work = df_work[~df_work[col_type].str.lower().str.contains(
+                "balance|deposit|withdrawal|credit|bonus", na=False)]
+
+        # Garder uniquement direction OUT si disponible
+        if col_dir:
+            mask_out = df_work[col_dir].str.lower().str.contains("out|close|exit|sell", na=False)
+            df_closed = df_work[mask_out].copy()
+            if df_closed.empty:
+                df_closed = df_work.copy()
+        else:
+            # Garder lignes avec profit non nul
+            def has_value(x):
+                try:
+                    return float(str(x).replace(" ","")) != 0
+                except:
+                    return False
+            df_closed = df_work[df_work[col_profit].apply(has_value)].copy()
+
+        if df_closed.empty:
+            st.warning("Aucun trade fermé détecté. Vérifiez le format.")
+            st.stop()
+
+        SYM_MAP = {
+            "EURUSD":"EUR/USD","GBPUSD":"GBP/USD","USDJPY":"USD/JPY","USDCHF":"USD/CHF",
+            "AUDUSD":"AUD/USD","NZDUSD":"NZD/USD","USDCAD":"USD/CAD","EURGBP":"EUR/GBP",
+            "EURJPY":"EUR/JPY","GBPJPY":"GBP/JPY","EURCAD":"EUR/CAD","AUDCAD":"AUD/CAD",
+            "XAUUSD":"GOLD","XAGUSD":"SILVER","BTCUSD":"BTC/USD","ETHUSD":"ETH/USD",
+            "US30":"DOW30","US500":"SP500","SP500":"SP500","USTEC":"NAS100",
+            "NAS100":"NAS100","UK100":"FTSE100","GER40":"DAX40","FRA40":"CAC40",
+            "USOIL":"OIL","UKOIL":"OIL","WTI":"OIL",
+        }
+
+        new_trades = []
+        skipped    = 0
+
+        for _, row in df_closed.iterrows():
+            try:
+                def safe_float(col):
+                    if not col: return 0.0
+                    try:
+                        return float(str(row.get(col,"0")).replace(" ","").replace(",",".") or 0)
+                    except:
+                        return 0.0
+
+                # Date
+                raw_date = str(row[col_time]).strip() if col_time else str(date.today())
+                try:
+                    parsed_date = pd.to_datetime(raw_date).strftime("%Y-%m-%d")
+                except:
+                    parsed_date = str(date.today())
+
+                # Symbol
+                symbol_raw = str(row[col_symbol]).strip().upper() if col_symbol else "UNKNOWN"
+                symbol = SYM_MAP.get(symbol_raw, symbol_raw)
+
+                # Direction
+                direction = "LONG"
+                if col_type:
+                    t_val = str(row[col_type]).strip().lower()
+                    if any(k in t_val for k in ["sell","short","s","vente"]):
+                        direction = "SHORT"
+                elif col_dir:
+                    d_val = str(row[col_dir]).strip().lower()
+                    if any(k in d_val for k in ["sell","short","out","close"]):
+                        direction = "SHORT"
+
+                # P&L reel = profit + commission + swap
+                profit = safe_float(col_profit)
+                comm   = safe_float(col_comm)
+                swap   = safe_float(col_swap)
+                pnl_reel = round(profit + comm + swap, 2)
+
+                entry_price = safe_float(col_price)
+                sl_val      = safe_float(col_sl)
+                tp_val      = safe_float(col_tp)
+
+                notes_parts = []
+                if comm: notes_parts.append(f"comm:{comm:.2f}")
+                if swap: notes_parts.append(f"swap:{swap:.2f}")
+                notes_str = "Import MT5" + (" · " + " · ".join(notes_parts) if notes_parts else "")
+
+                new_trades.append({
+                    "id":        int(datetime.now().timestamp()*1000*1000) + len(new_trades),
+                    "date":      parsed_date,
+                    "symbol":    symbol,
+                    "direction": direction,
+                    "entry":     entry_price,
+                    "exit":      0.0,
+                    "sl":        sl_val,
+                    "tp":        tp_val,
+                    "pnl":       pnl_reel,
+                    "strategy":  "Importé MT5",
+                    "mood":      "Neutre",
+                    "notes":     notes_str,
+                })
+            except Exception:
+                skipped += 1
+
+        if not new_trades:
+            st.error("Aucun trade valide extrait du fichier.")
+            st.stop()
+
+        total_import = round(sum(t["pnl"] for t in new_trades), 2)
+        wins_import  = [t for t in new_trades if t["pnl"] > 0]
+        col_t = "#00d4aa" if total_import >= 0 else "#ff4d6d"
+
+        st.markdown(f"### ✅ {len(new_trades)} trades prêts à importer" + (f" · {skipped} ignorés" if skipped else ""))
+        c1, c2, c3 = st.columns(3)
+        with c1: kpi("💰","P&L Total Import", fmt(total_import), "Tous trades confondus", col_t)
+        with c2: kpi("✅","Gagnants",  str(len(wins_import)),  f"{len(wins_import)/len(new_trades)*100:.0f}% win rate","#00d4aa")
+        with c3: kpi("❌","Perdants",  str(len(new_trades)-len(wins_import)), "Trades négatifs","#ff4d6d")
+        st.markdown(" ")
+
+        # Aperçu tableau
+        rows_html = ""
+        preview_list = new_trades[:20]
+        for t in preview_list:
+            c  = "#00d4aa" if t["pnl"] >= 0 else "#ff4d6d"
+            dc = "b-win" if t["direction"] == "LONG" else "b-loss"
+            rows_html += f"""<tr>
+                <td style='color:#6b7894;font-family:monospace'>{t["date"]}</td>
+                <td><span class='badge b-sym'>{t["symbol"]}</span></td>
+                <td><span class='badge {dc}'>{t["direction"]}</span></td>
+                <td style='font-family:monospace'>{t["entry"] if t["entry"] else "—"}</td>
+                <td style='font-family:monospace;font-weight:800;color:{c}'>{fmt(t["pnl"])}</td>
+                <td style='color:#6b7894;font-size:11px'>{t["notes"]}</td>
+            </tr>"""
+        if len(new_trades) > 20:
+            rows_html += f"<tr><td colspan='6' style='color:#6b7894;text-align:center;padding:12px'>... et {len(new_trades)-20} autres</td></tr>"
+
+        st.markdown(f"""<div style="overflow-x:auto">
+        <table class="tj-table"><thead><tr>
+            <th>Date</th><th>Symbole</th><th>Dir.</th><th>Entrée</th><th>P&L Réel $</th><th>Notes</th>
+        </tr></thead><tbody>{rows_html}</tbody></table></div>""", unsafe_allow_html=True)
+
+        st.markdown("---")
+        mode = st.radio(
+            "Mode d'import",
+            ["➕ Ajouter aux trades existants", "🔄 Remplacer tous les trades"],
+            horizontal=True
+        )
+
+        if st.button("✅  Confirmer l'import", use_container_width=True):
+            if "Remplacer" in mode:
+                st.session_state.trades = new_trades
+            else:
+                existing_ids = {t["id"] for t in st.session_state.trades}
+                to_add = [t for t in new_trades if t["id"] not in existing_ids]
+                st.session_state.trades += to_add
+
+            ok = cloud_save(st.session_state.trades)
+            msg = f"✅ {len(new_trades)} trades importés et synchronisés sur GitHub !"
+            if not ok:
+                msg = f"⚠️ {len(new_trades)} trades importés localement (erreur sync GitHub)."
+            st.success(msg)
+            st.session_state.page = "dashboard"
+            st.rerun()
