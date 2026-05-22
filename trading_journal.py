@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date, datetime
+import json
+import os
 
 # ── PAGE CONFIG ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -122,6 +124,24 @@ SYMBOLS    = ["EUR/USD","GBP/USD","USD/JPY","NAS100","SP500","GOLD","BTC/USD","E
 MOOD_EMOJI = {"Euphorique":"🚀","Confiant":"😊","Neutre":"😐","Anxieux":"😰","Peureux":"😨","Frustré":"😤"}
 CHART_COLORS = ["#00d4aa","#7c6aff","#ff9f43","#ff4d6d","#54a0ff","#5f27cd","#00cec9","#fdcb6e"]
 
+# ── PERSISTANCE JSON ───────────────────────────────────────────────────────────
+DATA_FILE = "trades_data.json"
+
+def load_trades():
+    """Charge les trades depuis le fichier JSON."""
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def save_trades(trades):
+    """Sauvegarde les trades dans le fichier JSON."""
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(trades, f, ensure_ascii=False, indent=2)
+
 PLOTLY_LAYOUT = dict(
     paper_bgcolor="#111520", plot_bgcolor="#111520",
     font=dict(color="#6b7894", family="DM Sans, sans-serif"),
@@ -133,7 +153,7 @@ PLOTLY_LAYOUT = dict(
 
 # ── SESSION STATE ─────────────────────────────────────────────────────────────
 if "trades" not in st.session_state:
-    st.session_state.trades = []
+    st.session_state.trades = load_trades()
 if "page" not in st.session_state:
     st.session_state.page = "dashboard"
 if "edit_id" not in st.session_state:
@@ -426,6 +446,7 @@ elif st.session_state.page == "journal":
             with c_d:
                 if st.button("🗑️ Supprimer"):
                     st.session_state.trades = [t for t in st.session_state.trades if t["id"] != sel_id]
+                    save_trades(st.session_state.trades)
                     st.success("Trade supprimé.")
                     st.rerun()
 
@@ -515,9 +536,11 @@ elif st.session_state.page == "add":
                         new_t if t["id"] == existing["id"] else t
                         for t in st.session_state.trades
                     ]
+                    save_trades(st.session_state.trades)
                     st.success("✅ Trade modifié !")
                 else:
                     st.session_state.trades.append(new_t)
+                    save_trades(st.session_state.trades)
                     st.success("✅ Trade enregistré !")
 
                 st.session_state.page    = "journal"
