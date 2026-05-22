@@ -353,11 +353,9 @@ if st.session_state.page == "dashboard":
             ))
             # Ligne zéro
             fig_eq.add_hline(y=0, line_dash="dot", line_color="#1e2535", line_width=1)
-            fig_eq.update_layout(**PLOTLY_LAYOUT, height=260,
-                showlegend=False,
-                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", showgrid=True),
-                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535",
-                           tickprefix="$", showgrid=True))
+            fig_eq.update_layout(**PLOTLY_LAYOUT, height=260, showlegend=False)
+            fig_eq.update_xaxes(gridcolor="#1e2535", linecolor="#1e2535", showgrid=True)
+            fig_eq.update_yaxes(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$", showgrid=True)
             st.plotly_chart(fig_eq, use_container_width=True)
 
         with r1c2:
@@ -395,10 +393,9 @@ if st.session_state.page == "dashboard":
                 customdata=list(zip(df_s["symbol"].tolist(), df_s["direction"].tolist())),
             ))
             fig_tl.add_hline(y=0, line_dash="dot", line_color="#1e2535", line_width=1)
-            fig_tl.update_layout(**PLOTLY_LAYOUT, height=220,
-                showlegend=False,
-                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535"),
-                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$"))
+            fig_tl.update_layout(**PLOTLY_LAYOUT, height=220, showlegend=False)
+            fig_tl.update_xaxes(gridcolor="#1e2535", linecolor="#1e2535")
+            fig_tl.update_yaxes(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$")
             st.plotly_chart(fig_tl, use_container_width=True)
 
         with r2c2:
@@ -410,9 +407,9 @@ if st.session_state.page == "dashboard":
                 hovertemplate="<b>%{x}</b><br>%{y:+,.2f}$<extra></extra>",
             ))
             fig_mo.add_hline(y=0, line_dash="dot", line_color="#1e2535", line_width=1)
-            fig_mo.update_layout(**PLOTLY_LAYOUT, height=220,
-                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535"),
-                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$"))
+            fig_mo.update_layout(**PLOTLY_LAYOUT, height=220)
+            fig_mo.update_xaxes(gridcolor="#1e2535", linecolor="#1e2535")
+            fig_mo.update_yaxes(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$")
             st.plotly_chart(fig_mo, use_container_width=True)
 
         # ══════════════════════════════════════════════════════════════════════
@@ -446,10 +443,9 @@ if st.session_state.page == "dashboard":
             ))
             fig_sym.add_vline(x=0, line_dash="dot", line_color="#1e2535", line_width=1)
             h_sym = max(280, len(by_sym)*45)
-            fig_sym.update_layout(**PLOTLY_LAYOUT, height=h_sym,
-                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$"),
-                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535",
-                           categoryorder="total ascending"))
+            fig_sym.update_layout(**PLOTLY_LAYOUT, height=h_sym)
+            fig_sym.update_xaxes(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$")
+            fig_sym.update_yaxes(gridcolor="#1e2535", linecolor="#1e2535", categoryorder="total ascending")
             st.plotly_chart(fig_sym, use_container_width=True)
 
         with r3c2:
@@ -476,10 +472,9 @@ if st.session_state.page == "dashboard":
             ))
             fig_st.add_vline(x=0, line_dash="dot", line_color="#1e2535", line_width=1)
             h_st = max(280, len(by_strat)*45)
-            fig_st.update_layout(**PLOTLY_LAYOUT, height=h_st,
-                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$"),
-                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535",
-                           categoryorder="total ascending"))
+            fig_st.update_layout(**PLOTLY_LAYOUT, height=h_st)
+            fig_st.update_xaxes(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$")
+            fig_st.update_yaxes(gridcolor="#1e2535", linecolor="#1e2535", categoryorder="total ascending")
             st.plotly_chart(fig_st, use_container_width=True)
 
         # ══════════════════════════════════════════════════════════════════════
@@ -527,11 +522,9 @@ if st.session_state.page == "dashboard":
                 ))
                 fig_hm.update_layout(**PLOTLY_LAYOUT,
                     height=max(280, len(pivot)*55),
-                    margin=dict(l=120, r=60, t=20, b=60),
-                    xaxis=dict(side="bottom", tickangle=-30,
-                               gridcolor="#1e2535", linecolor="#1e2535"),
-                    yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535"),
-                )
+                    margin=dict(l=120, r=60, t=20, b=60))
+                fig_hm.update_xaxes(side="bottom", tickangle=-30, gridcolor="#1e2535", linecolor="#1e2535")
+                fig_hm.update_yaxes(gridcolor="#1e2535", linecolor="#1e2535")
                 st.plotly_chart(fig_hm, use_container_width=True)
             else:
                 st.info("Pas assez de données pour la heatmap.")
@@ -562,11 +555,9 @@ if st.session_state.page == "dashboard":
                 customdata=list(zip(by_mood["trades"].tolist(), by_mood["win_rate"].tolist())),
             ))
             fig_mood.add_vline(x=0, line_dash="dot", line_color="#1e2535", line_width=1)
-            fig_mood.update_layout(**PLOTLY_LAYOUT,
-                height=max(280, len(by_mood)*55),
-                xaxis=dict(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$"),
-                yaxis=dict(gridcolor="#1e2535", linecolor="#1e2535"),
-            )
+            fig_mood.update_layout(**PLOTLY_LAYOUT, height=max(280, len(by_mood)*55))
+            fig_mood.update_xaxes(gridcolor="#1e2535", linecolor="#1e2535", tickprefix="$")
+            fig_mood.update_yaxes(gridcolor="#1e2535", linecolor="#1e2535")
             st.plotly_chart(fig_mood, use_container_width=True)
 
         # ══════════════════════════════════════════════════════════════════════
