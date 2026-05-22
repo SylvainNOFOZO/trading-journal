@@ -263,24 +263,20 @@ if st.session_state.page == "dashboard":
     mode_banner()
 
     # ── FILTRES GLOBAUX ──────────────────────────────────────────────────────
-    with st.container():
-        st.markdown('<div style="background:#111520;border:1px solid #1e2535;border-radius:14px;padding:16px 20px;margin:12px 0 20px">', unsafe_allow_html=True)
-        fc1,fc2,fc3,fc4,fc5 = st.columns(5)
-        df_all_f = get_df("Tous")
-        syms_avail  = sorted(df_all_f["symbol"].unique().tolist()) if not df_all_f.empty else []
-        moods_avail = sorted(df_all_f["mood"].unique().tolist())   if not df_all_f.empty else []
-        strat_avail = sorted(df_all_f["strategy"].unique().tolist()) if not df_all_f.empty else []
-        with fc1: f_sym   = st.selectbox("🪙 Actif",     ["Tous"] + syms_avail,  key="d_sym")
-        with fc2: f_mood  = st.selectbox("😊 Émotion",   ["Toutes"] + moods_avail, key="d_mood")
-        with fc3: f_strat = st.selectbox("🎯 Stratégie", ["Toutes"] + strat_avail, key="d_strat")
-        with fc4:
-            dates = sorted(df_all_f["date"].tolist()) if not df_all_f.empty else []
-            d_min = date.fromisoformat(dates[0])  if dates else date(2024,1,1)
-            d_max = date.fromisoformat(dates[-1]) if dates else date.today()
-            f_date_from = st.date_input("📅 Depuis", value=d_min, key="d_from")
-        with fc5:
-            f_date_to = st.date_input("📅 Jusqu'au", value=d_max, key="d_to")
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('<div style="background:#111520;border:1px solid #1e2535;border-radius:14px;padding:16px 20px;margin:12px 0 20px">', unsafe_allow_html=True)
+    df_all_f    = get_df("Tous")
+    syms_avail  = sorted(df_all_f["symbol"].unique().tolist()) if not df_all_f.empty else []
+    moods_avail = sorted(df_all_f["mood"].unique().tolist())   if not df_all_f.empty else []
+    strat_avail = sorted(df_all_f["strategy"].unique().tolist()) if not df_all_f.empty else []
+    dates       = sorted(df_all_f["date"].tolist()) if not df_all_f.empty else []
+    d_min = date.fromisoformat(dates[0])  if dates else date(2024,1,1)
+    d_max = date.fromisoformat(dates[-1]) if dates else date.today()
+    fc1,fc2,fc3,fc4,fc5 = st.columns(5)
+    with fc1: f_sym       = st.selectbox("🪙 Actif",       ["Tous"]   + syms_avail,  key="d_sym")
+    with fc2: f_mood      = st.selectbox("😊 Émotion",     ["Toutes"] + moods_avail, key="d_mood")
+    with fc3: f_strat     = st.selectbox("🎯 Stratégie",   ["Toutes"] + strat_avail, key="d_strat")
+    with fc4: f_date_from = st.date_input("📅 Depuis",     value=d_min, key="d_from")
+    with fc5: f_date_to   = st.date_input("📅 Jusqu'au",  value=d_max, key="d_to")
 
     # Appliquer filtres
     df = get_df(st.session_state.mode_filter)
@@ -682,8 +678,12 @@ elif st.session_state.page == "add":
         with r2c4: d_tp    = st.number_input("Take Profit",    value=float(ev("tp",0.0)),    format="%.5f",step=0.0001)
 
         r3c1,r3c2 = st.columns(2)
-        with r3c1: d_strat = st.selectbox("Stratégie",    STRATEGIES,index=STRATEGIES.index(ev("strategy","Breakout")))
-        with r3c2: d_mood  = st.selectbox("État d'esprit",MOODS,     index=MOODS.index(ev("mood","Confiant")))
+        strat_val  = ev("strategy","Breakout")
+        strat_list = STRATEGIES if strat_val in STRATEGIES else [strat_val] + STRATEGIES
+        mood_val   = ev("mood","Confiant")
+        mood_list  = MOODS if mood_val in MOODS else [mood_val] + MOODS
+        with r3c1: d_strat = st.selectbox("Stratégie",    strat_list, index=0)
+        with r3c2: d_mood  = st.selectbox("État d'esprit",mood_list,  index=0)
 
         st.markdown("""<div style="background:#0d111d;border:2px solid #00d4aa44;border-radius:12px;
             padding:14px 20px;margin:12px 0 4px">
