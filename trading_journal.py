@@ -79,11 +79,27 @@ GH_HDR   = {"Authorization": f"token {GH_TOKEN}", "Accept":"application/vnd.gith
 
 def gh_load():
     try:
-        r = requests.get(GH_API, headers=GH_HDR, timeout=8); r.raise_for_status()
+        r = requests.get(GH_API, headers=GH_HDR, timeout=8)
+        r.raise_for_status()
         d = r.json()
-        return json.loads(base64.b64decode(d["content"]).decode()), d["sha"]
+        raw = base64.b64decode(d["content"]).decode("utf-8").strip()
+        # Fichier vide ou invalide → retourner liste vide sans crash
+        if not raw or raw in ("", "null"):
+            return [], d["sha"]
+        trades = json.loads(raw)
+        if not isinstance(trades, list):
+            return [], d["sha"]
+        return trades, d["sha"]
+    except requests.exceptions.RequestException as e:
+        st.warning(f"⚠️ Impossible de joindre GitHub : {e}")
+        return [], None
+    except (json.JSONDecodeError, ValueError):
+        # Fichier corrompu sur GitHub — on repart de zéro sans crasher
+        st.warning("⚠️ Fichier de données vide ou corrompu sur GitHub. Repartez de zéro.")
+        return [], None
     except Exception as e:
-        st.error(f"Erreur chargement GitHub : {e}"); return [], None
+        st.error(f"Erreur chargement GitHub : {e}")
+        return [], None
 
 def gh_save(trades, sha):
     try:
