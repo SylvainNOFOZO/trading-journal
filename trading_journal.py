@@ -520,9 +520,8 @@ if st.session_state.page == "dashboard":
                         bgcolor="#111520", bordercolor="#1e2535",
                     ),
                 ))
-                fig_hm.update_layout(**PLOTLY_LAYOUT,
-                    height=max(280, len(pivot)*55),
-                    margin=dict(l=120, r=60, t=20, b=60))
+                fig_hm.update_layout(**PLOTLY_LAYOUT, height=max(280, len(pivot)*55))
+                fig_hm.update_layout(margin=dict(l=120, r=60, t=20, b=60))
                 fig_hm.update_xaxes(side="bottom", tickangle=-30, gridcolor="#1e2535", linecolor="#1e2535")
                 fig_hm.update_yaxes(gridcolor="#1e2535", linecolor="#1e2535")
                 st.plotly_chart(fig_hm, use_container_width=True)
