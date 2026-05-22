@@ -9,6 +9,16 @@ st.set_page_config(page_title="Trading Journal Pro", page_icon="📈", layout="w
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
+.fa, .fas, .far, .fab, .fa-solid, .fa-regular { font-family: "Font Awesome 6 Free" !important; }
+.icon { display:inline-flex; align-items:center; justify-content:center;
+        width:32px; height:32px; border-radius:8px; font-size:15px; }
+.icon-green  { color:#00d4aa; background:rgba(0,212,170,.12); }
+.icon-red    { color:#ff4d6d; background:rgba(255,77,109,.12); }
+.icon-purple { color:#7c6aff; background:rgba(124,106,255,.12); }
+.icon-orange { color:#ff9f43; background:rgba(255,159,67,.12); }
+.icon-muted  { color:#6b7894; background:rgba(107,120,148,.1); }
+.mood-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
 .stApp { background-color: #0a0c12; }
 section[data-testid="stSidebar"] > div { background-color: #0c0f1a; border-right: 1px solid #1e2535; }
 h1,h2,h3,h4,h5,h6,p,label,.stMarkdown { color: #e8ecf4 !important; }
@@ -52,6 +62,17 @@ SYMBOLS      = ["EUR/USD","GBP/USD","USD/JPY","USD/CHF","AUD/USD","NZD/USD","USD
                 "EUR/GBP","EUR/JPY","GBP/JPY","NAS100","SP500","DOW30","DAX40","FTSE100",
                 "GOLD","SILVER","BTC/USD","ETH/USD","OIL","Autre"]
 MOOD_EMOJI   = {"Euphorique":"🚀","Confiant":"😊","Neutre":"😐","Anxieux":"😰","Peureux":"😨","Frustré":"😤"}
+MOOD_ICON = {
+    "Euphorique": ('<i class="fa-solid fa-rocket"     style="color:#00d4aa"></i>', "#00d4aa"),
+    "Confiant":   ('<i class="fa-solid fa-thumbs-up"  style="color:#00b894"></i>', "#00b894"),
+    "Neutre":     ('<i class="fa-solid fa-minus"       style="color:#6b7894"></i>', "#6b7894"),
+    "Anxieux":    ('<i class="fa-solid fa-triangle-exclamation" style="color:#ff9f43"></i>', "#ff9f43"),
+    "Peureux":    ('<i class="fa-solid fa-shield-halved" style="color:#fd79a8"></i>', "#fd79a8"),
+    "Frustré":    ('<i class="fa-solid fa-fire"        style="color:#ff4d6d"></i>', "#ff4d6d"),
+}
+def mood_html(mood):
+    icon, color = MOOD_ICON.get(mood, ('<i class="fa-solid fa-circle" style="color:#6b7894"></i>', "#6b7894"))
+    return f'<span title="{mood}" style="display:inline-flex;align-items:center;gap:5px">{icon}</span>'
 CHART_COLORS = ["#00d4aa","#7c6aff","#ff9f43","#ff4d6d","#54a0ff","#5f27cd","#00cec9","#fdcb6e"]
 TRADE_MODES  = ["Réel 💰", "Démo 🧪"]
 SYM_MAP = {
@@ -110,7 +131,7 @@ def gh_load():
         sha, trades = gh_get_file()
         return trades, sha
     except Exception as e:
-        st.error(f"❌ {e}")
+        st.error(f"Erreur : {e}")
         return [], None
 
 def gh_save(trades):
@@ -131,7 +152,7 @@ def gh_save(trades):
         st.session_state.gh_sha = new_sha
         return True
     except Exception as e:
-        st.error(f"❌ Erreur sauvegarde : {e}")
+        st.error(f"Erreur sauvegarde : {e}")
         return False
 
 # ── INIT SESSION ───────────────────────────────────────────────────────────────
@@ -183,7 +204,7 @@ def get_df(mode_filter="Tous"):
 def kpi(icon, label, value, sub, color):
     st.markdown(f"""<div class="kpi">
         <div class="kpi-bar" style="background:{color}"></div>
-        <div class="kpi-icon">{icon}</div>
+        <div class="kpi-icon" style="font-size:17px;margin-bottom:8px;color:{color};opacity:.9">{icon}</div>
         <div class="kpi-label">{label}</div>
         <div class="kpi-value" style="color:{color}">{value}</div>
         <div class="kpi-sub">{sub}</div></div>""", unsafe_allow_html=True)
@@ -200,13 +221,13 @@ def safe_float(val):
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 📈 Trading Journal")
-    st.caption("Pro · v3.0  |  ☁️ GitHub Sync")
+    st.markdown("## Trading Journal")
+    st.caption("Pro · v3.0 · GitHub Sync")
     st.divider()
 
     # Filtre global mode
-    mode_f = st.radio("Afficher", ["Tous", "Réel 💰", "Démo 🧪"],
-        index=["Tous","Réel 💰","Démo 🧪"].index(st.session_state.mode_filter),
+    mode_f = st.radio("Afficher", ["Tous", "Réel", "Démo"],
+        index=["Tous","Réel 💰","Démo 🧪"].index(st.session_state.mode_filter) if st.session_state.mode_filter in ["Tous","Réel 💰","Démo 🧪"] else 0,
         horizontal=True, label_visibility="collapsed")
     if mode_f != st.session_state.mode_filter:
         st.session_state.mode_filter = mode_f; st.rerun()
@@ -216,7 +237,7 @@ with st.sidebar:
     total   = df_side["pnl"].sum() if not df_side.empty else 0
     wr      = (len(df_side[df_side["pnl"]>0])/len(df_side)*100) if not df_side.empty else 0
     col_pnl = "#00d4aa" if total >= 0 else "#ff4d6d"
-    mode_icon = {"Tous":"🌐","Réel 💰":"💰","Démo 🧪":"🧪"}[st.session_state.mode_filter]
+    mode_icon = {"Tous":"Tous","Réel 💰":"Réel","Démo 🧪":"Démo"}[st.session_state.mode_filter]
 
     st.markdown(f"""<div style="margin-bottom:16px;padding:10px 0">
         <div style="font-size:10px;color:#6b7894;letter-spacing:1px;text-transform:uppercase">
@@ -225,34 +246,34 @@ with st.sidebar:
         <div style="font-size:11px;color:#6b7894;margin-top:2px">{len(df_side)} trades · {wr:.0f}% win</div>
     </div>""", unsafe_allow_html=True)
 
-    if st.button("🏠  Dashboard",     use_container_width=True):
+    if st.button("  Dashboard",     icon=":material/dashboard:",     use_container_width=True):
         st.session_state.page="dashboard"; st.session_state.edit_id=None; st.rerun()
-    if st.button("📋  Journal",       use_container_width=True):
+    if st.button("  Journal",       icon=":material/table_rows:",       use_container_width=True):
         st.session_state.page="journal";   st.session_state.edit_id=None; st.rerun()
-    if st.button("➕  Nouveau Trade", use_container_width=True):
+    if st.button("  Nouveau Trade", icon=":material/add_circle:", use_container_width=True):
         st.session_state.page="add";       st.session_state.edit_id=None; st.rerun()
-    if st.button("📂  Importer MT5",  use_container_width=True):
+    if st.button("  Importer MT5",  icon=":material/upload_file:",  use_container_width=True):
         st.session_state.page="import";    st.session_state.edit_id=None; st.rerun()
-    if st.button("🔄  Synchroniser",  use_container_width=True):
-        force_reload(); st.success("✅ Rechargé !"); st.rerun()
+    if st.button("  Synchroniser",  icon=":material/sync:",  use_container_width=True):
+        force_reload(); st.success("Données rechargées."); st.rerun()
 
     st.divider()
     if not df_side.empty:
         csv = df_side.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Exporter CSV", csv, "trades.csv", "text/csv", use_container_width=True)
+        st.download_button("  Exporter CSV", data=csv, file_name="trades.csv", mime="text/csv", icon=":material/download:", use_container_width=True)
 
     sha_s = st.session_state.get("gh_sha","")[:7] if st.session_state.get("gh_sha") else "—"
-    st.markdown(f'<div class="sync-ok">☁️ GitHub · {sha_s}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sync-ok"><i class="fa-solid fa-cloud-arrow-up"></i> GitHub · {sha_s}</div>', unsafe_allow_html=True)
 
 # ── BANNER MODE ────────────────────────────────────────────────────────────────
 def mode_banner():
     m = st.session_state.mode_filter
     if m == "Réel 💰":
-        st.markdown('<div class="mode-banner-real">💰 Mode RÉEL — Performances sur compte réel</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mode-banner-real"><i class="fa-solid fa-circle-dot"></i> Mode RÉEL — Performances sur compte réel</div>', unsafe_allow_html=True)
     elif m == "Démo 🧪":
-        st.markdown('<div class="mode-banner-demo">🧪 Mode DÉMO — Performances sur compte démo</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mode-banner-demo"><i class="fa-solid fa-flask"></i> Mode DÉMO — Performances sur compte démo</div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div class="mode-banner-all">🌐 Tous les trades — Réel + Démo confondus</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mode-banner-all"><i class="fa-solid fa-layer-group"></i> Tous les trades — Réel + Démo confondus</div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : DASHBOARD
@@ -272,11 +293,11 @@ if st.session_state.page == "dashboard":
     d_min = date.fromisoformat(dates[0])  if dates else date(2024,1,1)
     d_max = date.fromisoformat(dates[-1]) if dates else date.today()
     fc1,fc2,fc3,fc4,fc5 = st.columns(5)
-    with fc1: f_sym       = st.selectbox("🪙 Actif",       ["Tous"]   + syms_avail,  key="d_sym")
-    with fc2: f_mood      = st.selectbox("😊 Émotion",     ["Toutes"] + moods_avail, key="d_mood")
-    with fc3: f_strat     = st.selectbox("🎯 Stratégie",   ["Toutes"] + strat_avail, key="d_strat")
-    with fc4: f_date_from = st.date_input("📅 Depuis",     value=d_min, key="d_from")
-    with fc5: f_date_to   = st.date_input("📅 Jusqu'au",  value=d_max, key="d_to")
+    with fc1: f_sym       = st.selectbox("Actif",       ["Tous"]   + syms_avail,  key="d_sym")
+    with fc2: f_mood      = st.selectbox("Émotion",     ["Toutes"] + moods_avail, key="d_mood")
+    with fc3: f_strat     = st.selectbox("Stratégie",   ["Toutes"] + strat_avail, key="d_strat")
+    with fc4: f_date_from = st.date_input("Depuis",     value=d_min, key="d_from")
+    with fc5: f_date_to   = st.date_input("Jusqu'au",  value=d_max, key="d_to")
 
     # Appliquer filtres
     df = get_df(st.session_state.mode_filter)
@@ -306,32 +327,32 @@ if st.session_state.page == "dashboard":
 
         # ── KPIs ─────────────────────────────────────────────────────────────
         c1,c2,c3,c4,c5,c6 = st.columns(6)
-        with c1: kpi("💰","P&L Net",      fmt(total),       f"{len(df)} trades",             "#00d4aa" if total>=0 else "#ff4d6d")
-        with c2: kpi("🎯","Win Rate",     f"{wr_val:.1f}%", f"{len(wins)}W · {len(losses)}L","#00d4aa" if wr_val>=50 else "#ff4d6d")
-        with c3: kpi("⚖️","Profit Factor",f"{pf:.2f}" if pf else "—","Gain/Perte",          "#00d4aa" if (pf or 0)>=1.5 else "#ff9f43")
-        with c4: kpi("📉","Max Drawdown", f"${mdd:,.2f}",   "Perte cumulée max",             "#ff4d6d")
-        with c5: kpi("⚡","R:R Moyen",   f"{avg_rr:.2f}R" if avg_rr else "—","Risque/Récomp","#7c6aff")
-        with c6: kpi("📈","Gain moyen",   fmt(avg_w),       "Par trade gagnant",             "#00d4aa")
+        with c1: kpi('<i class="fa-solid fa-coins"></i>',"P&L Net",      fmt(total),       f"{len(df)} trades",             "#00d4aa" if total>=0 else "#ff4d6d")
+        with c2: kpi('<i class="fa-solid fa-bullseye"></i>',"Win Rate",     f"{wr_val:.1f}%", f"{len(wins)}W · {len(losses)}L","#00d4aa" if wr_val>=50 else "#ff4d6d")
+        with c3: kpi('<i class="fa-solid fa-scale-balanced"></i>',"Profit Factor",f"{pf:.2f}" if pf else "—","Gain/Perte",          "#00d4aa" if (pf or 0)>=1.5 else "#ff9f43")
+        with c4: kpi('<i class="fa-solid fa-arrow-trend-down"></i>',"Max Drawdown", f"${mdd:,.2f}",   "Perte cumulée max",             "#ff4d6d")
+        with c5: kpi('<i class="fa-solid fa-bolt"></i>',"R:R Moyen",   f"{avg_rr:.2f}R" if avg_rr else "—","Risque/Récomp","#7c6aff")
+        with c6: kpi('<i class="fa-solid fa-arrow-trend-up"></i>',"Gain moyen",   fmt(avg_w),       "Par trade gagnant",             "#00d4aa")
         st.markdown(" ")
 
         # ── Comparaison Réel/Démo si mode Tous ───────────────────────────────
         if st.session_state.mode_filter == "Tous" and "trade_mode" in df.columns:
             df_r = df[df["trade_mode"]=="Réel 💰"]; df_d = df[df["trade_mode"]=="Démo 🧪"]
             if not df_r.empty and not df_d.empty:
-                st.markdown("#### ⚡ Réel vs Démo")
+                st.markdown("#### Comparaison Réel · Démo")
                 cr1,cr2,cr3,cr4 = st.columns(4)
                 wr_r = len(df_r[df_r["pnl"]>0])/len(df_r)*100 if len(df_r) else 0
                 wr_d = len(df_d[df_d["pnl"]>0])/len(df_d)*100 if len(df_d) else 0
-                with cr1: kpi("💰","P&L Réel",     fmt(df_r["pnl"].sum()),f"{len(df_r)} trades","#00d4aa")
-                with cr2: kpi("🧪","P&L Démo",     fmt(df_d["pnl"].sum()),f"{len(df_d)} trades","#ff9f43")
-                with cr3: kpi("🎯","Win Rate Réel",f"{wr_r:.1f}%","Compte réel","#00d4aa")
-                with cr4: kpi("🎯","Win Rate Démo",f"{wr_d:.1f}%","Compte démo","#ff9f43")
+                with cr1: kpi('<i class="fa-solid fa-coins"></i>',"P&L Réel",     fmt(df_r["pnl"].sum()),f"{len(df_r)} trades","#00d4aa")
+                with cr2: kpi('<i class="fa-solid fa-flask"></i>',"P&L Démo",     fmt(df_d["pnl"].sum()),f"{len(df_d)} trades","#ff9f43")
+                with cr3: kpi('<i class="fa-solid fa-bullseye"></i>',"Win Rate Réel",f"{wr_r:.1f}%","Compte réel","#00d4aa")
+                with cr4: kpi('<i class="fa-solid fa-bullseye"></i>',"Win Rate Démo",f"{wr_d:.1f}%","Compte démo","#ff9f43")
                 st.markdown(" ")
 
         # ══════════════════════════════════════════════════════════════════════
         # ROW 1 : Courbe capital + Distribution trades
         # ══════════════════════════════════════════════════════════════════════
-        st.markdown("### 📊 Performance dans le temps")
+        st.markdown("### Performance dans le temps")
         r1c1, r1c2 = st.columns([3,2])
 
         with r1c1:
@@ -355,7 +376,7 @@ if st.session_state.page == "dashboard":
             st.plotly_chart(fig_eq, use_container_width=True)
 
         with r1c2:
-            st.markdown("#### Répartition Win/Loss")
+            st.markdown("#### Répartition")
             fig_pie = go.Figure(go.Pie(
                 values=[len(wins), len(losses)],
                 labels=["Gagnants","Perdants"], hole=0.62,
@@ -376,7 +397,7 @@ if st.session_state.page == "dashboard":
         r2c1, r2c2 = st.columns([3,2])
 
         with r2c1:
-            st.markdown("#### Timeline des Trades")
+            st.markdown("#### Trades individuels")
             colors_trades = ["#00d4aa" if p>0 else "#ff4d6d" for p in df_s["pnl"]]
             fig_tl = go.Figure()
             fig_tl.add_trace(go.Bar(
@@ -411,11 +432,11 @@ if st.session_state.page == "dashboard":
         # ══════════════════════════════════════════════════════════════════════
         # ROW 3 : Classement actifs + P&L par stratégie
         # ══════════════════════════════════════════════════════════════════════
-        st.markdown("### 🏆 Analyse par Actif & Stratégie")
+        st.markdown("### Analyse par Actif & Stratégie")
         r3c1, r3c2 = st.columns(2)
 
         with r3c1:
-            st.markdown("#### Classement des Actifs (rentabilité décroissante)")
+            st.markdown("#### Classement des Actifs — rentabilité décroissante")
             by_sym = df.groupby("symbol").agg(
                 pnl=("pnl","sum"),
                 trades=("pnl","count"),
@@ -476,11 +497,11 @@ if st.session_state.page == "dashboard":
         # ══════════════════════════════════════════════════════════════════════
         # ROW 4 : Heatmap Actif × Émotion + Stats émotions
         # ══════════════════════════════════════════════════════════════════════
-        st.markdown("### 🧠 Psychologie de Trading")
+        st.markdown("### Psychologie de Trading")
         r4c1, r4c2 = st.columns([3,2])
 
         with r4c1:
-            st.markdown("#### Heatmap Rentabilité : Actif × Émotion")
+            st.markdown("#### Heatmap : Actif × Émotion")
             if len(df["symbol"].unique()) >= 1 and len(df["mood"].unique()) >= 1:
                 pivot = df.pivot_table(
                     values="pnl", index="mood", columns="symbol",
@@ -492,7 +513,7 @@ if st.session_state.page == "dashboard":
                 pivot = pivot.reindex(mood_order)
 
                 # Ajouter emoji aux labels
-                y_labels = [f"{MOOD_EMOJI.get(m,'')} {m}" for m in pivot.index]
+                y_labels = [m for m in pivot.index]
 
                 fig_hm = go.Figure(go.Heatmap(
                     z=pivot.values.tolist(),
@@ -532,8 +553,8 @@ if st.session_state.page == "dashboard":
                 wins=("pnl", lambda x: (x>0).sum()),
             ).reset_index()
             by_mood["win_rate"] = (by_mood["wins"]/by_mood["trades"]*100).round(1)
-            by_mood["emoji"]    = by_mood["mood"].map(MOOD_EMOJI).fillna("😐")
-            by_mood["label"]    = by_mood["emoji"] + " " + by_mood["mood"]
+            by_mood["emoji"]    = by_mood["mood"]
+            by_mood["label"]    = by_mood["mood"]
             by_mood = by_mood.sort_values("pnl", ascending=False)
 
             fig_mood = go.Figure(go.Bar(
@@ -558,7 +579,7 @@ if st.session_state.page == "dashboard":
         # ══════════════════════════════════════════════════════════════════════
         # ROW 5 : Derniers trades
         # ══════════════════════════════════════════════════════════════════════
-        st.markdown("### 🕐 Derniers Trades")
+        st.markdown("### Derniers Trades")
         recent = df.sort_values("date", ascending=False).head(8)
         rows_html = ""
         for _, t in recent.iterrows():
@@ -570,7 +591,7 @@ if st.session_state.page == "dashboard":
                 <td>{badge(t["symbol"],"b-sym")}</td>
                 <td>{badge(t["direction"],dc)}</td>
                 <td>{badge(t.get("trade_mode","Réel 💰"),mc)}</td>
-                <td style="font-size:16px" title="{t["mood"]}">{MOOD_EMOJI.get(t["mood"],"😐")}</td>
+                <td style="font-size:16px" title="{t["mood"]}">{mood_html(t['mood'])}</td>
                 <td>{badge(t["strategy"],"b-str")}</td>
                 <td style="font-family:monospace;font-weight:800;color:{c}">{fmt(t["pnl"])}</td>
                 <td style="color:#6b7894;font-size:12px">{str(t.get("notes",""))[:40]}</td>
@@ -586,7 +607,7 @@ if st.session_state.page == "dashboard":
 # PAGE : JOURNAL
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.page == "journal":
-    st.markdown("# 📋 Journal des Trades")
+    st.markdown("# Journal des Trades")
     mode_banner()
     st.divider()
 
@@ -626,7 +647,7 @@ elif st.session_state.page == "journal":
                 <td style="font-family:monospace;font-weight:800;color:{c};white-space:nowrap">{fmt(t["pnl"])}</td>
                 <td style="font-family:monospace;color:{rr_c}">{rr_v if rr_v else "—"}</td>
                 <td>{badge(t["strategy"],"b-str")}</td>
-                <td title="{t["mood"]}" style="font-size:15px">{MOOD_EMOJI.get(t["mood"],"😐")}</td>
+                <td title="{t["mood"]}" style="font-size:15px">{mood_html(t['mood'])}</td>
                 <td style="color:#6b7894;font-size:12px">{str(t.get("notes",""))[:45]}</td>
             </tr>"""
         st.markdown(f"""<div style="overflow-x:auto"><table class="tj-table"><thead><tr>
@@ -644,21 +665,21 @@ elif st.session_state.page == "journal":
             sel_id  = ids[labels.index(sel_lbl)]
             ce,cd,_ = st.columns([1,1,5])
             with ce:
-                if st.button("✏️ Modifier"):
+                if st.button("Modifier", icon=":material/edit:"):
                     st.session_state.edit_id=sel_id; st.session_state.page="add"; st.rerun()
             with cd:
-                if st.button("🗑️ Supprimer"):
+                if st.button("Supprimer", icon=":material/delete:"):
                     st.session_state.trades=[t for t in st.session_state.trades if t["id"]!=sel_id]
                     ok=cloud_save(st.session_state.trades)
-                    st.success("✅ Supprimé." if ok else "⚠️ Erreur sync."); st.rerun()
+                    st.success("Supprimé." if ok else "Erreur synchronisation."); st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : ADD / EDIT
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.page == "add":
     is_edit = st.session_state.edit_id is not None
-    st.markdown(f"# {'✏️ Modifier' if is_edit else '➕ Nouveau Trade'}")
-    if st.button("← Retour"):
+    st.markdown(f"# {'Modifier le Trade' if is_edit else 'Nouveau Trade'}")
+    if st.button("Retour", icon=":material/arrow_back:"):
         st.session_state.page="journal"; st.session_state.edit_id=None; st.rerun()
     st.divider()
 
@@ -688,7 +709,7 @@ elif st.session_state.page == "add":
         st.markdown("""<div style="background:#0d111d;border:2px solid #00d4aa44;border-radius:12px;
             padding:14px 20px;margin:12px 0 4px">
             <div style="font-size:11px;color:#00d4aa;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;margin-bottom:4px">
-                💰 P&L Réel (tel qu'affiché par votre broker)</div>
+                P&L Réel — tel qu'affiché par votre broker</div>
             <div style="font-size:12px;color:#6b7894">Saisissez le résultat exact · spread, commission et swap inclus</div>
         </div>""", unsafe_allow_html=True)
 
@@ -698,7 +719,7 @@ elif st.session_state.page == "add":
         with pc2:
             if d_pnl != 0:
                 color = "#00d4aa" if d_pnl>=0 else "#ff4d6d"
-                sign  = "✅ GAIN" if d_pnl>=0 else "❌ PERTE"
+                sign  = "GAIN" if d_pnl>=0 else "PERTE"
                 rr_h  = ""
                 if d_entry and d_sl and d_tp:
                     risk = abs(d_entry-d_sl)
@@ -712,7 +733,7 @@ elif st.session_state.page == "add":
         d_notes = st.text_area("Notes & Analyse", value=ev("notes",""),
             placeholder="Raison du trade, contexte, leçons...", height=80)
 
-        if st.form_submit_button("✓  Sauvegarder" if is_edit else "✓  Enregistrer le Trade", use_container_width=True):
+        if st.form_submit_button("Sauvegarder" if is_edit else "Enregistrer le Trade", use_container_width=True):
             ex    = next((t for t in st.session_state.trades if t["id"]==st.session_state.edit_id),None)
             new_t = {"id":ex["id"] if is_edit else int(datetime.now().timestamp()*1000),
                 "date":str(d_date),"symbol":d_sym,"direction":d_dir,"trade_mode":d_mode,
@@ -723,15 +744,15 @@ elif st.session_state.page == "add":
             else:
                 st.session_state.trades.append(new_t)
             ok = cloud_save(st.session_state.trades)
-            st.success("✅ Synchronisé !" if ok else "⚠️ Sauvegardé localement.")
+            st.success("Synchronisé." if ok else "Sauvegardé localement (vérifiez la connexion).")
             st.session_state.page="journal"; st.session_state.edit_id=None; st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : IMPORT MT5
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.page == "import":
-    st.markdown("# 📂 Importer depuis MetaTrader 5")
-    if st.button("← Retour"):
+    st.markdown("# Importer depuis MetaTrader 5")
+    if st.button("Retour", icon=":material/arrow_back:"):
         st.session_state.page = "journal"; st.rerun()
     st.divider()
 
@@ -746,7 +767,7 @@ elif st.session_state.page == "import":
 
     st.markdown("---")
 
-    with st.expander("📖 Comment exporter depuis MT5 ?", expanded=False):
+    with st.expander("Comment exporter depuis MT5 ?", expanded=False):
         st.markdown("""
         1. MT5 → **Affichage → Historique des transactions**
         2. Clic droit → **Enregistrer en tant que rapport** → **Detailed Report** → **XLSX** ou **CSV**
@@ -797,7 +818,7 @@ elif st.session_state.page == "import":
                                      dtype=str, on_bad_lines="skip")
 
         except Exception as e:
-            st.error(f"❌ Erreur lecture fichier : {e}")
+            st.error(f"Erreur lecture fichier : {e}")
             st.exception(e)
             st.stop()
 
@@ -854,7 +875,7 @@ elif st.session_state.page == "import":
         col_profit      = find_col("profit", "p&l", "result", "net_profit", "net profit")
 
         # Afficher le diagnostic
-        with st.expander(f"🔍 Colonnes détectées ({len(df_raw.columns)})", expanded=True):
+        with st.expander(f"Colonnes détectées ({len(df_raw.columns)})", expanded=True):
             d1, d2 = st.columns(2)
             mapping_info = [
                 ("Open Time",    col_open_time),
@@ -873,19 +894,19 @@ elif st.session_state.page == "import":
             half = len(mapping_info) // 2
             with d1:
                 for k, v in mapping_info[:half]:
-                    st.markdown(f"{'✅' if v else '❌'} **{k}** → `{v or 'Non trouvé'}`")
+                    st.markdown(f"{'OK' if v else '—'} · **{k}** → `{v or 'Non trouvé'}`")
             with d2:
                 for k, v in mapping_info[half:]:
-                    st.markdown(f"{'✅' if v else '❌'} **{k}** → `{v or 'Non trouvé'}`")
+                    st.markdown(f"{'OK' if v else '—'} · **{k}** → `{v or 'Non trouvé'}`")
             st.caption(f"Toutes les colonnes : {list(df_raw.columns)}")
             st.dataframe(df_raw.head(3))
 
         if not col_profit:
-            st.error("❌ Colonne Profit introuvable. Vérifiez les colonnes affichées ci-dessus.")
+            st.error("Colonne Profit introuvable. Vérifiez les colonnes affichées ci-dessus.")
             st.stop()
 
         if not col_symbol:
-            st.error("❌ Colonne Symbol introuvable.")
+            st.error("Colonne Symbol introuvable.")
             st.stop()
 
         # ── 4. Filtrage lignes valides ────────────────────────────────────────
@@ -908,10 +929,10 @@ elif st.session_state.page == "import":
             df_closed = df_work.dropna(subset=[col_profit]).copy()
 
         if df_closed.empty:
-            st.warning("⚠️ Aucun trade fermé détecté. Vérifiez le fichier.")
+            st.warning("Aucun trade fermé détecté. Vérifiez le fichier.")
             st.stop()
 
-        st.success(f"✅ {len(df_closed)} lignes de trades détectées")
+        st.success(f"{len(df_closed)} lignes de trades détectées")
 
         # ── 5. Construction des trades ────────────────────────────────────────
         SYM_MAP_LOCAL = {
@@ -994,7 +1015,7 @@ elif st.session_state.page == "import":
                 skipped += 1
 
         if not new_trades:
-            st.error("❌ Aucun trade valide extrait. Vérifiez le diagnostic des colonnes.")
+            st.error("Aucun trade valide extrait. Vérifiez le diagnostic des colonnes.")
             st.stop()
 
         # ── 6. Résumé + aperçu ────────────────────────────────────────────────
@@ -1002,12 +1023,12 @@ elif st.session_state.page == "import":
         wins_imp  = [t for t in new_trades if t["pnl"] > 0]
         col_t     = "#00d4aa" if total_imp >= 0 else "#ff4d6d"
 
-        st.markdown(f"### ✅ {len(new_trades)} trades prêts à importer" +
+        st.markdown(f"### {len(new_trades)} trades prêts à importer" +
                     (f" · {skipped} ignorés" if skipped else ""))
         s1, s2, s3 = st.columns(3)
-        with s1: kpi("💰", "P&L Total",  fmt(total_imp),  "Résultat global",           col_t)
-        with s2: kpi("✅", "Gagnants",   str(len(wins_imp)), f"{len(wins_imp)/len(new_trades)*100:.0f}% win", "#00d4aa")
-        with s3: kpi("❌", "Perdants",   str(len(new_trades)-len(wins_imp)), "Trades négatifs", "#ff4d6d")
+        with s1: kpi('<i class="fa-solid fa-coins"></i>', "P&L Total",  fmt(total_imp),  "Résultat global",           col_t)
+        with s2: kpi('<i class="fa-solid fa-circle-check"></i>', "Gagnants",   str(len(wins_imp)), f"{len(wins_imp)/len(new_trades)*100:.0f}% win", "#00d4aa")
+        with s3: kpi('<i class="fa-solid fa-circle-xmark"></i>', "Perdants",   str(len(new_trades)-len(wins_imp)), "Trades négatifs", "#ff4d6d")
         st.markdown(" ")
 
         rows_html = ""
@@ -1035,17 +1056,17 @@ elif st.session_state.page == "import":
 
         st.markdown("---")
         add_mode = st.radio("Mode d'import",
-            ["➕ Ajouter aux trades existants", "🔄 Remplacer tous les trades"],
+            ["Ajouter aux trades existants", "Remplacer tous les trades"],
             horizontal=True)
 
-        if st.button("✅  Confirmer l'import", use_container_width=True):
+        if st.button("Confirmer l'import", icon=":material/check_circle:", use_container_width=True):
             if "Remplacer" in add_mode:
                 st.session_state.trades = new_trades
             else:
                 existing_ids = {t["id"] for t in st.session_state.trades}
                 st.session_state.trades += [t for t in new_trades if t["id"] not in existing_ids]
             ok = cloud_save(st.session_state.trades)
-            st.success(f"✅ {len(new_trades)} trades importés ({imp_mode}) — " +
+            st.success(f"{len(new_trades)} trades importés ({imp_mode}) — " +
                        ("synchronisés !" if ok else "erreur sync GitHub."))
             st.session_state.page = "dashboard"
             st.rerun()
