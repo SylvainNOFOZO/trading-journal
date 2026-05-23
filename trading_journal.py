@@ -74,7 +74,7 @@ def mood_html(mood):
     icon, color = MOOD_ICON.get(mood, ('<i class="fa-solid fa-circle" style="color:#6b7894"></i>', "#6b7894"))
     return f'<span title="{mood}" style="display:inline-flex;align-items:center;gap:5px">{icon}</span>'
 CHART_COLORS = ["#00d4aa","#7c6aff","#ff9f43","#ff4d6d","#54a0ff","#5f27cd","#00cec9","#fdcb6e"]
-TRADE_MODES  = ["Réel 💰", "Démo 🧪"]
+TRADE_MODES  = ["Réel", "Démo"]
 SYM_MAP = {
     "EURUSD":"EUR/USD","GBPUSD":"GBP/USD","USDJPY":"USD/JPY","USDCHF":"USD/CHF",
     "AUDUSD":"AUD/USD","NZDUSD":"NZD/USD","USDCAD":"USD/CAD","EURGBP":"EUR/GBP",
@@ -136,35 +136,43 @@ def gh_load():
 
 def gh_save(trades):
     """Sauvegarde les trades — récupère TOUJOURS le SHA frais avant d'écrire."""
-    try:
-        # 1. Récupérer le SHA actuel (évite les conflits)
-        sha, _ = gh_get_file()
-        # 2. Écrire
-        content = base64.b64encode(
-            json.dumps(trades, ensure_ascii=False, indent=2).encode()
-        ).decode()
-        body = {"message": f"Update trades ({len(trades)} total)", "content": content}
-        if sha:
-            body["sha"] = sha
-        r = requests.put(GH_API, headers=GH_HDR, json=body, timeout=15)
-        r.raise_for_status()
-        new_sha = r.json()["content"]["sha"]
-        st.session_state.gh_sha = new_sha
-        return True
-    except Exception as e:
-        st.error(f"Erreur sauvegarde : {e}")
-        return False
+    for attempt in range(3):   # 3 tentatives
+        try:
+            sha, _ = gh_get_file()
+            payload = base64.b64encode(
+                json.dumps(trades, ensure_ascii=False, indent=2).encode("utf-8")
+            ).decode("utf-8")
+            body = {"message": f"Update trades ({len(trades)})", "content": payload}
+            if sha:
+                body["sha"] = sha
+            r = requests.put(GH_API, headers=GH_HDR, json=body, timeout=20)
+            if r.status_code in (200, 201):
+                st.session_state.gh_sha = r.json()["content"]["sha"]
+                return True
+            elif r.status_code == 409:   # conflit SHA → réessayer
+                continue
+            else:
+                r.raise_for_status()
+        except Exception as e:
+            if attempt == 2:
+                st.error(f"Erreur sauvegarde (3 tentatives) : {e}")
+                return False
+    return False
 
 # ── INIT SESSION ───────────────────────────────────────────────────────────────
-if "trades"      not in st.session_state:
-    with st.spinner("Chargement des données depuis GitHub..."):
-        trades, sha = gh_load()
-    st.session_state.trades     = trades
-    st.session_state.gh_sha     = sha
-    st.session_state.loaded_ok  = True
+if "trades" not in st.session_state:
+    _trades, _sha = gh_load()
+    # Migrer les anciens modes avec emoji
+    for _t in _trades:
+        if _t.get("trade_mode","") == "Réel 💰": _t["trade_mode"] = "Réel"
+        if _t.get("trade_mode","") == "Démo 🧪":  _t["trade_mode"] = "Démo"
+        if not _t.get("trade_mode"): _t["trade_mode"] = "Réel"
+    st.session_state.trades    = _trades
+    st.session_state.gh_sha    = _sha
 if "page"        not in st.session_state: st.session_state.page        = "dashboard"
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
 if "mode_filter" not in st.session_state: st.session_state.mode_filter = "Tous"
+if st.session_state.mode_filter not in ["Tous","Réel","Démo"]: st.session_state.mode_filter = "Tous"
 
 def cloud_save(trades):
     """Sauvegarde + met à jour session."""
@@ -196,9 +204,9 @@ def get_df(mode_filter="Tous"):
     rows = [dict(t, pnl=get_pnl(t), rr=calc_rr(t)) for t in st.session_state.trades]
     df = pd.DataFrame(rows) if rows else pd.DataFrame()
     if df.empty: return df
-    if "trade_mode" not in df.columns: df["trade_mode"] = "Réel 💰"
-    if mode_filter == "Réel 💰":  return df[df["trade_mode"] == "Réel 💰"]
-    if mode_filter == "Démo 🧪":  return df[df["trade_mode"] == "Démo 🧪"]
+    if "trade_mode" not in df.columns: df["trade_mode"] = "Réel"
+    if mode_filter == "Réel":  return df[df["trade_mode"] == "Réel"]
+    if mode_filter == "Démo":  return df[df["trade_mode"] == "Démo"]
     return df
 
 def kpi(icon, label, value, sub, color):
@@ -227,7 +235,7 @@ with st.sidebar:
 
     # Filtre global mode
     mode_f = st.radio("Afficher", ["Tous", "Réel", "Démo"],
-        index=["Tous","Réel 💰","Démo 🧪"].index(st.session_state.mode_filter) if st.session_state.mode_filter in ["Tous","Réel 💰","Démo 🧪"] else 0,
+        index=["Tous","Réel","Démo"].index(st.session_state.mode_filter) if st.session_state.mode_filter in ["Tous","Réel","Démo"] else 0,
         horizontal=True, label_visibility="collapsed")
     if mode_f != st.session_state.mode_filter:
         st.session_state.mode_filter = mode_f; st.rerun()
@@ -237,7 +245,7 @@ with st.sidebar:
     total   = df_side["pnl"].sum() if not df_side.empty else 0
     wr      = (len(df_side[df_side["pnl"]>0])/len(df_side)*100) if not df_side.empty else 0
     col_pnl = "#00d4aa" if total >= 0 else "#ff4d6d"
-    mode_icon = {"Tous":"Tous","Réel 💰":"Réel","Démo 🧪":"Démo"}[st.session_state.mode_filter]
+    mode_icon = {"Tous":"Tous","Réel":"Réel","Démo":"Démo"}[st.session_state.mode_filter]
 
     st.markdown(f"""<div style="margin-bottom:16px;padding:10px 0">
         <div style="font-size:10px;color:#6b7894;letter-spacing:1px;text-transform:uppercase">
@@ -268,9 +276,9 @@ with st.sidebar:
 # ── BANNER MODE ────────────────────────────────────────────────────────────────
 def mode_banner():
     m = st.session_state.mode_filter
-    if m == "Réel 💰":
+    if m == "Réel":
         st.markdown('<div class="mode-banner-real"><i class="fa-solid fa-circle-dot"></i> Mode RÉEL — Performances sur compte réel</div>', unsafe_allow_html=True)
-    elif m == "Démo 🧪":
+    elif m == "Démo":
         st.markdown('<div class="mode-banner-demo"><i class="fa-solid fa-flask"></i> Mode DÉMO — Performances sur compte démo</div>', unsafe_allow_html=True)
     else:
         st.markdown('<div class="mode-banner-all"><i class="fa-solid fa-layer-group"></i> Tous les trades — Réel + Démo confondus</div>', unsafe_allow_html=True)
@@ -337,7 +345,7 @@ if st.session_state.page == "dashboard":
 
         # ── Comparaison Réel/Démo si mode Tous ───────────────────────────────
         if st.session_state.mode_filter == "Tous" and "trade_mode" in df.columns:
-            df_r = df[df["trade_mode"]=="Réel 💰"]; df_d = df[df["trade_mode"]=="Démo 🧪"]
+            df_r = df[df["trade_mode"]=="Réel"]; df_d = df[df["trade_mode"]=="Démo"]
             if not df_r.empty and not df_d.empty:
                 st.markdown("#### Comparaison Réel · Démo")
                 cr1,cr2,cr3,cr4 = st.columns(4)
@@ -585,12 +593,12 @@ if st.session_state.page == "dashboard":
         for _, t in recent.iterrows():
             c  = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
             dc = "b-win" if t["direction"]=="LONG" else "b-loss"
-            mc = "b-real" if t.get("trade_mode","Réel 💰")=="Réel 💰" else "b-demo"
+            mc = "b-real" if t.get("trade_mode","Réel")=="Réel" else "b-demo"
             rows_html += f"""<tr>
                 <td style="color:#6b7894;font-family:monospace">{t["date"]}</td>
                 <td>{badge(t["symbol"],"b-sym")}</td>
                 <td>{badge(t["direction"],dc)}</td>
-                <td>{badge(t.get("trade_mode","Réel 💰"),mc)}</td>
+                <td>{badge(t.get("trade_mode","Réel"),mc)}</td>
                 <td style="font-size:16px" title="{t["mood"]}">{mood_html(t['mood'])}</td>
                 <td>{badge(t["strategy"],"b-str")}</td>
                 <td style="font-family:monospace;font-weight:800;color:{c}">{fmt(t["pnl"])}</td>
@@ -619,14 +627,15 @@ elif st.session_state.page == "journal":
         with f1: fs  = st.selectbox("Symbole",    ["Tous"]+sorted(df["symbol"].unique().tolist()))
         with f2: fd  = st.selectbox("Direction",  ["Tous","LONG","SHORT"])
         with f3: fst = st.selectbox("Stratégie",  ["Toutes"]+STRATEGIES+["Importé MT5"])
-        with f4: fmo = st.selectbox("Mode",       ["Tous","Réel 💰","Démo 🧪"])
+        with f4: fmo = st.selectbox("Mode",       ["Tous","Réel","Démo"])
         with f5: srt = st.selectbox("Trier par",  ["Date ↓","Date ↑","P&L ↓","P&L ↑"])
 
         if fs !="Tous":   df=df[df["symbol"]   ==fs]
         if fd !="Tous":   df=df[df["direction"]==fd]
         if fst!="Toutes": df=df[df["strategy"] ==fst]
         if fmo!="Tous":
-            if "trade_mode" in df.columns: df=df[df["trade_mode"]==fmo]
+            if "trade_mode" in df.columns:
+                df=df[df["trade_mode"].isin([fmo, fmo+" 💰" if fmo=="Réel" else fmo+" 🧪"])]
         sm={"Date ↓":("date",False),"Date ↑":("date",True),"P&L ↓":("pnl",False),"P&L ↑":("pnl",True)}
         sc,sa=sm[srt]; df=df.sort_values(sc,ascending=sa)
 
@@ -636,12 +645,12 @@ elif st.session_state.page == "journal":
             c  = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
             dc = "b-win" if t["direction"]=="LONG" else "b-loss"
             rr_v=t["rr"]; rr_c="#00d4aa" if (rr_v or 0)>=2 else "#ff9f43" if (rr_v or 0)>=1 else "#ff4d6d"
-            mc = "b-real" if t.get("trade_mode","Réel 💰")=="Réel 💰" else "b-demo"
+            mc = "b-real" if t.get("trade_mode","Réel")=="Réel" else "b-demo"
             rows_html+=f"""<tr>
                 <td style="color:#6b7894;font-family:monospace;white-space:nowrap">{t["date"]}</td>
                 <td>{badge(t["symbol"],"b-sym")}</td>
                 <td>{badge(t["direction"],dc)}</td>
-                <td>{badge(t.get("trade_mode","Réel 💰"),mc)}</td>
+                <td>{badge(t.get("trade_mode","Réel"),mc)}</td>
                 <td style="font-family:monospace">{t.get("entry","—")}</td>
                 <td style="font-family:monospace">{t.get("exit","—")}</td>
                 <td style="font-family:monospace;font-weight:800;color:{c};white-space:nowrap">{fmt(t["pnl"])}</td>
@@ -658,7 +667,7 @@ elif st.session_state.page == "journal":
         st.divider()
         st.markdown("##### Modifier / Supprimer")
         df_full = get_df("Tous").sort_values("date",ascending=False)
-        labels  = [f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel 💰')}  ·  {fmt(r['pnl'])}" for _,r in df_full.iterrows()]
+        labels  = [f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel')}  ·  {fmt(r['pnl'])}" for _,r in df_full.iterrows()]
         ids     = df_full["id"].tolist()
         if labels:
             sel_lbl = st.selectbox("Sélectionner",labels,label_visibility="collapsed")
@@ -689,7 +698,7 @@ elif st.session_state.page == "add":
         with r1c2: d_sym  = st.selectbox("Symbole", SYMBOLS, index=SYMBOLS.index(ev("symbol","EUR/USD")) if ev("symbol","EUR/USD") in SYMBOLS else 0)
         with r1c3: d_dir  = st.selectbox("Direction", ["LONG","SHORT"], index=["LONG","SHORT"].index(ev("direction","LONG")))
         with r1c4:
-            cur_mode = ev("trade_mode","Réel 💰")
+            cur_mode = ev("trade_mode","Réel")
             d_mode = st.selectbox("Mode", TRADE_MODES, index=TRADE_MODES.index(cur_mode) if cur_mode in TRADE_MODES else 0)
 
         r2c1,r2c2,r2c3,r2c4 = st.columns(4)
@@ -759,9 +768,9 @@ elif st.session_state.page == "import":
     # ── Choix du mode ────────────────────────────────────────────────────────
     ic1, ic2 = st.columns([2, 3])
     with ic1:
-        imp_mode = st.radio("Type de compte", ["Réel 💰", "Démo 🧪"], horizontal=True)
+        imp_mode = st.radio("Type de compte", ["Réel", "Démo"], horizontal=True)
     with ic2:
-        mc = "mode-banner-real" if imp_mode == "Réel 💰" else "mode-banner-demo"
+        mc = "mode-banner-real" if imp_mode == "Réel" else "mode-banner-demo"
         st.markdown(f'<div class="{mc}" style="margin-top:8px">Trades importés étiquetés : {imp_mode}</div>',
                     unsafe_allow_html=True)
 
@@ -1035,7 +1044,7 @@ elif st.session_state.page == "import":
         for t in new_trades[:30]:
             c  = "#00d4aa" if t["pnl"] >= 0 else "#ff4d6d"
             dc = "b-win" if t["direction"] == "LONG" else "b-loss"
-            mc = "b-real" if t["trade_mode"] == "Réel 💰" else "b-demo"
+            mc = "b-real" if t["trade_mode"] == "Réel" else "b-demo"
             rows_html += f"""<tr>
                 <td style="color:#6b7894;font-family:monospace">{t["date"]}</td>
                 <td>{badge(t["symbol"],"b-sym")}</td>
