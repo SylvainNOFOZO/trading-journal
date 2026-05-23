@@ -162,20 +162,38 @@ def db_load():
 def db_save(trades):
     if not _sb_ready():
         st.session_state["_local_trades"] = trades
-        return True   # sauvegarde locale en attendant
+        st.warning("Supabase non configuré — données en mémoire uniquement.")
+        return False
     try:
-        hdrs = {**SB_HDR, "Prefer": "resolution=merge-duplicates"}
-        r = requests.post(SB_EP, headers=hdrs,
-            json={"key": "trades", "value": trades}, timeout=15)
-        if r.status_code in (200, 201, 204):
+        # 1. Essai PATCH (update de la ligne existante)
+        r = requests.patch(
+            f"{SB_EP}?key=eq.trades",
+            headers={**SB_HDR, "Prefer": "return=representation"},
+            json={"value": trades, "updated_at": "now()"},
+            timeout=15
+        )
+        if r.status_code == 200:
+            # PATCH réussi mais vérifie qu'une ligne a bien été modifiée
+            result = r.json()
+            if isinstance(result, list) and len(result) > 0:
+                return True  # ✅ mis à jour
+            # Ligne absente → INSERT
+        if r.status_code in (204,):
             return True
-        r2 = requests.patch(f"{SB_EP}?key=eq.trades", headers=SB_HDR,
-            json={"value": trades}, timeout=15)
-        return r2.status_code in (200, 201, 204)
+        # 2. INSERT si la ligne n'existe pas encore
+        r2 = requests.post(
+            SB_EP,
+            headers={**SB_HDR, "Prefer": "resolution=merge-duplicates,return=representation"},
+            json={"key": "trades", "value": trades},
+            timeout=15
+        )
+        if r2.status_code in (200, 201):
+            return True
+        st.error(f"Erreur sauvegarde [{r2.status_code}] : {r2.text[:200]}")
+        return False
     except Exception as e:
         st.error(f"Erreur sauvegarde : {e}")
         return False
-
 def db_init():
     try:
         requests.post(SB_EP, headers=SB_HDR,
@@ -183,6 +201,24 @@ def db_init():
     except:
         pass
 
+
+def db_status():
+    """Vérifie la connexion et retourne le nombre de trades en base."""
+    if not _sb_ready():
+        return False, 0, "Secrets manquants"
+    try:
+        r = requests.get(f"{SB_EP}?key=eq.trades&select=value",
+                         headers=SB_HDR, timeout=6)
+        if r.status_code == 200:
+            rows = r.json()
+            if rows:
+                val = rows[0].get("value", [])
+                n = len(val) if isinstance(val, list) else 0
+                return True, n, f"{n} trades en base"
+            return True, 0, "Connecté · base vide"
+        return False, 0, f"HTTP {r.status_code}"
+    except Exception as e:
+        return False, 0, str(e)[:50]
 def cloud_save(trades):
     ok = db_save(trades)
     if ok: st.session_state.trades = trades
