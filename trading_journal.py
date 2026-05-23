@@ -6,6 +6,40 @@ import json, os, base64, requests, io
 
 st.set_page_config(page_title="Trading Journal Pro", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
+# ── VÉRIFICATION CONFIGURATION ────────────────────────────────────────────────
+_sb_url = st.secrets.get("SUPABASE_URL","")
+_sb_key = st.secrets.get("SUPABASE_KEY","")
+if not _sb_url or not _sb_url.startswith("https://") or not _sb_key:
+    st.error("**Base de données non configurée**")
+    st.markdown("""
+    ### Configuration Supabase requise
+
+    **Étape 1 — Créer un compte gratuit**  
+    → https://supabase.com → New project
+
+    **Étape 2 — Créer la table** (SQL Editor dans le dashboard Supabase) :
+    ```sql
+    CREATE TABLE journal_data (
+        key        TEXT PRIMARY KEY,
+        value      JSONB NOT NULL DEFAULT '[]',
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    INSERT INTO journal_data (key, value) VALUES ('trades', '[]');
+    ALTER TABLE journal_data ENABLE ROW LEVEL SECURITY;
+    CREATE POLICY "allow_all" ON journal_data FOR ALL USING (true) WITH CHECK (true);
+    ```
+
+    **Étape 3 — Ajouter les secrets dans Streamlit Cloud**  
+    Settings → Secrets :
+    ```toml
+    SUPABASE_URL = "https://xxxxxxxxxxxx.supabase.co"
+    SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    ```
+    *(Project URL et anon/public key disponibles dans Supabase → Settings → API)*
+    """)
+    st.info("En attendant la configuration, vos trades sont sauvegardés localement dans cette session.")
+    st.divider()
+
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
@@ -104,35 +138,50 @@ SB_HDR = {
 }
 SB_EP = f"{SB_URL}/rest/v1/journal_data"
 
+def _sb_ready():
+    """Vérifie que les secrets Supabase sont configurés."""
+    return bool(SB_URL and SB_KEY and SB_URL.startswith("https://"))
+
 def db_load():
+    if not _sb_ready():
+        return st.session_state.get("_local_trades", [])
     try:
-        r = requests.get(f"{SB_EP}?key=eq.trades&select=value", headers=SB_HDR, timeout=10)
+        r = requests.get(f"{SB_EP}?key=eq.trades&select=value",
+                         headers=SB_HDR, timeout=10)
         r.raise_for_status()
         rows = r.json()
         if not rows:
-            db_init(); return []
+            db_init()
+            return []
         val = rows[0].get("value", [])
         return val if isinstance(val, list) else []
     except Exception as e:
-        st.error(f"Erreur chargement : {e}"); return []
+        st.error(f"Erreur chargement base de données : {e}")
+        return []
 
 def db_save(trades):
+    if not _sb_ready():
+        st.session_state["_local_trades"] = trades
+        return True   # sauvegarde locale en attendant
     try:
         hdrs = {**SB_HDR, "Prefer": "resolution=merge-duplicates"}
         r = requests.post(SB_EP, headers=hdrs,
             json={"key": "trades", "value": trades}, timeout=15)
-        if r.status_code in (200, 201, 204): return True
+        if r.status_code in (200, 201, 204):
+            return True
         r2 = requests.patch(f"{SB_EP}?key=eq.trades", headers=SB_HDR,
             json={"value": trades}, timeout=15)
         return r2.status_code in (200, 201, 204)
     except Exception as e:
-        st.error(f"Erreur sauvegarde : {e}"); return False
+        st.error(f"Erreur sauvegarde : {e}")
+        return False
 
 def db_init():
     try:
         requests.post(SB_EP, headers=SB_HDR,
             json={"key": "trades", "value": []}, timeout=10)
-    except: pass
+    except:
+        pass
 
 def cloud_save(trades):
     ok = db_save(trades)
