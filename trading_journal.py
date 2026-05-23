@@ -92,101 +92,77 @@ PLOTLY_LAYOUT = dict(
     hovermode="x unified",
 )
 
-GH_TOKEN = st.secrets.get("GITHUB_TOKEN", os.environ.get("GITHUB_TOKEN",""))
-GH_REPO  = st.secrets.get("GITHUB_REPO",  "SylvainNOFOZO/trading-journal")
-GH_FILE  = st.secrets.get("DATA_FILE",    "trades_data.json")
-GH_API   = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_FILE}"
-GH_HDR   = {"Authorization": f"token {GH_TOKEN}", "Accept":"application/vnd.github.v3+json"}
+# ── SUPABASE PERSISTENCE ────────────────────────────────────────────────────
+# Base PostgreSQL indépendante du code → données 100% sécurisées
+SB_URL = st.secrets.get("SUPABASE_URL", "")
+SB_KEY = st.secrets.get("SUPABASE_KEY", "")
+SB_HDR = {
+    "apikey":        SB_KEY,
+    "Authorization": f"Bearer {SB_KEY}",
+    "Content-Type":  "application/json",
+    "Prefer":        "return=minimal",
+}
+SB_EP = f"{SB_URL}/rest/v1/journal_data"
 
-def gh_get_file():
-    """Retourne (sha, trades_list) depuis GitHub. Toujours fetch le SHA frais."""
+def db_load():
     try:
-        r = requests.get(GH_API, headers=GH_HDR, timeout=10)
-        if r.status_code == 404:
-            # Fichier n'existe pas encore — le créer
-            gh_create_file()
-            return None, []
+        r = requests.get(f"{SB_EP}?key=eq.trades&select=value", headers=SB_HDR, timeout=10)
         r.raise_for_status()
-        d   = r.json()
-        sha = d.get("sha")
-        raw = base64.b64decode(d.get("content","")).decode("utf-8").strip()
-        if not raw or raw == "null":
-            return sha, []
-        parsed = json.loads(raw)
-        return sha, parsed if isinstance(parsed, list) else []
-    except json.JSONDecodeError:
-        return None, []
+        rows = r.json()
+        if not rows:
+            db_init(); return []
+        val = rows[0].get("value", [])
+        return val if isinstance(val, list) else []
     except Exception as e:
-        raise RuntimeError(f"Impossible de charger les données : {e}")
+        st.error(f"Erreur chargement : {e}"); return []
 
-def gh_create_file():
-    """Crée trades_data.json vide si absent."""
-    content = base64.b64encode(b"[]").decode()
-    requests.put(GH_API, headers=GH_HDR,
-        json={"message":"Init trades_data.json","content":content}, timeout=10)
-
-def gh_load():
-    """Charge les trades — affiche erreur Streamlit si échec."""
+def db_save(trades):
     try:
-        sha, trades = gh_get_file()
-        return trades, sha
+        hdrs = {**SB_HDR, "Prefer": "resolution=merge-duplicates"}
+        r = requests.post(SB_EP, headers=hdrs,
+            json={"key": "trades", "value": trades}, timeout=15)
+        if r.status_code in (200, 201, 204): return True
+        r2 = requests.patch(f"{SB_EP}?key=eq.trades", headers=SB_HDR,
+            json={"value": trades}, timeout=15)
+        return r2.status_code in (200, 201, 204)
     except Exception as e:
-        st.error(f"Erreur : {e}")
-        return [], None
+        st.error(f"Erreur sauvegarde : {e}"); return False
 
-def gh_save(trades):
-    """Sauvegarde les trades — récupère TOUJOURS le SHA frais avant d'écrire."""
-    for attempt in range(3):   # 3 tentatives
-        try:
-            sha, _ = gh_get_file()
-            payload = base64.b64encode(
-                json.dumps(trades, ensure_ascii=False, indent=2).encode("utf-8")
-            ).decode("utf-8")
-            body = {"message": f"Update trades ({len(trades)})", "content": payload}
-            if sha:
-                body["sha"] = sha
-            r = requests.put(GH_API, headers=GH_HDR, json=body, timeout=20)
-            if r.status_code in (200, 201):
-                st.session_state.gh_sha = r.json()["content"]["sha"]
-                return True
-            elif r.status_code == 409:   # conflit SHA → réessayer
-                continue
-            else:
-                r.raise_for_status()
-        except Exception as e:
-            if attempt == 2:
-                st.error(f"Erreur sauvegarde (3 tentatives) : {e}")
-                return False
-    return False
+def db_init():
+    try:
+        requests.post(SB_EP, headers=SB_HDR,
+            json={"key": "trades", "value": []}, timeout=10)
+    except: pass
 
-# ── INIT SESSION ───────────────────────────────────────────────────────────────
+def cloud_save(trades):
+    ok = db_save(trades)
+    if ok: st.session_state.trades = trades
+    else: st.warning("Sauvegarde échouée — vérifiez la connexion.")
+    return ok
+
+def force_reload():
+    trades = db_load()
+    for t in trades:
+        if t.get("trade_mode","") in ("Réel 💰",""): t["trade_mode"] = "Réel"
+        if t.get("trade_mode","") == "Démo 🧪": t["trade_mode"] = "Démo"
+        if not t.get("trade_mode"): t["trade_mode"] = "Réel"
+    st.session_state.trades = trades
+# ── INIT SESSION ────────────────────────────────────────────────────────────
 if "trades" not in st.session_state:
-    _trades, _sha = gh_load()
-    # Migrer les anciens modes avec emoji
-    for _t in _trades:
-        if _t.get("trade_mode","") == "Réel 💰": _t["trade_mode"] = "Réel"
-        if _t.get("trade_mode","") == "Démo 🧪":  _t["trade_mode"] = "Démo"
-        if not _t.get("trade_mode"): _t["trade_mode"] = "Réel"
-    st.session_state.trades    = _trades
-    st.session_state.gh_sha    = _sha
+    _t = db_load()
+    for _x in _t:
+        if _x.get("trade_mode","") in ("Réel 💰",""): _x["trade_mode"] = "Réel"
+        if _x.get("trade_mode","") == "Démo 🧪": _x["trade_mode"] = "Démo"
+        if not _x.get("trade_mode"): _x["trade_mode"] = "Réel"
+    st.session_state.trades = _t
 if "page"        not in st.session_state: st.session_state.page        = "dashboard"
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
 if "mode_filter" not in st.session_state: st.session_state.mode_filter = "Tous"
 if st.session_state.mode_filter not in ["Tous","Réel","Démo"]: st.session_state.mode_filter = "Tous"
 
-def cloud_save(trades):
-    """Sauvegarde + met à jour session."""
-    ok = gh_save(trades)
-    if ok:
-        st.session_state.trades = trades
-    return ok
 
-def force_reload():
-    """Forcer rechargement depuis GitHub."""
-    with st.spinner("Synchronisation..."):
-        trades, sha = gh_load()
-    st.session_state.trades = trades
-    st.session_state.gh_sha = sha
+
+
 
 def get_pnl(t): return float(t.get("pnl", 0))
 
@@ -270,8 +246,7 @@ with st.sidebar:
         csv = df_side.to_csv(index=False).encode("utf-8")
         st.download_button("  Exporter CSV", data=csv, file_name="trades.csv", mime="text/csv", icon=":material/download:", use_container_width=True)
 
-    sha_s = st.session_state.get("gh_sha","")[:7] if st.session_state.get("gh_sha") else "—"
-    st.markdown(f'<div class="sync-ok"><i class="fa-solid fa-cloud-arrow-up"></i> GitHub · {sha_s}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sync-ok"><i class="fa-solid fa-database"></i> Supabase · connecté</div>', unsafe_allow_html=True)
 
 # ── BANNER MODE ────────────────────────────────────────────────────────────────
 def mode_banner():
