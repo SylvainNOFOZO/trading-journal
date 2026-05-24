@@ -677,70 +677,177 @@ if st.session_state.page == "dashboard":
 elif st.session_state.page == "journal":
     st.markdown("# Journal des Trades")
     mode_banner()
-    st.divider()
 
-    df = get_df(st.session_state.mode_filter)
-    if df.empty:
-        st.info("Aucun trade. Ajoutez-en un ou importez depuis MT5.")
+    df_all = get_df("Tous")
+
+    if df_all.empty:
+        st.info("Aucun trade. Ajoutez-en un avec **Nouveau Trade** ou importez depuis MT5.")
     else:
-        f1,f2,f3,f4,f5 = st.columns(5)
-        with f1: fs  = st.selectbox("Symbole",    ["Tous"]+sorted(df["symbol"].unique().tolist()))
-        with f2: fd  = st.selectbox("Direction",  ["Tous","LONG","SHORT"])
-        with f3: fst = st.selectbox("Stratégie",  ["Toutes"]+STRATEGIES+["Importé MT5"])
-        with f4: fmo = st.selectbox("Mode",       ["Tous","Réel","Démo"])
-        with f5: srt = st.selectbox("Trier par",  ["Date ↓","Date ↑","P&L ↓","P&L ↑"])
+        # ── FILTRES ──────────────────────────────────────────────────────────
+        st.markdown('''<div style="background:#111520;border:1px solid #1e2535;
+            border-radius:14px;padding:18px 20px;margin-bottom:18px">''',
+            unsafe_allow_html=True)
 
-        if fs !="Tous":   df=df[df["symbol"]   ==fs]
-        if fd !="Tous":   df=df[df["direction"]==fd]
-        if fst!="Toutes": df=df[df["strategy"] ==fst]
-        if fmo!="Tous":
-            if "trade_mode" in df.columns:
-                df=df[df["trade_mode"].isin([fmo, fmo+" 💰" if fmo=="Réel" else fmo+" 🧪"])]
-        sm={"Date ↓":("date",False),"Date ↑":("date",True),"P&L ↓":("pnl",False),"P&L ↑":("pnl",True)}
-        sc,sa=sm[srt]; df=df.sort_values(sc,ascending=sa)
+        fa1, fa2, fa3, fa4, fa5 = st.columns(5)
 
-        st.caption(f"{len(df)} trades affichés")
-        rows_html=""
-        for _,t in df.iterrows():
-            c  = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
-            dc = "b-win" if t["direction"]=="LONG" else "b-loss"
-            rr_v=t["rr"]; rr_c="#00d4aa" if (rr_v or 0)>=2 else "#ff9f43" if (rr_v or 0)>=1 else "#ff4d6d"
-            mc = "b-real" if t.get("trade_mode","Réel")=="Réel" else "b-demo"
-            rows_html+=f"""<tr>
-                <td style="color:#6b7894;font-family:monospace;white-space:nowrap">{t["date"]}</td>
-                <td>{badge(t["symbol"],"b-sym")}</td>
-                <td>{badge(t["direction"],dc)}</td>
-                <td>{badge(t.get("trade_mode","Réel"),mc)}</td>
-                <td style="font-family:monospace">{t.get("entry","—")}</td>
-                <td style="font-family:monospace">{t.get("exit","—")}</td>
-                <td style="font-family:monospace;font-weight:800;color:{c};white-space:nowrap">{fmt(t["pnl"])}</td>
-                <td style="font-family:monospace;color:{rr_c}">{rr_v if rr_v else "—"}</td>
-                <td>{badge(t["strategy"],"b-str")}</td>
-                <td title="{t["mood"]}" style="font-size:15px">{mood_html(t['mood'])}</td>
-                <td style="color:#6b7894;font-size:12px">{str(t.get("notes",""))[:45]}</td>
-            </tr>"""
-        st.markdown(f"""<div style="overflow-x:auto"><table class="tj-table"><thead><tr>
-            <th>Date</th><th>Symbole</th><th>Dir.</th><th>Mode</th><th>Entrée</th><th>Sortie</th>
-            <th>P&L $</th><th>R:R</th><th>Stratégie</th><th>Mood</th><th>Notes</th>
-        </tr></thead><tbody>{rows_html}</tbody></table></div>""", unsafe_allow_html=True)
+        dates_avail = sorted(df_all["date"].dropna().unique().tolist())
+        d_min = date.fromisoformat(dates_avail[0])  if dates_avail else date(2024,1,1)
+        d_max = date.fromisoformat(dates_avail[-1]) if dates_avail else date.today()
 
-        st.divider()
-        st.markdown("##### Modifier / Supprimer")
-        df_full = get_df("Tous").sort_values("date",ascending=False)
-        labels  = [f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel')}  ·  {fmt(r['pnl'])}" for _,r in df_full.iterrows()]
-        ids     = df_full["id"].tolist()
-        if labels:
-            sel_lbl = st.selectbox("Sélectionner",labels,label_visibility="collapsed")
+        with fa1:
+            f_from = st.date_input("Du", value=d_min, key="j_from",
+                                   min_value=d_min, max_value=d_max)
+        with fa2:
+            f_to   = st.date_input("Au", value=d_max, key="j_to",
+                                   min_value=d_min, max_value=d_max)
+        with fa3:
+            syms   = ["Tous"] + sorted(df_all["symbol"].unique().tolist())
+            f_sym  = st.selectbox("Actif", syms, key="j_sym")
+        with fa4:
+            f_mode = st.selectbox("Mode", ["Tous","Réel","Démo"], key="j_mode")
+        with fa5:
+            f_dir  = st.selectbox("Direction", ["Tous","LONG","SHORT"], key="j_dir")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # ── APPLIQUER FILTRES ─────────────────────────────────────────────────
+        df = df_all.copy()
+        df = df[df["date"].between(str(f_from), str(f_to))]
+        if f_sym  != "Tous": df = df[df["symbol"]    == f_sym]
+        if f_mode != "Tous": df = df[df["trade_mode"].isin([f_mode, f_mode+" 💰" if f_mode=="Réel" else f_mode+" 🧪"])]
+        if f_dir  != "Tous": df = df[df["direction"] == f_dir]
+        df = df.sort_values("date", ascending=False)
+
+        # Résumé filtres
+        total_f = df["pnl"].sum() if not df.empty else 0
+        wins_f  = len(df[df["pnl"] > 0]) if not df.empty else 0
+        col_f   = "#00d4aa" if total_f >= 0 else "#ff4d6d"
+        st.markdown(
+            f'''<div style="display:flex;gap:24px;align-items:center;
+                margin-bottom:16px;padding:10px 16px;background:#0d111d;
+                border-radius:10px;border:1px solid #1e2535">
+                <span style="color:#6b7894;font-size:13px">
+                    <b style="color:#e8ecf4">{len(df)}</b> trades affichés
+                </span>
+                <span style="color:#6b7894;font-size:13px">
+                    P&L : <b style="color:{col_f}">{fmt(total_f)}</b>
+                </span>
+                <span style="color:#6b7894;font-size:13px">
+                    Win rate : <b style="color:#00d4aa">{wins_f/len(df)*100:.0f}%</b>
+                </span>
+            </div>''' if not df.empty else "",
+            unsafe_allow_html=True
+        )
+
+        # ── TABLEAU ───────────────────────────────────────────────────────────
+        if df.empty:
+            st.info("Aucun trade pour ces filtres.")
+        else:
+            rows_html = ""
+            for _, t in df.iterrows():
+                c    = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
+                dc   = "b-win" if t["direction"]=="LONG" else "b-loss"
+                rr_v = t["rr"]
+                rr_c = "#00d4aa" if (rr_v or 0)>=2 else "#ff9f43" if (rr_v or 0)>=1 else "#ff4d6d"
+                mc   = "b-real" if t.get("trade_mode","Réel") in ("Réel","Réel 💰") else "b-demo"
+                rows_html += f"""<tr>
+                    <td style="color:#6b7894;font-family:monospace;white-space:nowrap">{t["date"]}</td>
+                    <td>{badge(t["symbol"],"b-sym")}</td>
+                    <td>{badge(t["direction"],dc)}</td>
+                    <td>{badge(t.get("trade_mode","Réel"),mc)}</td>
+                    <td style="font-family:monospace">{t.get("entry","—")}</td>
+                    <td style="font-family:monospace">{t.get("exit","—")}</td>
+                    <td style="font-family:monospace;font-weight:800;color:{c};white-space:nowrap">{fmt(t["pnl"])}</td>
+                    <td style="font-family:monospace;color:{rr_c}">{rr_v if rr_v else "—"}</td>
+                    <td>{badge(t["strategy"],"b-str")}</td>
+                    <td style="text-align:center">{mood_html(t["mood"])}</td>
+                    <td style="color:#6b7894;font-size:12px;max-width:160px">{str(t.get("notes",""))[:45]}</td>
+                </tr>"""
+            st.markdown(f"""<div style="overflow-x:auto"><table class="tj-table">
+                <thead><tr>
+                    <th>Date</th><th>Actif</th><th>Dir.</th><th>Mode</th>
+                    <th>Entrée</th><th>Sortie</th><th>P&L $</th><th>R:R</th>
+                    <th>Stratégie</th><th>Mood</th><th>Notes</th>
+                </tr></thead><tbody>{rows_html}</tbody></table></div>""",
+                unsafe_allow_html=True)
+
+        # ── MODIFIER / SUPPRIMER ──────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("##### Modifier ou supprimer un trade")
+
+        # Construire les labels depuis les trades filtrés
+        if not df.empty:
+            df_sel = df.copy()
+        else:
+            df_sel = df_all.sort_values("date", ascending=False)
+
+        if df_sel.empty:
+            st.info("Aucun trade disponible.")
+        else:
+            labels = [
+                f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel')}  ·  {r['direction']}  ·  {fmt(r['pnl'])}"
+                for _, r in df_sel.iterrows()
+            ]
+            ids = df_sel["id"].tolist()
+
+            sel_lbl = st.selectbox("Sélectionner un trade", labels,
+                                   label_visibility="collapsed")
             sel_id  = ids[labels.index(sel_lbl)]
-            ce,cd,_ = st.columns([1,1,5])
+
+            # Afficher le détail du trade sélectionné
+            sel_trade = next((t for t in st.session_state.trades if t["id"] == sel_id), None)
+            if sel_trade:
+                mc_s = "mode-banner-real" if sel_trade.get("trade_mode","Réel") in ("Réel","Réel 💰") else "mode-banner-demo"
+                pnl_s = sel_trade.get("pnl", 0)
+                col_s = "#00d4aa" if pnl_s >= 0 else "#ff4d6d"
+                st.markdown(f'''<div style="background:#0d111d;border:1px solid #1e2535;
+                    border-radius:10px;padding:12px 18px;margin:8px 0;
+                    display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+                    <span style="color:#6b7894;font-family:monospace">{sel_trade.get("date","")}</span>
+                    <span style="font-weight:700">{sel_trade.get("symbol","")}</span>
+                    <span style="color:#7c6aff">{sel_trade.get("direction","")}</span>
+                    <span style="color:{col_s};font-weight:800;font-family:monospace">{fmt(pnl_s)}</span>
+                    <span style="color:#6b7894;font-size:12px">{sel_trade.get("strategy","")}</span>
+                    <span style="color:#6b7894;font-size:12px">{str(sel_trade.get("notes",""))[:50]}</span>
+                </div>''', unsafe_allow_html=True)
+
+            ce, cd, _ = st.columns([1, 1, 5])
             with ce:
-                if st.button("Modifier", icon=":material/edit:"):
-                    st.session_state.edit_id=sel_id; st.session_state.page="add"; st.rerun()
+                if st.button("Modifier", icon=":material/edit:",
+                             use_container_width=True):
+                    st.session_state.edit_id = sel_id
+                    st.session_state.page = "add"
+                    st.rerun()
             with cd:
-                if st.button("Supprimer", icon=":material/delete:"):
-                    st.session_state.trades=[t for t in st.session_state.trades if t["id"]!=sel_id]
-                    ok=cloud_save(st.session_state.trades)
-                    st.success("Supprimé." if ok else "Erreur synchronisation."); st.rerun()
+                if st.button("Supprimer", icon=":material/delete:",
+                             use_container_width=True):
+                    st.session_state["confirm_del"] = sel_id
+
+            # Confirmation suppression
+            if st.session_state.get("confirm_del") == sel_id:
+                st.warning(
+                    f"Confirmer la suppression de ce trade ? "
+                    f"**{sel_trade.get('date','')} · {sel_trade.get('symbol','')} · {fmt(sel_trade.get('pnl',0))}**"
+                )
+                cc1, cc2, _ = st.columns([1, 1, 5])
+                with cc1:
+                    if st.button("Oui, supprimer", icon=":material/check:",
+                                 use_container_width=True):
+                        st.session_state.trades = [
+                            t for t in st.session_state.trades if t["id"] != sel_id
+                        ]
+                        ok = cloud_save(st.session_state.trades)
+                        st.session_state.pop("confirm_del", None)
+                        if ok:
+                            st.success("Trade supprimé et sauvegardé.")
+                        else:
+                            st.error("Supprimé localement mais erreur de sauvegarde.")
+                        st.rerun()
+                with cc2:
+                    if st.button("Annuler", icon=":material/close:",
+                                 use_container_width=True):
+                        st.session_state.pop("confirm_del", None)
+                        st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : ADD / EDIT
