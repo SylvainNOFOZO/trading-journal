@@ -856,39 +856,37 @@ elif st.session_state.page == "journal":
                 if "multi_sel" not in st.session_state:
                     st.session_state.multi_sel = set()
 
-                # Boutons sélection rapide
+                all_ids = df_sel["id"].tolist()
+
+                # Boutons sélection rapide — synchronisent directement les clés checkbox
                 qc1, qc2, qc3 = st.columns([1, 1, 4])
                 with qc1:
                     if st.button("Tout sélectionner", use_container_width=True,
                                  key="sel_all", icon=":material/select_all:"):
-                        st.session_state.multi_sel = set(df_sel["id"].tolist())
+                        for _tid in all_ids:
+                            st.session_state[f"chk_{_tid}"] = True
                         st.rerun()
                 with qc2:
                     if st.button("Tout désélectionner", use_container_width=True,
                                  key="desel_all", icon=":material/deselect:"):
-                        st.session_state.multi_sel = set()
+                        for _tid in all_ids:
+                            st.session_state[f"chk_{_tid}"] = False
                         st.rerun()
 
                 # Liste des trades avec checkboxes
                 for _, row in df_sel.iterrows():
-                    tid   = row["id"]
-                    checked = tid in st.session_state.multi_sel
-                    c_pnl = "#00d4aa" if row["pnl"] >= 0 else "#ff4d6d"
-                    label = (
-                        f"**{row['date']}** · {row['symbol']} · "
-                        f"{row.get('trade_mode','Réel')} · {row['direction']} · "
-                        f":{' green' if row['pnl']>=0 else 'red'}[{fmt(row['pnl'])}]"
-                    )
-                    new_val = st.checkbox(
+                    tid = row["id"]
+                    st.checkbox(
                         f"{row['date']}  ·  {row['symbol']}  ·  "
                         f"{row.get('trade_mode','Réel')}  ·  {row['direction']}  ·  {fmt(row['pnl'])}",
-                        value=checked, key=f"chk_{tid}"
+                        key=f"chk_{tid}"
                     )
-                    if new_val and tid not in st.session_state.multi_sel:
-                        st.session_state.multi_sel.add(tid)
-                    elif not new_val and tid in st.session_state.multi_sel:
-                        st.session_state.multi_sel.discard(tid)
 
+                # Collecter les trades cochés depuis les clés de session
+                st.session_state.multi_sel = {
+                    tid for tid in all_ids
+                    if st.session_state.get(f"chk_{tid}", False)
+                }
                 n_sel = len(st.session_state.multi_sel)
 
                 if n_sel > 0:
