@@ -755,59 +755,41 @@ elif st.session_state.page == "journal":
 
             # ── Onglet : PLUSIEURS TRADES ────────────────────────────────────
             with tab2:
-                all_ids = df_all.sort_values("date", ascending=False)["id"].tolist()
                 df_multi = df_all.sort_values("date", ascending=False)
 
-                st.markdown(
-                    f'<div style="font-size:13px;color:#6b7894;margin-bottom:10px">'
-                    f'<b style="color:#e8ecf4">{len(df_multi)}</b> trades au total.' 
-                    f' Utilisez les filtres ci-dessous pour affiner, puis sélectionnez.' 
-                    f'</div>', unsafe_allow_html=True)
-
-                # Filtres intégrés à l'onglet multi
+                # ── 1. FILTRES ─────────────────────────────────────────────
                 mf1, mf2, mf3, mf4, mf5 = st.columns(5)
                 dates_m = sorted(df_all["date"].dropna().unique().tolist())
                 d_min_m = date.fromisoformat(dates_m[0])  if dates_m else date(2024,1,1)
                 d_max_m = date.fromisoformat(dates_m[-1]) if dates_m else date.today()
-                with mf1: mf_from = st.date_input("Du",  value=d_min_m, key="mf_from")
-                with mf2: mf_to   = st.date_input("Au",  value=d_max_m, key="mf_to")
-                with mf3: mf_sym  = st.selectbox("Actif", ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="mf_sym")
-                with mf4: mf_mode = st.selectbox("Mode",  ["Tous","Réel","Démo"], key="mf_mode")
-                with mf5: mf_dir  = st.selectbox("Dir.",  ["Tous","LONG","SHORT"], key="mf_dir")
+                with mf1: mf_from = st.date_input("Du",    value=d_min_m, key="mf_from")
+                with mf2: mf_to   = st.date_input("Au",    value=d_max_m, key="mf_to")
+                with mf3: mf_sym  = st.selectbox("Actif",  ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="mf_sym")
+                with mf4: mf_mode = st.selectbox("Mode",   ["Tous","Réel","Démo"], key="mf_mode")
+                with mf5: mf_dir  = st.selectbox("Dir.",   ["Tous","LONG","SHORT"], key="mf_dir")
 
                 df_multi = df_multi[df_multi["date"].between(str(mf_from), str(mf_to))]
-                if mf_sym  != "Tous": df_multi = df_multi[df_multi["symbol"]    == mf_sym]
+                if mf_sym  != "Tous": df_multi = df_multi[df_multi["symbol"]   == mf_sym]
                 if mf_mode != "Tous": df_multi = df_multi[df_multi["trade_mode"].isin([mf_mode, mf_mode+" 💰", mf_mode+" 🧪"])]
                 if mf_dir  != "Tous": df_multi = df_multi[df_multi["direction"] == mf_dir]
-
                 filtered_ids = df_multi["id"].tolist()
-                st.caption(f"{len(filtered_ids)} trades correspondent aux filtres")
 
-                # Boutons sélection rapide
-                qc1, qc2, _ = st.columns([1, 1, 4])
-                with qc1:
+                # ── 2. SÉLECTION RAPIDE ────────────────────────────────────
+                sc1, sc2, sc3 = st.columns([1, 1, 4])
+                with sc1:
                     if st.button("Tout sélectionner", use_container_width=True,
                                  key="sel_all", icon=":material/select_all:"):
                         for _tid in filtered_ids:
                             st.session_state[f"chk_{_tid}"] = True
                         st.rerun()
-                with qc2:
+                with sc2:
                     if st.button("Tout désélectionner", use_container_width=True,
                                  key="desel_all", icon=":material/deselect:"):
                         for _tid in filtered_ids:
                             st.session_state[f"chk_{_tid}"] = False
                         st.rerun()
 
-                # Checkboxes
-                for _, row in df_multi.iterrows():
-                    tid = row["id"]
-                    st.checkbox(
-                        f"{row['date']}  ·  {row['symbol']}  ·  "
-                        f"{row.get('trade_mode','Réel')}  ·  {row['direction']}  ·  {fmt(row['pnl'])}",
-                        key=f"chk_{tid}"
-                    )
-
-                # Lire les sélections
+                # ── 3. BOUTON SUPPRIMER + CONFIRMATION (AVANT les checkboxes) ──
                 selected_ids = {
                     tid for tid in filtered_ids
                     if st.session_state.get(f"chk_{tid}", False)
@@ -815,37 +797,43 @@ elif st.session_state.page == "journal":
                 n_sel = len(selected_ids)
 
                 if n_sel > 0:
-                    sel_data  = [t for t in st.session_state.trades if t["id"] in selected_ids]
-                    pnl_sel   = sum(t.get("pnl", 0) for t in sel_data)
-                    col_psel  = "#00d4aa" if pnl_sel >= 0 else "#ff4d6d"
+                    sel_data = [t for t in st.session_state.trades if t["id"] in selected_ids]
+                    pnl_sel  = sum(t.get("pnl", 0) for t in sel_data)
+                    col_psel = "#00d4aa" if pnl_sel >= 0 else "#ff4d6d"
+
+                    # Bandeau résumé + bouton supprimer
                     st.markdown(
-                        f'''<div style="background:#ff4d6d12;border:1px solid #ff4d6d44;
+                        f'''<div style="background:#ff4d6d12;border:1px solid #ff4d6d55;
                             border-radius:10px;padding:10px 16px;margin:8px 0;
-                            display:flex;gap:24px;align-items:center">
+                            display:flex;gap:24px;align-items:center;flex-wrap:wrap">
                             <span style="color:#ff4d6d;font-weight:700">
                                 <i class="fa-solid fa-triangle-exclamation"></i>
                                 &nbsp;{n_sel} trade{"s" if n_sel>1 else ""} sélectionné{"s" if n_sel>1 else ""}
                             </span>
                             <span style="color:#6b7894">
-                                P&L : <b style="color:{col_psel}">{fmt(pnl_sel)}</b>
+                                P&L sélection : <b style="color:{col_psel}">{fmt(pnl_sel)}</b>
                             </span>
                         </div>''', unsafe_allow_html=True)
 
                     bd1, bd2, _ = st.columns([1.5, 1, 4])
                     with bd1:
-                        if st.button(f"Supprimer {n_sel} trade{'s' if n_sel>1 else ''}",
-                                     icon=":material/delete_sweep:",
-                                     use_container_width=True, key="btn_del_multi"):
+                        if st.button(
+                            f"Supprimer {n_sel} trade{'s' if n_sel>1 else ''}",
+                            icon=":material/delete_sweep:",
+                            use_container_width=True, key="btn_del_multi"
+                        ):
                             st.session_state["confirm_multi"] = True
 
+                    # Confirmation immédiatement sous le bouton
                     if st.session_state.get("confirm_multi"):
                         st.error(
                             f"Supprimer définitivement **{n_sel} trade{'s' if n_sel>1 else ''}** "
-                            f"(P&L : {fmt(pnl_sel)}) ?"
+                            f"(P&L total : {fmt(pnl_sel)}) ?"
                         )
                         cm1, cm2, _ = st.columns([1, 1, 5])
                         with cm1:
-                            if st.button("Confirmer", icon=":material/check:",
+                            if st.button("Confirmer la suppression",
+                                         icon=":material/check:",
                                          use_container_width=True, key="btn_multi_yes"):
                                 st.session_state.trades = [
                                     t for t in st.session_state.trades
@@ -862,8 +850,21 @@ elif st.session_state.page == "journal":
                                          use_container_width=True, key="btn_multi_no"):
                                 st.session_state.pop("confirm_multi", None)
                                 st.rerun()
+
+                    st.markdown("---")
+
                 else:
-                    st.info("Cochez les trades à supprimer.")
+                    st.caption(f"{len(filtered_ids)} trades · Cochez ceux à supprimer")
+
+                # ── 4. LISTE DES CHECKBOXES ────────────────────────────────
+                for _, row in df_multi.iterrows():
+                    tid = row["id"]
+                    c_pnl = "#00d4aa" if row["pnl"] >= 0 else "#ff4d6d"
+                    st.checkbox(
+                        f"{row['date']}  ·  {row['symbol']}  ·  "
+                        f"{row.get('trade_mode','Réel')}  ·  {row['direction']}  ·  {fmt(row['pnl'])}",
+                        key=f"chk_{tid}"
+                    )
 
         # ══════════════════════════════════════════════════════════════════════
         # FILTRES + TABLEAU
