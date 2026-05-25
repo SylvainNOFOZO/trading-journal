@@ -773,81 +773,182 @@ elif st.session_state.page == "journal":
 
         # ── MODIFIER / SUPPRIMER ──────────────────────────────────────────────
         st.markdown("---")
-        st.markdown("##### Modifier ou supprimer un trade")
-
-        # Construire les labels depuis les trades filtrés
-        if not df.empty:
-            df_sel = df.copy()
-        else:
-            df_sel = df_all.sort_values("date", ascending=False)
+        st.markdown("##### Modifier ou supprimer des trades")
 
         if df_sel.empty:
             st.info("Aucun trade disponible.")
         else:
-            labels = [
-                f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel')}  ·  {r['direction']}  ·  {fmt(r['pnl'])}"
-                for _, r in df_sel.iterrows()
-            ]
-            ids = df_sel["id"].tolist()
+            # ── SÉLECTION MULTIPLE ────────────────────────────────────────────
+            tab1, tab2 = st.tabs(["  Un trade", "  Plusieurs trades"])
 
-            sel_lbl = st.selectbox("Sélectionner un trade", labels,
-                                   label_visibility="collapsed")
-            sel_id  = ids[labels.index(sel_lbl)]
+            with tab1:
+                labels = [
+                    f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel')}  ·  {r['direction']}  ·  {fmt(r['pnl'])}"
+                    for _, r in df_sel.iterrows()
+                ]
+                ids = df_sel["id"].tolist()
 
-            # Afficher le détail du trade sélectionné
-            sel_trade = next((t for t in st.session_state.trades if t["id"] == sel_id), None)
-            if sel_trade:
-                mc_s = "mode-banner-real" if sel_trade.get("trade_mode","Réel") in ("Réel","Réel 💰") else "mode-banner-demo"
-                pnl_s = sel_trade.get("pnl", 0)
-                col_s = "#00d4aa" if pnl_s >= 0 else "#ff4d6d"
-                st.markdown(f'''<div style="background:#0d111d;border:1px solid #1e2535;
-                    border-radius:10px;padding:12px 18px;margin:8px 0;
-                    display:flex;gap:24px;align-items:center;flex-wrap:wrap">
-                    <span style="color:#6b7894;font-family:monospace">{sel_trade.get("date","")}</span>
-                    <span style="font-weight:700">{sel_trade.get("symbol","")}</span>
-                    <span style="color:#7c6aff">{sel_trade.get("direction","")}</span>
-                    <span style="color:{col_s};font-weight:800;font-family:monospace">{fmt(pnl_s)}</span>
-                    <span style="color:#6b7894;font-size:12px">{sel_trade.get("strategy","")}</span>
-                    <span style="color:#6b7894;font-size:12px">{str(sel_trade.get("notes",""))[:50]}</span>
-                </div>''', unsafe_allow_html=True)
+                sel_lbl  = st.selectbox("Sélectionner un trade", labels,
+                                        label_visibility="collapsed")
+                sel_id   = ids[labels.index(sel_lbl)]
+                sel_trade = next((t for t in st.session_state.trades if t["id"] == sel_id), None)
 
-            ce, cd, _ = st.columns([1, 1, 5])
-            with ce:
-                if st.button("Modifier", icon=":material/edit:",
-                             use_container_width=True):
-                    st.session_state.edit_id = sel_id
-                    st.session_state.page = "add"
-                    st.rerun()
-            with cd:
-                if st.button("Supprimer", icon=":material/delete:",
-                             use_container_width=True):
-                    st.session_state["confirm_del"] = sel_id
+                if sel_trade:
+                    pnl_s = sel_trade.get("pnl", 0)
+                    col_s = "#00d4aa" if pnl_s >= 0 else "#ff4d6d"
+                    st.markdown(f'''<div style="background:#0d111d;border:1px solid #1e2535;
+                        border-radius:10px;padding:12px 18px;margin:8px 0;
+                        display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+                        <span style="color:#6b7894;font-family:monospace">{sel_trade.get("date","")}</span>
+                        <span style="font-weight:700">{sel_trade.get("symbol","")}</span>
+                        <span style="color:#7c6aff">{sel_trade.get("direction","")}</span>
+                        <span style="color:{col_s};font-weight:800;font-family:monospace">{fmt(pnl_s)}</span>
+                        <span style="color:#6b7894;font-size:12px">{sel_trade.get("strategy","")}</span>
+                        <span style="color:#6b7894;font-size:12px">{str(sel_trade.get("notes",""))[:50]}</span>
+                    </div>''', unsafe_allow_html=True)
 
-            # Confirmation suppression
-            if st.session_state.get("confirm_del") == sel_id:
-                st.warning(
-                    f"Confirmer la suppression de ce trade ? "
-                    f"**{sel_trade.get('date','')} · {sel_trade.get('symbol','')} · {fmt(sel_trade.get('pnl',0))}**"
+                ce, cd, _ = st.columns([1, 1, 5])
+                with ce:
+                    if st.button("Modifier", icon=":material/edit:",
+                                 use_container_width=True, key="btn_edit_one"):
+                        st.session_state.edit_id = sel_id
+                        st.session_state.page = "add"
+                        st.rerun()
+                with cd:
+                    if st.button("Supprimer", icon=":material/delete:",
+                                 use_container_width=True, key="btn_del_one"):
+                        st.session_state["confirm_del"] = sel_id
+
+                if st.session_state.get("confirm_del") == sel_id:
+                    st.warning(
+                        f"Confirmer la suppression de **{sel_trade.get('date','')} · "
+                        f"{sel_trade.get('symbol','')} · {fmt(sel_trade.get('pnl',0))}** ?"
+                    )
+                    cc1, cc2, _ = st.columns([1, 1, 5])
+                    with cc1:
+                        if st.button("Oui, supprimer", icon=":material/check:",
+                                     use_container_width=True, key="btn_confirm_del"):
+                            st.session_state.trades = [
+                                t for t in st.session_state.trades if t["id"] != sel_id
+                            ]
+                            ok = cloud_save(st.session_state.trades)
+                            st.session_state.pop("confirm_del", None)
+                            st.success("Supprimé." if ok else "Erreur sauvegarde.")
+                            st.rerun()
+                    with cc2:
+                        if st.button("Annuler", icon=":material/close:",
+                                     use_container_width=True, key="btn_cancel_del"):
+                            st.session_state.pop("confirm_del", None)
+                            st.rerun()
+
+            with tab2:
+                st.markdown(
+                    f'<div style="font-size:13px;color:#6b7894;margin-bottom:12px">'
+                    f'<b style="color:#e8ecf4">{len(df_sel)}</b> trades correspondent aux filtres actifs.' 
+                    f' Sélectionnez ceux à supprimer.</div>',
+                    unsafe_allow_html=True
                 )
-                cc1, cc2, _ = st.columns([1, 1, 5])
-                with cc1:
-                    if st.button("Oui, supprimer", icon=":material/check:",
-                                 use_container_width=True):
-                        st.session_state.trades = [
-                            t for t in st.session_state.trades if t["id"] != sel_id
-                        ]
-                        ok = cloud_save(st.session_state.trades)
-                        st.session_state.pop("confirm_del", None)
-                        if ok:
-                            st.success("Trade supprimé et sauvegardé.")
-                        else:
-                            st.error("Supprimé localement mais erreur de sauvegarde.")
+
+                # Checkboxes par trade
+                if "multi_sel" not in st.session_state:
+                    st.session_state.multi_sel = set()
+
+                # Boutons sélection rapide
+                qc1, qc2, qc3 = st.columns([1, 1, 4])
+                with qc1:
+                    if st.button("Tout sélectionner", use_container_width=True,
+                                 key="sel_all", icon=":material/select_all:"):
+                        st.session_state.multi_sel = set(df_sel["id"].tolist())
                         st.rerun()
-                with cc2:
-                    if st.button("Annuler", icon=":material/close:",
-                                 use_container_width=True):
-                        st.session_state.pop("confirm_del", None)
+                with qc2:
+                    if st.button("Tout désélectionner", use_container_width=True,
+                                 key="desel_all", icon=":material/deselect:"):
+                        st.session_state.multi_sel = set()
                         st.rerun()
+
+                # Liste des trades avec checkboxes
+                for _, row in df_sel.iterrows():
+                    tid   = row["id"]
+                    checked = tid in st.session_state.multi_sel
+                    c_pnl = "#00d4aa" if row["pnl"] >= 0 else "#ff4d6d"
+                    label = (
+                        f"**{row['date']}** · {row['symbol']} · "
+                        f"{row.get('trade_mode','Réel')} · {row['direction']} · "
+                        f":{' green' if row['pnl']>=0 else 'red'}[{fmt(row['pnl'])}]"
+                    )
+                    new_val = st.checkbox(
+                        f"{row['date']}  ·  {row['symbol']}  ·  "
+                        f"{row.get('trade_mode','Réel')}  ·  {row['direction']}  ·  {fmt(row['pnl'])}",
+                        value=checked, key=f"chk_{tid}"
+                    )
+                    if new_val and tid not in st.session_state.multi_sel:
+                        st.session_state.multi_sel.add(tid)
+                    elif not new_val and tid in st.session_state.multi_sel:
+                        st.session_state.multi_sel.discard(tid)
+
+                n_sel = len(st.session_state.multi_sel)
+
+                if n_sel > 0:
+                    st.markdown("---")
+                    # Résumé de la sélection
+                    sel_trades_data = [t for t in st.session_state.trades
+                                       if t["id"] in st.session_state.multi_sel]
+                    pnl_sel   = sum(t.get("pnl",0) for t in sel_trades_data)
+                    col_psel  = "#00d4aa" if pnl_sel >= 0 else "#ff4d6d"
+                    st.markdown(
+                        f'''<div style="background:#0d111d;border:1px solid #ff4d6d44;
+                            border-radius:10px;padding:12px 18px;margin:8px 0;
+                            display:flex;gap:24px;align-items:center">
+                            <span style="color:#ff4d6d;font-weight:700">
+                                <i class="fa-solid fa-triangle-exclamation"></i>
+                                &nbsp;{n_sel} trade{"s" if n_sel>1 else ""} sélectionné{"s" if n_sel>1 else ""}
+                            </span>
+                            <span style="color:#6b7894">
+                                P&L total : <b style="color:{col_psel}">{fmt(pnl_sel)}</b>
+                            </span>
+                        </div>''',
+                        unsafe_allow_html=True
+                    )
+
+                    bd1, bd2, _ = st.columns([1.5, 1, 4])
+                    with bd1:
+                        if st.button(
+                            f"Supprimer {n_sel} trade{'s' if n_sel>1 else ''}",
+                            icon=":material/delete_sweep:",
+                            use_container_width=True,
+                            key="btn_del_multi"
+                        ):
+                            st.session_state["confirm_multi"] = True
+
+                    if st.session_state.get("confirm_multi"):
+                        st.error(
+                            f"⚠️ Supprimer définitivement **{n_sel} trade{'s' if n_sel>1 else ''}** "
+                            f"(P&L total : {fmt(pnl_sel)}) ?"
+                        )
+                        cm1, cm2, _ = st.columns([1, 1, 5])
+                        with cm1:
+                            if st.button("Confirmer", icon=":material/check:",
+                                         use_container_width=True, key="btn_multi_yes"):
+                                ids_to_del = set(st.session_state.multi_sel)
+                                st.session_state.trades = [
+                                    t for t in st.session_state.trades
+                                    if t["id"] not in ids_to_del
+                                ]
+                                ok = cloud_save(st.session_state.trades)
+                                st.session_state.multi_sel = set()
+                                st.session_state.pop("confirm_multi", None)
+                                if ok:
+                                    st.success(f"{len(ids_to_del)} trade(s) supprimé(s) et sauvegardés.")
+                                else:
+                                    st.error("Supprimés localement mais erreur de sauvegarde.")
+                                st.rerun()
+                        with cm2:
+                            if st.button("Annuler", icon=":material/close:",
+                                         use_container_width=True, key="btn_multi_no"):
+                                st.session_state.pop("confirm_multi", None)
+                                st.rerun()
+                else:
+                    st.info("Cochez les trades à supprimer ci-dessus.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : ADD / EDIT
