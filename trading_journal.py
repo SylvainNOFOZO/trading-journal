@@ -683,132 +683,41 @@ elif st.session_state.page == "journal":
     if df_all.empty:
         st.info("Aucun trade. Ajoutez-en un avec **Nouveau Trade** ou importez depuis MT5.")
     else:
-        # ── FILTRES ──────────────────────────────────────────────────────────
-        st.markdown('''<div style="background:#111520;border:1px solid #1e2535;
-            border-radius:14px;padding:18px 20px;margin-bottom:18px">''',
-            unsafe_allow_html=True)
-
-        fa1, fa2, fa3, fa4, fa5 = st.columns(5)
-
-        dates_avail = sorted(df_all["date"].dropna().unique().tolist())
-        d_min = date.fromisoformat(dates_avail[0])  if dates_avail else date(2024,1,1)
-        d_max = date.fromisoformat(dates_avail[-1]) if dates_avail else date.today()
-
-        with fa1:
-            f_from = st.date_input("Du", value=d_min, key="j_from",
-                                   min_value=d_min, max_value=d_max)
-        with fa2:
-            f_to   = st.date_input("Au", value=d_max, key="j_to",
-                                   min_value=d_min, max_value=d_max)
-        with fa3:
-            syms   = ["Tous"] + sorted(df_all["symbol"].unique().tolist())
-            f_sym  = st.selectbox("Actif", syms, key="j_sym")
-        with fa4:
-            f_mode = st.selectbox("Mode", ["Tous","Réel","Démo"], key="j_mode")
-        with fa5:
-            f_dir  = st.selectbox("Direction", ["Tous","LONG","SHORT"], key="j_dir")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # ── APPLIQUER FILTRES ─────────────────────────────────────────────────
-        df = df_all.copy()
-        df = df[df["date"].between(str(f_from), str(f_to))]
-        if f_sym  != "Tous": df = df[df["symbol"]    == f_sym]
-        if f_mode != "Tous": df = df[df["trade_mode"].isin([f_mode, f_mode+" 💰" if f_mode=="Réel" else f_mode+" 🧪"])]
-        if f_dir  != "Tous": df = df[df["direction"] == f_dir]
-        df = df.sort_values("date", ascending=False)
-
-        # Résumé filtres
-        total_f = df["pnl"].sum() if not df.empty else 0
-        wins_f  = len(df[df["pnl"] > 0]) if not df.empty else 0
-        col_f   = "#00d4aa" if total_f >= 0 else "#ff4d6d"
-        st.markdown(
-            f'''<div style="display:flex;gap:24px;align-items:center;
-                margin-bottom:16px;padding:10px 16px;background:#0d111d;
-                border-radius:10px;border:1px solid #1e2535">
-                <span style="color:#6b7894;font-size:13px">
-                    <b style="color:#e8ecf4">{len(df)}</b> trades affichés
-                </span>
-                <span style="color:#6b7894;font-size:13px">
-                    P&L : <b style="color:{col_f}">{fmt(total_f)}</b>
-                </span>
-                <span style="color:#6b7894;font-size:13px">
-                    Win rate : <b style="color:#00d4aa">{wins_f/len(df)*100:.0f}%</b>
-                </span>
-            </div>''' if not df.empty else "",
-            unsafe_allow_html=True
-        )
-
-        # ── TABLEAU ───────────────────────────────────────────────────────────
-        if df.empty:
-            st.info("Aucun trade pour ces filtres.")
-        else:
-            rows_html = ""
-            for _, t in df.iterrows():
-                c    = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
-                dc   = "b-win" if t["direction"]=="LONG" else "b-loss"
-                rr_v = t["rr"]
-                rr_c = "#00d4aa" if (rr_v or 0)>=2 else "#ff9f43" if (rr_v or 0)>=1 else "#ff4d6d"
-                mc   = "b-real" if t.get("trade_mode","Réel") in ("Réel","Réel 💰") else "b-demo"
-                rows_html += f"""<tr>
-                    <td style="color:#6b7894;font-family:monospace;white-space:nowrap">{t["date"]}</td>
-                    <td>{badge(t["symbol"],"b-sym")}</td>
-                    <td>{badge(t["direction"],dc)}</td>
-                    <td>{badge(t.get("trade_mode","Réel"),mc)}</td>
-                    <td style="font-family:monospace">{t.get("entry","—")}</td>
-                    <td style="font-family:monospace">{t.get("exit","—")}</td>
-                    <td style="font-family:monospace;font-weight:800;color:{c};white-space:nowrap">{fmt(t["pnl"])}</td>
-                    <td style="font-family:monospace;color:{rr_c}">{rr_v if rr_v else "—"}</td>
-                    <td>{badge(t["strategy"],"b-str")}</td>
-                    <td style="text-align:center">{mood_html(t["mood"])}</td>
-                    <td style="color:#6b7894;font-size:12px;max-width:160px">{str(t.get("notes",""))[:45]}</td>
-                </tr>"""
-            st.markdown(f"""<div style="overflow-x:auto"><table class="tj-table">
-                <thead><tr>
-                    <th>Date</th><th>Actif</th><th>Dir.</th><th>Mode</th>
-                    <th>Entrée</th><th>Sortie</th><th>P&L $</th><th>R:R</th>
-                    <th>Stratégie</th><th>Mood</th><th>Notes</th>
-                </tr></thead><tbody>{rows_html}</tbody></table></div>""",
-                unsafe_allow_html=True)
-
-        # ── MODIFIER / SUPPRIMER ──────────────────────────────────────────────
-        st.markdown("---")
-        st.markdown("##### Modifier ou supprimer des trades")
-
-        # Trades à afficher dans le sélecteur : filtrés si disponibles, sinon tous
-        df_sel = df.copy() if not df.empty else df_all.sort_values("date", ascending=False)
-
-        if df_sel.empty:
-            st.info("Aucun trade disponible.")
-        else:
-            # ── SÉLECTION MULTIPLE ────────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════════
+        # ACTIONS EN HAUT — modifier / supprimer
+        # ══════════════════════════════════════════════════════════════════════
+        with st.expander("Modifier ou supprimer des trades", expanded=True):
             tab1, tab2 = st.tabs(["  Un trade", "  Plusieurs trades"])
 
+            # ── Onglet : UN TRADE ─────────────────────────────────────────────
             with tab1:
-                labels = [
+                df_all_s = df_all.sort_values("date", ascending=False)
+                labels_one = [
                     f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel')}  ·  {r['direction']}  ·  {fmt(r['pnl'])}"
-                    for _, r in df_sel.iterrows()
+                    for _, r in df_all_s.iterrows()
                 ]
-                ids = df_sel["id"].tolist()
+                ids_one = df_all_s["id"].tolist()
 
-                sel_lbl  = st.selectbox("Sélectionner un trade", labels,
-                                        label_visibility="collapsed")
-                sel_id   = ids[labels.index(sel_lbl)]
-                sel_trade = next((t for t in st.session_state.trades if t["id"] == sel_id), None)
+                sel_lbl   = st.selectbox("Sélectionner un trade",
+                                         labels_one, label_visibility="collapsed")
+                sel_id    = ids_one[labels_one.index(sel_lbl)]
+                sel_trade = next((t for t in st.session_state.trades
+                                  if t["id"] == sel_id), None)
 
                 if sel_trade:
                     pnl_s = sel_trade.get("pnl", 0)
                     col_s = "#00d4aa" if pnl_s >= 0 else "#ff4d6d"
-                    st.markdown(f'''<div style="background:#0d111d;border:1px solid #1e2535;
-                        border-radius:10px;padding:12px 18px;margin:8px 0;
-                        display:flex;gap:24px;align-items:center;flex-wrap:wrap">
-                        <span style="color:#6b7894;font-family:monospace">{sel_trade.get("date","")}</span>
-                        <span style="font-weight:700">{sel_trade.get("symbol","")}</span>
-                        <span style="color:#7c6aff">{sel_trade.get("direction","")}</span>
-                        <span style="color:{col_s};font-weight:800;font-family:monospace">{fmt(pnl_s)}</span>
-                        <span style="color:#6b7894;font-size:12px">{sel_trade.get("strategy","")}</span>
-                        <span style="color:#6b7894;font-size:12px">{str(sel_trade.get("notes",""))[:50]}</span>
-                    </div>''', unsafe_allow_html=True)
+                    st.markdown(
+                        f'''<div style="background:#0d111d;border:1px solid #1e2535;
+                            border-radius:10px;padding:10px 16px;margin:6px 0;
+                            display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+                            <span style="color:#6b7894;font-family:monospace">{sel_trade.get("date","")}</span>
+                            <span style="font-weight:700">{sel_trade.get("symbol","")}</span>
+                            <span style="color:#7c6aff">{sel_trade.get("direction","")}</span>
+                            <span style="color:{col_s};font-weight:800;font-family:monospace">{fmt(pnl_s)}</span>
+                            <span style="color:#6b7894;font-size:12px">{sel_trade.get("strategy","")}</span>
+                            <span style="color:#6b7894;font-size:12px">{str(sel_trade.get("notes",""))[:50]}</span>
+                        </div>''', unsafe_allow_html=True)
 
                 ce, cd, _ = st.columns([1, 1, 5])
                 with ce:
@@ -844,37 +753,53 @@ elif st.session_state.page == "journal":
                             st.session_state.pop("confirm_del", None)
                             st.rerun()
 
+            # ── Onglet : PLUSIEURS TRADES ────────────────────────────────────
             with tab2:
+                all_ids = df_all.sort_values("date", ascending=False)["id"].tolist()
+                df_multi = df_all.sort_values("date", ascending=False)
+
                 st.markdown(
-                    f'<div style="font-size:13px;color:#6b7894;margin-bottom:12px">'
-                    f'<b style="color:#e8ecf4">{len(df_sel)}</b> trades correspondent aux filtres actifs.' 
-                    f' Sélectionnez ceux à supprimer.</div>',
-                    unsafe_allow_html=True
-                )
+                    f'<div style="font-size:13px;color:#6b7894;margin-bottom:10px">'
+                    f'<b style="color:#e8ecf4">{len(df_multi)}</b> trades au total.' 
+                    f' Utilisez les filtres ci-dessous pour affiner, puis sélectionnez.' 
+                    f'</div>', unsafe_allow_html=True)
 
-                # Checkboxes par trade
-                if "multi_sel" not in st.session_state:
-                    st.session_state.multi_sel = set()
+                # Filtres intégrés à l'onglet multi
+                mf1, mf2, mf3, mf4, mf5 = st.columns(5)
+                dates_m = sorted(df_all["date"].dropna().unique().tolist())
+                d_min_m = date.fromisoformat(dates_m[0])  if dates_m else date(2024,1,1)
+                d_max_m = date.fromisoformat(dates_m[-1]) if dates_m else date.today()
+                with mf1: mf_from = st.date_input("Du",  value=d_min_m, key="mf_from")
+                with mf2: mf_to   = st.date_input("Au",  value=d_max_m, key="mf_to")
+                with mf3: mf_sym  = st.selectbox("Actif", ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="mf_sym")
+                with mf4: mf_mode = st.selectbox("Mode",  ["Tous","Réel","Démo"], key="mf_mode")
+                with mf5: mf_dir  = st.selectbox("Dir.",  ["Tous","LONG","SHORT"], key="mf_dir")
 
-                all_ids = df_sel["id"].tolist()
+                df_multi = df_multi[df_multi["date"].between(str(mf_from), str(mf_to))]
+                if mf_sym  != "Tous": df_multi = df_multi[df_multi["symbol"]    == mf_sym]
+                if mf_mode != "Tous": df_multi = df_multi[df_multi["trade_mode"].isin([mf_mode, mf_mode+" 💰", mf_mode+" 🧪"])]
+                if mf_dir  != "Tous": df_multi = df_multi[df_multi["direction"] == mf_dir]
 
-                # Boutons sélection rapide — synchronisent directement les clés checkbox
-                qc1, qc2, qc3 = st.columns([1, 1, 4])
+                filtered_ids = df_multi["id"].tolist()
+                st.caption(f"{len(filtered_ids)} trades correspondent aux filtres")
+
+                # Boutons sélection rapide
+                qc1, qc2, _ = st.columns([1, 1, 4])
                 with qc1:
                     if st.button("Tout sélectionner", use_container_width=True,
                                  key="sel_all", icon=":material/select_all:"):
-                        for _tid in all_ids:
+                        for _tid in filtered_ids:
                             st.session_state[f"chk_{_tid}"] = True
                         st.rerun()
                 with qc2:
                     if st.button("Tout désélectionner", use_container_width=True,
                                  key="desel_all", icon=":material/deselect:"):
-                        for _tid in all_ids:
+                        for _tid in filtered_ids:
                             st.session_state[f"chk_{_tid}"] = False
                         st.rerun()
 
-                # Liste des trades avec checkboxes
-                for _, row in df_sel.iterrows():
+                # Checkboxes
+                for _, row in df_multi.iterrows():
                     tid = row["id"]
                     st.checkbox(
                         f"{row['date']}  ·  {row['symbol']}  ·  "
@@ -882,66 +807,55 @@ elif st.session_state.page == "journal":
                         key=f"chk_{tid}"
                     )
 
-                # Collecter les trades cochés depuis les clés de session
-                st.session_state.multi_sel = {
-                    tid for tid in all_ids
+                # Lire les sélections
+                selected_ids = {
+                    tid for tid in filtered_ids
                     if st.session_state.get(f"chk_{tid}", False)
                 }
-                n_sel = len(st.session_state.multi_sel)
+                n_sel = len(selected_ids)
 
                 if n_sel > 0:
-                    st.markdown("---")
-                    # Résumé de la sélection
-                    sel_trades_data = [t for t in st.session_state.trades
-                                       if t["id"] in st.session_state.multi_sel]
-                    pnl_sel   = sum(t.get("pnl",0) for t in sel_trades_data)
+                    sel_data  = [t for t in st.session_state.trades if t["id"] in selected_ids]
+                    pnl_sel   = sum(t.get("pnl", 0) for t in sel_data)
                     col_psel  = "#00d4aa" if pnl_sel >= 0 else "#ff4d6d"
                     st.markdown(
-                        f'''<div style="background:#0d111d;border:1px solid #ff4d6d44;
-                            border-radius:10px;padding:12px 18px;margin:8px 0;
+                        f'''<div style="background:#ff4d6d12;border:1px solid #ff4d6d44;
+                            border-radius:10px;padding:10px 16px;margin:8px 0;
                             display:flex;gap:24px;align-items:center">
                             <span style="color:#ff4d6d;font-weight:700">
                                 <i class="fa-solid fa-triangle-exclamation"></i>
                                 &nbsp;{n_sel} trade{"s" if n_sel>1 else ""} sélectionné{"s" if n_sel>1 else ""}
                             </span>
                             <span style="color:#6b7894">
-                                P&L total : <b style="color:{col_psel}">{fmt(pnl_sel)}</b>
+                                P&L : <b style="color:{col_psel}">{fmt(pnl_sel)}</b>
                             </span>
-                        </div>''',
-                        unsafe_allow_html=True
-                    )
+                        </div>''', unsafe_allow_html=True)
 
                     bd1, bd2, _ = st.columns([1.5, 1, 4])
                     with bd1:
-                        if st.button(
-                            f"Supprimer {n_sel} trade{'s' if n_sel>1 else ''}",
-                            icon=":material/delete_sweep:",
-                            use_container_width=True,
-                            key="btn_del_multi"
-                        ):
+                        if st.button(f"Supprimer {n_sel} trade{'s' if n_sel>1 else ''}",
+                                     icon=":material/delete_sweep:",
+                                     use_container_width=True, key="btn_del_multi"):
                             st.session_state["confirm_multi"] = True
 
                     if st.session_state.get("confirm_multi"):
                         st.error(
-                            f"⚠️ Supprimer définitivement **{n_sel} trade{'s' if n_sel>1 else ''}** "
-                            f"(P&L total : {fmt(pnl_sel)}) ?"
+                            f"Supprimer définitivement **{n_sel} trade{'s' if n_sel>1 else ''}** "
+                            f"(P&L : {fmt(pnl_sel)}) ?"
                         )
                         cm1, cm2, _ = st.columns([1, 1, 5])
                         with cm1:
                             if st.button("Confirmer", icon=":material/check:",
                                          use_container_width=True, key="btn_multi_yes"):
-                                ids_to_del = set(st.session_state.multi_sel)
                                 st.session_state.trades = [
                                     t for t in st.session_state.trades
-                                    if t["id"] not in ids_to_del
+                                    if t["id"] not in selected_ids
                                 ]
                                 ok = cloud_save(st.session_state.trades)
-                                st.session_state.multi_sel = set()
+                                for _tid in selected_ids:
+                                    st.session_state.pop(f"chk_{_tid}", None)
                                 st.session_state.pop("confirm_multi", None)
-                                if ok:
-                                    st.success(f"{len(ids_to_del)} trade(s) supprimé(s) et sauvegardés.")
-                                else:
-                                    st.error("Supprimés localement mais erreur de sauvegarde.")
+                                st.success(f"{n_sel} trade(s) supprimé(s)." if ok else "Erreur sauvegarde.")
                                 st.rerun()
                         with cm2:
                             if st.button("Annuler", icon=":material/close:",
@@ -949,7 +863,83 @@ elif st.session_state.page == "journal":
                                 st.session_state.pop("confirm_multi", None)
                                 st.rerun()
                 else:
-                    st.info("Cochez les trades à supprimer ci-dessus.")
+                    st.info("Cochez les trades à supprimer.")
+
+        # ══════════════════════════════════════════════════════════════════════
+        # FILTRES + TABLEAU
+        # ══════════════════════════════════════════════════════════════════════
+        st.markdown("---")
+
+        fa1, fa2, fa3, fa4, fa5 = st.columns(5)
+        dates_avail = sorted(df_all["date"].dropna().unique().tolist())
+        d_min = date.fromisoformat(dates_avail[0])  if dates_avail else date(2024,1,1)
+        d_max = date.fromisoformat(dates_avail[-1]) if dates_avail else date.today()
+
+        with fa1: f_from = st.date_input("Du",        value=d_min, key="j_from")
+        with fa2: f_to   = st.date_input("Au",        value=d_max, key="j_to")
+        with fa3: f_sym  = st.selectbox("Actif",      ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="j_sym")
+        with fa4: f_mode = st.selectbox("Mode",       ["Tous","Réel","Démo"], key="j_mode")
+        with fa5: f_dir  = st.selectbox("Direction",  ["Tous","LONG","SHORT"], key="j_dir")
+
+        df = df_all.copy()
+        df = df[df["date"].between(str(f_from), str(f_to))]
+        if f_sym  != "Tous": df = df[df["symbol"]    == f_sym]
+        if f_mode != "Tous": df = df[df["trade_mode"].isin([f_mode, f_mode+" 💰", f_mode+" 🧪"])]
+        if f_dir  != "Tous": df = df[df["direction"] == f_dir]
+        df = df.sort_values("date", ascending=False)
+
+        # Résumé
+        if not df.empty:
+            total_f = df["pnl"].sum()
+            wins_f  = len(df[df["pnl"] > 0])
+            col_f   = "#00d4aa" if total_f >= 0 else "#ff4d6d"
+            st.markdown(
+                f'''<div style="display:flex;gap:24px;align-items:center;
+                    padding:8px 14px;background:#0d111d;border-radius:8px;
+                    border:1px solid #1e2535;margin:10px 0;font-size:13px">
+                    <span style="color:#6b7894">
+                        <b style="color:#e8ecf4">{len(df)}</b> trades
+                    </span>
+                    <span style="color:#6b7894">
+                        P&L : <b style="color:{col_f}">{fmt(total_f)}</b>
+                    </span>
+                    <span style="color:#6b7894">
+                        Win rate : <b style="color:#00d4aa">
+                        {len(df[df["pnl"]>0])/len(df)*100:.0f}%</b>
+                    </span>
+                </div>''', unsafe_allow_html=True)
+
+        if df.empty:
+            st.info("Aucun trade pour ces filtres.")
+        else:
+            rows_html = ""
+            for _, t in df.iterrows():
+                c    = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
+                dc   = "b-win" if t["direction"]=="LONG" else "b-loss"
+                rr_v = t["rr"]
+                rr_c = "#00d4aa" if (rr_v or 0)>=2 else "#ff9f43" if (rr_v or 0)>=1 else "#ff4d6d"
+                mc   = "b-real" if t.get("trade_mode","Réel") in ("Réel","Réel 💰") else "b-demo"
+                rows_html += f"""<tr>
+                    <td style="color:#6b7894;font-family:monospace;white-space:nowrap">{t["date"]}</td>
+                    <td>{badge(t["symbol"],"b-sym")}</td>
+                    <td>{badge(t["direction"],dc)}</td>
+                    <td>{badge(t.get("trade_mode","Réel"),mc)}</td>
+                    <td style="font-family:monospace">{t.get("entry","—")}</td>
+                    <td style="font-family:monospace">{t.get("exit","—")}</td>
+                    <td style="font-family:monospace;font-weight:800;color:{c};white-space:nowrap">{fmt(t["pnl"])}</td>
+                    <td style="font-family:monospace;color:{rr_c}">{rr_v if rr_v else "—"}</td>
+                    <td>{badge(t["strategy"],"b-str")}</td>
+                    <td style="text-align:center">{mood_html(t["mood"])}</td>
+                    <td style="color:#6b7894;font-size:12px;max-width:160px">{str(t.get("notes",""))[:45]}</td>
+                </tr>"""
+            st.markdown(
+                f"""<div style="overflow-x:auto"><table class="tj-table">
+                <thead><tr>
+                    <th>Date</th><th>Actif</th><th>Dir.</th><th>Mode</th>
+                    <th>Entrée</th><th>Sortie</th><th>P&L $</th><th>R:R</th>
+                    <th>Stratégie</th><th>Mood</th><th>Notes</th>
+                </tr></thead><tbody>{rows_html}</tbody></table></div>""",
+                unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : ADD / EDIT
