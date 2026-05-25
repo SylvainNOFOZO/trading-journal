@@ -775,6 +775,9 @@ elif st.session_state.page == "journal":
         st.markdown("---")
         st.markdown("##### Modifier ou supprimer des trades")
 
+        # Trades à afficher dans le sélecteur : filtrés si disponibles, sinon tous
+        df_sel = df.copy() if not df.empty else df_all.sort_values("date", ascending=False)
+
         if df_sel.empty:
             st.info("Aucun trade disponible.")
         else:
