@@ -502,7 +502,7 @@ if st.session_state.page == "dashboard":
                 font=dict(size=30,color=_win,family="JetBrains Mono"), showarrow=False)
             fig_pie.add_annotation(text="Win Rate", x=0.5, y=0.38,
                 font=dict(size=13,color=_text), showarrow=False)
-            fig_pie.update_layout(**_base_layout(height=270), showlegend=True,
+            fig_pie.update_layout(**_base_layout(height=270, showlegend=True),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.1,
                             font=dict(color=_text, size=12)))
             st.plotly_chart(fig_pie, use_container_width=True)
@@ -523,7 +523,7 @@ if st.session_state.page == "dashboard":
                 customdata=list(zip(df_s["symbol"].tolist(), df_s["direction"].tolist())),
             ))
             fig_tl.add_hline(y=0, line_dash="dot", line_color=_grid, line_width=1)
-            fig_tl.update_layout(**_base_layout(height=230), showlegend=False)
+            fig_tl.update_layout(**_base_layout(height=230, showlegend=False))
             _style_axes(fig_tl, yprefix="$")
             st.plotly_chart(fig_tl, use_container_width=True)
 
@@ -590,7 +590,7 @@ if st.session_state.page == "dashboard":
                     annotation_text="1R", annotation_font=dict(color=_ora, size=10))
                 fig_rr.add_hline(y=2, line_dash="dot", line_color=_win, line_width=1,
                     annotation_text="2R", annotation_font=dict(color=_win, size=10))
-                fig_rr.update_layout(**_base_layout(height=260), showlegend=True,
+                fig_rr.update_layout(**_base_layout(height=260, showlegend=True),
                     legend=dict(orientation="h", yanchor="bottom", y=-0.15,
                                 font=dict(color=_text, size=11)))
                 _style_axes(fig_rr)
@@ -673,7 +673,7 @@ if st.session_state.page == "dashboard":
                         ))
                     except: pass
                 fig_vol.add_hline(y=0, line_dash="dot", line_color=_grid, line_width=1)
-                fig_vol.update_layout(**_base_layout(height=260), showlegend=True,
+                fig_vol.update_layout(**_base_layout(height=260, showlegend=True),
                     legend=dict(orientation="h", yanchor="bottom", y=-0.15))
                 _style_axes(fig_vol, yprefix="$")
                 fig_vol.update_xaxes(title_text="Volume (lots)")
