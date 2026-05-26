@@ -429,13 +429,14 @@ if st.session_state.page == "dashboard":
         _alt  = "#7c6aff"
         _ora  = "#ff9f43"
 
-        def _base_layout(height=260, **kwargs):
+        def _base_layout(height=260, showlegend=False, **kwargs):
+            """showlegend est un param nommé — jamais en doublon avec **kwargs."""
             return dict(
                 paper_bgcolor=_bg, plot_bgcolor=_bg,
                 font=dict(color=_text, family="DM Sans, sans-serif", size=12),
                 height=height,
                 margin=dict(l=50,r=20,t=30,b=40),
-                showlegend=False,
+                showlegend=showlegend,
                 hovermode="x unified",
                 **kwargs
             )
