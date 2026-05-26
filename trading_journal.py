@@ -1306,9 +1306,9 @@ elif st.session_state.page == "import":
         st.dataframe(
             df_preview.style
             .format({"Profit brut":"{:+.2f}","Commission":"{:+.2f}","Swap":"{:+.2f}","P&L net":"{:+.2f}"})
-            .applymap(lambda v: f"color:{'#00d4aa' if v>0 else '#ff4d6d' if v<0 else '#6b7894'}" 
-                      if isinstance(v,(int,float)) else "",
-                      subset=["Profit brut","Commission","Swap","P&L net"]),
+            .map(lambda v: f"color:{'#00d4aa' if v>0 else '#ff4d6d' if v<0 else '#6b7894'}" 
+                 if isinstance(v,(int,float)) else "",
+                 subset=["Profit brut","Commission","Swap","P&L net"]),
             use_container_width=True, hide_index=True
         )
         st.caption(
