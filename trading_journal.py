@@ -498,75 +498,85 @@ if st.session_state.page == "dashboard":
                 unsafe_allow_html=True)
 
         # ════════════════════════════════════════════════════════════════════
-        # ROW 1 : Courbe capital + Win/Loss
+        # AXE TEMPOREL — datetime précis si disponible, sinon date
+        # ════════════════════════════════════════════════════════════════════
+        def _get_x(df_sorted):
+            """Retourne (x_list, label) avec datetime précis si possible."""
+            if "datetime" in df_sorted.columns:
+                x = pd.to_datetime(df_sorted["datetime"], errors="coerce")
+                if x.notna().sum() > 0:
+                    return x.tolist(), "Date · Heure"
+            return df_sorted["date"].tolist(), "Date"
+
+        x_eq, x_eq_lbl = _get_x(df_s)
+
+        # ════════════════════════════════════════════════════════════════════
+        # ROW 1 : Courbe capital (barres) + Win/Loss
         # ════════════════════════════════════════════════════════════════════
         st.markdown("### Performance dans le temps")
         r1c1, r1c2 = st.columns([3,2])
 
         with r1c1:
-            _card("Courbe de Capital", "P&L cumulé")
-            fig_eq = go.Figure()
-            fig_eq.add_trace(go.Scatter(
-                x=df_s["date"].tolist(), y=cumul.tolist(),
-                mode="lines", name="Capital",
-                line=dict(color=_win, width=2.5, shape="spline"),
-                fill="tozeroy",
-                fillgradient=dict(type="vertical",
-                    colorscale=[[0,"rgba(0,212,170,0.25)"],[1,"rgba(0,212,170,0)"]]),
-                hovertemplate="<b>%{x}</b><br>Capital : %{y:+,.2f}$<extra></extra>",
+            _card("Courbe de Capital", x_eq_lbl)
+            # Barres en bâtons : chaque trade = une barre de la hauteur du capital cumulé
+            fig_eq = go.Figure(go.Bar(
+                x=x_eq,
+                y=cumul.tolist(),
+                marker_color=[_win if v >= 0 else _loss for v in cumul],
+                marker_opacity=0.75,
+                hovertemplate=(
+                    "<b>%{x}</b><br>"
+                    "%{customdata[0]} %{customdata[1]}<br>"
+                    "Capital cumulé : %{y:+,.2f}$<extra></extra>"
+                ),
+                customdata=list(zip(df_s["symbol"].tolist(), df_s["direction"].tolist())),
+                showlegend=False,
             ))
-            # Points gagnants / perdants
-            for _, row in df_s.iterrows():
-                idx = df_s.index.get_loc(row.name)
-                fig_eq.add_trace(go.Scatter(
-                    x=[row["date"]], y=[cumul.iloc[idx]],
-                    mode="markers",
-                    marker=dict(color=_win if row["pnl"]>0 else _loss, size=7,
-                                line=dict(color=_bg, width=1.5)),
-                    hovertemplate=f"<b>{row['date']}</b><br>{row['symbol']} {row['direction']}<br>P&L : {fmt(row['pnl'])}<extra></extra>",
-                    showlegend=False,
-                ))
-            fig_eq.add_hline(y=0, line_dash="dot", line_color=_grid, line_width=1)
-            fig_eq.update_layout(**_base_layout(height=270))
+            fig_eq.add_hline(y=0, line_color=_grid, line_width=1)
+            fig_eq.update_layout(**_base_layout(height=260))
             _style_axes(fig_eq, yprefix="$")
             st.plotly_chart(fig_eq, use_container_width=True)
 
         with r1c2:
-            _card("Répartition", "Win / Loss")
+            _card("Win / Loss")
             fig_pie = go.Figure(go.Pie(
                 values=[len(wins), len(losses)],
                 labels=["Gagnants","Perdants"], hole=0.65,
-                marker=dict(colors=[_win, _loss],
-                            line=dict(color=_bg, width=4)),
+                marker=dict(colors=[_win, _loss], line=dict(color=_bg, width=3)),
                 hovertemplate="<b>%{label}</b>: %{value} trades (%{percent})<extra></extra>",
                 textinfo="none",
             ))
             fig_pie.add_annotation(text=f"<b>{wr_val:.0f}%</b>", x=0.5, y=0.58,
-                font=dict(size=30,color=_win,family="JetBrains Mono"), showarrow=False)
+                font=dict(size=28,color=_win,family="JetBrains Mono"), showarrow=False)
             fig_pie.add_annotation(text="Win Rate", x=0.5, y=0.38,
-                font=dict(size=13,color=_text), showarrow=False)
-            fig_pie.update_layout(**_base_layout(height=270, showlegend=True),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.1,
-                            font=dict(color=_text, size=12)))
+                font=dict(size=12,color=_text), showarrow=False)
+            fig_pie.update_layout(**_base_layout(height=260, showlegend=True),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.08,
+                            font=dict(color=_text)))
             st.plotly_chart(fig_pie, use_container_width=True)
 
         # ════════════════════════════════════════════════════════════════════
-        # ROW 2 : Timeline trades + P&L mensuel
+        # ROW 2 : P&L par trade (barres) + P&L mensuel
         # ════════════════════════════════════════════════════════════════════
         r2c1, r2c2 = st.columns([3,2])
 
         with r2c1:
-            _card("Trades individuels", "P&L par trade dans le temps")
-            colors_t = [_win if p>0 else _loss for p in df_s["pnl"]]
+            _card("P&L par Trade", x_eq_lbl)
             fig_tl = go.Figure(go.Bar(
-                x=df_s["date"].tolist(), y=df_s["pnl"].tolist(),
-                marker=dict(color=colors_t, opacity=0.85,
-                            line=dict(color=_bg, width=0.5)),
-                hovertemplate="<b>%{x}</b><br>%{customdata[0]} · %{customdata[1]}<br>P&L : %{y:+,.2f}$<extra></extra>",
+                x=x_eq,
+                y=df_s["pnl"].tolist(),
+                marker_color=[_win if p>0 else _loss for p in df_s["pnl"]],
+                marker_opacity=0.75,
+                hovertemplate=(
+                    "<b>%{x}</b><br>"
+                    "%{customdata[0]} %{customdata[1]}<br>"
+                    "P&L : %{y:+,.2f}$<extra></extra>"
+                ),
                 customdata=list(zip(df_s["symbol"].tolist(), df_s["direction"].tolist())),
+                showlegend=False,
             ))
-            fig_tl.add_hline(y=0, line_dash="dot", line_color=_grid, line_width=1)
-            fig_tl.update_layout(**_base_layout(height=230, showlegend=False))
+            fig_tl.add_hline(y=0, line_color=_grid, line_width=1)
+            fig_tl.update_layout(**_base_layout(height=240))
             _style_axes(fig_tl, yprefix="$")
             st.plotly_chart(fig_tl, use_container_width=True)
 
