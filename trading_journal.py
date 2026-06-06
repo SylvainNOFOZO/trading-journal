@@ -533,9 +533,18 @@ if st.session_state.page == "dashboard":
                 showlegend=False,
             ))
             fig_eq.add_hline(y=0, line_color=_grid, line_width=1)
-            fig_eq.update_layout(**_base_layout(height=260))
+            fig_eq.update_layout(**_base_layout(height=300))
             _style_axes(fig_eq, yprefix="$")
-            st.plotly_chart(fig_eq, use_container_width=True)
+            fig_eq.update_xaxes(
+                rangeslider=dict(visible=True, thickness=0.06, bgcolor="#0d111d",
+                                 bordercolor=_grid, borderwidth=1),
+                tickformat="%d/%m %H:%M" if x_eq_lbl == "Date · Heure" else "%d/%m/%Y",
+                tickangle=-30,
+            )
+            st.plotly_chart(fig_eq, use_container_width=True,
+                            config={"scrollZoom": True, "displayModeBar": True,
+                                    "modeBarButtonsToRemove": ["lasso2d","select2d"],
+                                    "toImageButtonOptions": {"format":"png","scale":2}})
 
         with r1c2:
             _card("Win / Loss")
@@ -576,9 +585,18 @@ if st.session_state.page == "dashboard":
                 showlegend=False,
             ))
             fig_tl.add_hline(y=0, line_color=_grid, line_width=1)
-            fig_tl.update_layout(**_base_layout(height=240))
+            fig_tl.update_layout(**_base_layout(height=280))
             _style_axes(fig_tl, yprefix="$")
-            st.plotly_chart(fig_tl, use_container_width=True)
+            fig_tl.update_xaxes(
+                rangeslider=dict(visible=True, thickness=0.06, bgcolor="#0d111d",
+                                 bordercolor=_grid, borderwidth=1),
+                tickformat="%d/%m %H:%M" if x_eq_lbl == "Date · Heure" else "%d/%m/%Y",
+                tickangle=-30,
+            )
+            st.plotly_chart(fig_tl, use_container_width=True,
+                            config={"scrollZoom": True, "displayModeBar": True,
+                                    "modeBarButtonsToRemove": ["lasso2d","select2d"],
+                                    "toImageButtonOptions": {"format":"png","scale":2}})
 
         with r2c2:
             _card("P&L Mensuel")
