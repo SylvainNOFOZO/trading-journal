@@ -599,7 +599,13 @@ if st.session_state.page == "dashboard":
                 rr_colors = [_win if r>=2 else _ora if r>=1 else _loss for r in df_rr["rr"]]
                 fig_rr = go.Figure()
                 # Ligne de tendance lissée
-                x_rr, _ = get_x_axis(df_rr)
+                # Axe X : datetime si disponible, sinon date
+                if "datetime" in df_rr.columns and df_rr["datetime"].notna().any():
+                    _xrr = pd.to_datetime(df_rr["datetime"], errors="coerce")
+                    x_rr = _xrr.tolist() if _xrr.notna().sum() > 0 else df_rr["date"].tolist()
+                else:
+                    x_rr = df_rr["date"].tolist()
+
                 if len(df_rr) >= 3:
                     rr_smooth = pd.Series(df_rr["rr"].values).rolling(
                         window=min(5,len(df_rr)), min_periods=1).mean()
