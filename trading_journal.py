@@ -530,8 +530,15 @@ if st.session_state.page == "dashboard":
 
         pos_labels = _position_labels(df_s)   # un label par position
         n_pos      = len(pos_labels)
+        # Index numérique pour l'axe X : barres larges quel que soit le nb de trades
+        pos_idx    = list(range(n_pos))
 
-        # Config commune pour les graphiques en bâtons par position
+        # Ticks : afficher seulement ~12 dates sur l'axe pour rester lisible
+        _tick_step = max(1, n_pos // 12)
+        _tick_vals = pos_idx[::_tick_step]
+        _tick_text = [pos_labels[i] for i in _tick_vals]
+
+        # Config commune
         _chart_cfg = {
             "scrollZoom": True,
             "displayModeBar": True,
@@ -539,16 +546,15 @@ if st.session_state.page == "dashboard":
             "toImageButtonOptions": {"format":"png","scale":2},
         }
 
-        def _xaxis_pos(n_labels):
-            """Axe X adapté au nombre de positions."""
+        def _xaxis_pos(n):
             return dict(
-                type="category",           # catégoriel → 1 barre = 1 position
-                tickangle=-45,
+                tickmode="array",
+                tickvals=_tick_vals,
+                ticktext=_tick_text,
+                tickangle=-35,
                 tickfont=dict(size=10, color=_text),
-                rangeslider=dict(visible=True, thickness=0.05,
+                rangeslider=dict(visible=True, thickness=0.04,
                                  bgcolor="#0d111d", bordercolor=_grid, borderwidth=1),
-                # Afficher un tick tous les N pour ne pas surcharger
-                nticks=min(n_labels, 20),
             )
 
         # ════════════════════════════════════════════════════════════════════
@@ -560,18 +566,20 @@ if st.session_state.page == "dashboard":
         with r1c1:
             _card("Capital Cumulé par Position")
             fig_eq = go.Figure(go.Bar(
-                x=pos_labels,
+                x=pos_idx,
                 y=cumul.tolist(),
                 marker_color=[_win if v >= 0 else _loss for v in cumul],
-                marker_opacity=0.75,
+                marker_opacity=0.8,
                 hovertemplate=(
-                    "<b>#%{pointNumber+1} · %{x}</b><br>"
-                    "%{customdata[0]} %{customdata[1]}<br>"
+                    "<b>Position #%{pointNumber+1}</b><br>"
+                    "%{customdata[2]}<br>"
+                    "%{customdata[0]} · %{customdata[1]}<br>"
                     "Capital cumulé : <b>%{y:+,.2f}$</b><extra></extra>"
                 ),
                 customdata=list(zip(
                     df_s["symbol"].tolist(),
                     df_s["direction"].tolist(),
+                    pos_labels,
                 )),
                 showlegend=False,
             ))
@@ -607,18 +615,20 @@ if st.session_state.page == "dashboard":
         with r2c1:
             _card("P&L par Position", f"{n_pos} trades — 1 barre = 1 position")
             fig_tl = go.Figure(go.Bar(
-                x=pos_labels,
+                x=pos_idx,
                 y=df_s["pnl"].tolist(),
                 marker_color=[_win if p>0 else _loss for p in df_s["pnl"]],
-                marker_opacity=0.75,
+                marker_opacity=0.8,
                 hovertemplate=(
-                    "<b>#%{pointNumber+1} · %{x}</b><br>"
-                    "%{customdata[0]} %{customdata[1]}<br>"
+                    "<b>Position #%{pointNumber+1}</b><br>"
+                    "%{customdata[2]}<br>"
+                    "%{customdata[0]} · %{customdata[1]}<br>"
                     "P&L : <b>%{y:+,.2f}$</b><extra></extra>"
                 ),
                 customdata=list(zip(
                     df_s["symbol"].tolist(),
                     df_s["direction"].tolist(),
+                    pos_labels,
                 )),
                 showlegend=False,
             ))
