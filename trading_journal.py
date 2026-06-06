@@ -549,11 +549,7 @@ if st.session_state.page == "dashboard":
 
         def _xaxis_pos(n):
             return dict(
-                tickmode="array",
-                tickvals=_tick_vals,
-                ticktext=_tick_text,
-                tickangle=-35,
-                tickfont=dict(size=10, color=_text),
+                showticklabels=False,   # pas de labels sur l'axe X
                 rangeslider=dict(visible=True, thickness=0.04,
                                  bgcolor="#0d111d", bordercolor=_grid, borderwidth=1),
             )
