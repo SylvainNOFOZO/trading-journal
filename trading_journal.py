@@ -92,9 +92,21 @@ hr { border-color:#1e2535 !important; }
 
 STRATEGIES   = ["Breakout","Retracement","Support","Tendance","Range","Divergence","Scalping","News"]
 MOODS        = ["Euphorique","Confiant","Neutre","Anxieux","Peureux","Frustré"]
-SYMBOLS      = ["EUR/USD","GBP/USD","USD/JPY","USD/CHF","AUD/USD","NZD/USD","USD/CAD",
-                "EUR/GBP","EUR/JPY","GBP/JPY","NAS100","SP500","DOW30","DAX40","FTSE100",
-                "GOLD","SILVER","BTC/USD","ETH/USD","OIL","Autre"]
+SYMBOLS = [
+    # Forex majeurs
+    "EUR/USD","GBP/USD","USD/JPY","USD/CHF","AUD/USD","NZD/USD","USD/CAD",
+    # Forex croisés
+    "EUR/GBP","EUR/JPY","EUR/CHF","EUR/AUD","EUR/CAD",
+    "GBP/JPY","GBP/CHF","GBP/CAD","AUD/JPY","CAD/JPY","CHF/JPY","AUD/NZD",
+    # Indices
+    "NAS100","SP500","DOW30","DAX40","FTSE100","CAC40","NIKKEI","ASX200",
+    # Matières premières
+    "GOLD","SILVER","OIL","GAS","COPPER","PLATINUM",
+    # Crypto
+    "BTC/USD","ETH/USD","XRP/USD","SOL/USD","BNB/USD","LTC/USD","ADA/USD",
+    # Autre
+    "Autre",
+]
 MOOD_EMOJI   = {"Euphorique":"🚀","Confiant":"😊","Neutre":"😐","Anxieux":"😰","Peureux":"😨","Frustré":"😤"}
 MOOD_ICON = {
     "Euphorique": ('<i class="fa-solid fa-rocket"     style="color:#00d4aa"></i>', "#00d4aa"),
@@ -109,14 +121,44 @@ def mood_html(mood):
     return f'<span title="{mood}" style="display:inline-flex;align-items:center;gap:5px">{icon}</span>'
 CHART_COLORS = ["#00d4aa","#7c6aff","#ff9f43","#ff4d6d","#54a0ff","#5f27cd","#00cec9","#fdcb6e"]
 TRADE_MODES  = ["Réel", "Démo"]
-SYM_MAP = {
+# Mapping universel : nom broker → nom normalisé
+# Exness utilise le suffixe "m" (ex: XAUUSDm, BTCUSDm)
+_BASE_PAIRS = {
     "EURUSD":"EUR/USD","GBPUSD":"GBP/USD","USDJPY":"USD/JPY","USDCHF":"USD/CHF",
     "AUDUSD":"AUD/USD","NZDUSD":"NZD/USD","USDCAD":"USD/CAD","EURGBP":"EUR/GBP",
     "EURJPY":"EUR/JPY","GBPJPY":"GBP/JPY","EURCAD":"EUR/CAD","AUDCAD":"AUD/CAD",
-    "XAUUSD":"GOLD","XAGUSD":"SILVER","BTCUSD":"BTC/USD","ETHUSD":"ETH/USD",
-    "US30":"DOW30","US500":"SP500","SP500":"SP500","USTEC":"NAS100","NAS100":"NAS100",
-    "UK100":"FTSE100","GER40":"DAX40","FRA40":"CAC40","USOIL":"OIL","UKOIL":"OIL","WTI":"OIL",
+    "AUDNZD":"AUD/NZD","GBPCAD":"GBP/CAD","GBPCHF":"GBP/CHF","EURCHF":"EUR/CHF",
+    "EURAUD":"EUR/AUD","EURCAD":"EUR/CAD","CADJPY":"CAD/JPY","CHFJPY":"CHF/JPY",
+    "XAUUSD":"GOLD","XAGUSD":"SILVER","XPTUSD":"PLATINUM",
+    "BTCUSD":"BTC/USD","ETHUSD":"ETH/USD","LTCUSD":"LTC/USD","XRPUSD":"XRP/USD",
+    "BNBUSD":"BNB/USD","SOLUSD":"SOL/USD","ADAUSD":"ADA/USD","DOTUSD":"DOT/USD",
+    "US30":"DOW30","US500":"SP500","SP500":"SP500","SPX500":"SP500",
+    "USTEC":"NAS100","NAS100":"NAS100","NASDAQ":"NAS100","US100":"NAS100",
+    "UK100":"FTSE100","GER40":"DAX40","GER30":"DAX40","FRA40":"CAC40",
+    "JPN225":"NIKKEI","AUS200":"ASX200","HK50":"HK50",
+    "USOIL":"OIL","UKOIL":"OIL","WTI":"OIL","BRENT":"OIL","NGAS":"GAS",
+    "COPPER":"COPPER",
 }
+# Générer automatiquement les variantes avec suffixe "m" (Exness)
+SYM_MAP = {}
+for k, v in _BASE_PAIRS.items():
+    SYM_MAP[k]        = v   # standard
+    SYM_MAP[k + "m"]  = v   # Exness suffixe "m"
+    SYM_MAP[k + "M"]  = v   # majuscule
+    SYM_MAP[k + ".m"] = v   # point + m
+    SYM_MAP[k + "_m"] = v   # underscore + m
+# Cas spéciaux Exness
+SYM_MAP.update({
+    "XAUUSDm":"GOLD","XAGUSDm":"SILVER",
+    "BTCUSDm":"BTC/USD","ETHUSDm":"ETH/USD",
+    "USTECm":"NAS100","US30m":"DOW30","US500m":"SP500",
+    "GER40m":"DAX40","UK100m":"FTSE100","FRA40m":"CAC40",
+    "USOILm":"OIL","UKOILm":"OIL",
+    "EURUSDm":"EUR/USD","GBPUSDm":"GBP/USD","USDJPYm":"USD/JPY",
+    "USDCHFm":"USD/CHF","AUDUSDm":"AUD/USD","NZDUSDm":"NZD/USD",
+    "USDCADm":"USD/CAD","EURGBPm":"EUR/GBP","EURJPYm":"EUR/JPY",
+    "GBPJPYm":"GBP/JPY","XRPUSDm":"XRP/USD","SOLUSDm":"SOL/USD",
+})
 PLOTLY_LAYOUT = dict(
     paper_bgcolor="#111520", plot_bgcolor="#111520",
     font=dict(color="#6b7894", family="DM Sans, sans-serif"),
@@ -1355,15 +1397,6 @@ elif st.session_state.page == "import":
             st.warning("Aucun trade fermé détecté."); st.stop()
 
         # ── Construction trades + aperçu détaillé ────────────────────────────
-        SYM_MAP_L = {
-            "EURUSD":"EUR/USD","GBPUSD":"GBP/USD","USDJPY":"USD/JPY","USDCHF":"USD/CHF",
-            "AUDUSD":"AUD/USD","NZDUSD":"NZD/USD","USDCAD":"USD/CAD","EURGBP":"EUR/GBP",
-            "EURJPY":"EUR/JPY","GBPJPY":"GBP/JPY","EURCAD":"EUR/CAD","AUDCAD":"AUD/CAD",
-            "XAUUSD":"GOLD","XAGUSD":"SILVER","BTCUSD":"BTC/USD","ETHUSD":"ETH/USD",
-            "US30":"DOW30","US500":"SP500","SP500":"SP500","USTEC":"NAS100","NAS100":"NAS100",
-            "UK100":"FTSE100","GER40":"DAX40","FRA40":"CAC40","USOIL":"OIL","UKOIL":"OIL",
-        }
-
         new_trades = []; skipped = 0
         preview_rows = []   # pour tableau de vérification
 
@@ -1383,8 +1416,8 @@ elif st.session_state.page == "import":
                 except: parsed_date = str(date.today())
 
                 # Symbole
-                sym_raw = rv(col_symbol,"UNKNOWN").strip().upper()
-                symbol  = SYM_MAP_L.get(sym_raw, sym_raw)
+                sym_raw = rv(col_symbol,"UNKNOWN").strip()
+                symbol  = norm_symbol(sym_raw)
 
                 # Direction
                 direction = "LONG"
