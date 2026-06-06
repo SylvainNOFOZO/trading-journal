@@ -483,13 +483,14 @@ if st.session_state.page == "dashboard":
                 **kwargs
             )
 
-        def _style_axes(fig, xprefix="", yprefix="", xtickangle=0):
+        def _style_axes(fig, xprefix="", yprefix="", xtickangle=0, free_y=False):
             fig.update_xaxes(gridcolor=_grid, linecolor=_grid, tickcolor=_grid,
                              tickprefix=xprefix, tickangle=xtickangle,
                              showline=True, zeroline=False)
             fig.update_yaxes(gridcolor=_grid, linecolor=_grid, tickcolor=_grid,
                              tickprefix=yprefix, showline=True, zeroline=True,
-                             zerolinecolor="#2a3248", zerolinewidth=1)
+                             zerolinecolor="#2a3248", zerolinewidth=1,
+                             fixedrange=not free_y)
 
         def _card(title, subtitle=""):
             sub_html = f' <span style="font-size:12px;color:#6b7894">{subtitle}</span>' if subtitle else ""
@@ -585,8 +586,9 @@ if st.session_state.page == "dashboard":
             ))
             fig_eq.add_hline(y=0, line_color=_grid, line_width=1)
             fig_eq.update_layout(**_base_layout(height=300))
-            _style_axes(fig_eq, yprefix="$")
+            _style_axes(fig_eq, yprefix="$", free_y=True)
             fig_eq.update_xaxes(**_xaxis_pos(n_pos))
+            fig_eq.update_layout(dragmode="zoom")
             st.plotly_chart(fig_eq, use_container_width=True, config=_chart_cfg)
 
         with r1c2:
@@ -634,8 +636,9 @@ if st.session_state.page == "dashboard":
             ))
             fig_tl.add_hline(y=0, line_color=_grid, line_width=1)
             fig_tl.update_layout(**_base_layout(height=280))
-            _style_axes(fig_tl, yprefix="$")
+            _style_axes(fig_tl, yprefix="$", free_y=True)
             fig_tl.update_xaxes(**_xaxis_pos(n_pos))
+            fig_tl.update_layout(dragmode="zoom")
             st.plotly_chart(fig_tl, use_container_width=True, config=_chart_cfg)
 
         with r2c2:
