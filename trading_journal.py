@@ -603,22 +603,19 @@ if st.session_state.page == "dashboard":
                     rr_smooth = pd.Series(df_rr["rr"].values).rolling(
                         window=min(5,len(df_rr)), min_periods=1).mean()
                     fig_rr.add_trace(go.Scatter(
-                        x=df_rr["date"].tolist(), y=rr_smooth.tolist(),
-                        mode="lines", name="Moyenne mobile",
-                        line=dict(color=_alt, width=2, dash="dash"),
+                        x=x_rr, y=rr_smooth.tolist(),
+                        mode="lines", name="Tendance",
+                        line=dict(color=_alt, width=1.5, dash="dash"),
                         hoverinfo="skip",
                     ))
                 # Points R:R
+                x_rr, _ = get_x_axis(df_rr)
                 fig_rr.add_trace(go.Scatter(
-                    x=df_rr["date"].tolist(), y=df_rr["rr"].tolist(),
-                    mode="markers+text",
-                    marker=dict(color=rr_colors, size=10,
-                                line=dict(color=_bg, width=1.5),
-                                symbol="circle"),
-                    text=[f"{r:.1f}R" for r in df_rr["rr"]],
-                    textposition="top center",
-                    textfont=dict(size=9, color=_text),
-                    hovertemplate="<b>%{x}</b><br>%{customdata[0]} · %{customdata[1]}<br>R:R : %{y:.2f}<extra></extra>",
+                    x=x_rr, y=df_rr["rr"].tolist(),
+                    mode="markers",
+                    marker=dict(color=rr_colors, size=9,
+                                line=dict(color=_bg, width=1.5)),
+                    hovertemplate="<b>%{x}</b><br>%{customdata[0]} %{customdata[1]}<br>R:R : %{y:.2f}<extra></extra>",
                     customdata=list(zip(df_rr["symbol"].tolist(), df_rr["direction"].tolist())),
                     name="R:R",
                 ))
@@ -1205,8 +1202,14 @@ elif st.session_state.page == "add":
 
         if st.form_submit_button("Sauvegarder" if is_edit else "Enregistrer le Trade", use_container_width=True):
             ex    = next((t for t in st.session_state.trades if t["id"]==st.session_state.edit_id),None)
+            # Construire le datetime complet pour l'intraday
+            _time_clean = d_time.strip() if d_time.strip() else "00:00"
+            try: datetime.strptime(_time_clean, "%H:%M")
+            except: _time_clean = "00:00"
+            _dt_str = f"{d_date}T{_time_clean}"
             new_t = {"id":ex["id"] if is_edit else int(datetime.now().timestamp()*1000),
-                "date":str(d_date),"symbol":d_sym,"direction":d_dir,"trade_mode":d_mode,
+                "date":str(d_date),"time":_time_clean,"datetime":_dt_str,
+                "symbol":d_sym,"direction":d_dir,"trade_mode":d_mode,
                 "entry":d_entry,"exit":d_exit,"sl":d_sl,"tp":d_tp,"pnl":d_pnl,
                 "strategy":d_strat,"mood":d_mood,"notes":d_notes}
             if is_edit:
@@ -1448,9 +1451,20 @@ elif st.session_state.page == "import":
                 if swap_raw: parts.append(f"swap:{swap_raw:.2f}")
                 notes_str = "Import MT5" + (" · "+" · ".join(parts) if parts else "")
 
+                # Extraire l'heure depuis open_time
+                _time_str = "00:00"
+                try:
+                    _dt_parsed = pd.to_datetime(rv(col_open_time, str(date.today())))
+                    _time_str  = _dt_parsed.strftime("%H:%M")
+                    _dt_full   = _dt_parsed.strftime("%Y-%m-%dT%H:%M")
+                except:
+                    _dt_full = f"{parsed_date}T00:00"
+
                 new_trades.append({
                     "id":         int(datetime.now().timestamp()*1000000)+len(new_trades),
                     "date":       parsed_date,
+                    "time":       _time_str,
+                    "datetime":   _dt_full,
                     "symbol":     symbol,
                     "direction":  direction,
                     "trade_mode": imp_mode,
