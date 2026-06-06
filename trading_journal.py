@@ -508,43 +508,78 @@ if st.session_state.page == "dashboard":
                     return x.tolist(), "Date · Heure"
             return df_sorted["date"].tolist(), "Date"
 
-        x_eq, x_eq_lbl = _get_x(df_s)
+        # ════════════════════════════════════════════════════════════════════
+        # AXE X : une entrée unique PAR POSITION (jamais agrégé)
+        # ════════════════════════════════════════════════════════════════════
+        # Construire des labels de position uniques : "DD/MM HH:MM · SYMBOL"
+        def _position_labels(df_sorted):
+            labels = []
+            for i, (_, row) in enumerate(df_sorted.iterrows()):
+                if "datetime" in df_sorted.columns and pd.notna(row.get("datetime",""))                         and str(row.get("datetime","")) not in ("","nan","NaT"):
+                    try:
+                        dt = pd.to_datetime(row["datetime"])
+                        lbl = dt.strftime("%d/%m %H:%M")
+                    except:
+                        lbl = str(row["date"])
+                else:
+                    lbl = str(row["date"])
+                # Rendre unique si plusieurs trades même instant
+                lbl_unique = f"{lbl} · {row['symbol']}"
+                labels.append(lbl_unique)
+            return labels
+
+        pos_labels = _position_labels(df_s)   # un label par position
+        n_pos      = len(pos_labels)
+
+        # Config commune pour les graphiques en bâtons par position
+        _chart_cfg = {
+            "scrollZoom": True,
+            "displayModeBar": True,
+            "modeBarButtonsToRemove": ["lasso2d","select2d"],
+            "toImageButtonOptions": {"format":"png","scale":2},
+        }
+
+        def _xaxis_pos(n_labels):
+            """Axe X adapté au nombre de positions."""
+            return dict(
+                type="category",           # catégoriel → 1 barre = 1 position
+                tickangle=-45,
+                tickfont=dict(size=10, color=_text),
+                rangeslider=dict(visible=True, thickness=0.05,
+                                 bgcolor="#0d111d", bordercolor=_grid, borderwidth=1),
+                # Afficher un tick tous les N pour ne pas surcharger
+                nticks=min(n_labels, 20),
+            )
 
         # ════════════════════════════════════════════════════════════════════
-        # ROW 1 : Courbe capital (barres) + Win/Loss
+        # ROW 1 : Capital cumulé + Win/Loss
         # ════════════════════════════════════════════════════════════════════
         st.markdown("### Performance dans le temps")
         r1c1, r1c2 = st.columns([3,2])
 
         with r1c1:
-            _card("Courbe de Capital", x_eq_lbl)
-            # Barres en bâtons : chaque trade = une barre de la hauteur du capital cumulé
+            _card("Capital Cumulé par Position")
             fig_eq = go.Figure(go.Bar(
-                x=x_eq,
+                x=pos_labels,
                 y=cumul.tolist(),
                 marker_color=[_win if v >= 0 else _loss for v in cumul],
                 marker_opacity=0.75,
                 hovertemplate=(
-                    "<b>%{x}</b><br>"
+                    "<b>#%{pointNumber+1} · %{x}</b><br>"
                     "%{customdata[0]} %{customdata[1]}<br>"
-                    "Capital cumulé : %{y:+,.2f}$<extra></extra>"
+                    "Capital cumulé : <b>%{y:+,.2f}$</b><extra></extra>"
                 ),
-                customdata=list(zip(df_s["symbol"].tolist(), df_s["direction"].tolist())),
+                customdata=list(zip(
+                    df_s["symbol"].tolist(),
+                    df_s["direction"].tolist(),
+                )),
                 showlegend=False,
             ))
             fig_eq.add_hline(y=0, line_color=_grid, line_width=1)
             fig_eq.update_layout(**_base_layout(height=300))
             _style_axes(fig_eq, yprefix="$")
-            fig_eq.update_xaxes(
-                rangeslider=dict(visible=True, thickness=0.06, bgcolor="#0d111d",
-                                 bordercolor=_grid, borderwidth=1),
-                tickformat="%d/%m %H:%M" if x_eq_lbl == "Date · Heure" else "%d/%m/%Y",
-                tickangle=-30,
-            )
-            st.plotly_chart(fig_eq, use_container_width=True,
-                            config={"scrollZoom": True, "displayModeBar": True,
-                                    "modeBarButtonsToRemove": ["lasso2d","select2d"],
-                                    "toImageButtonOptions": {"format":"png","scale":2}})
+            fig_eq.update_xaxes(**_xaxis_pos(n_pos))
+            st.plotly_chart(fig_eq, use_container_width=True, config=_chart_cfg)
 
         with r1c2:
             _card("Win / Loss")
@@ -565,38 +600,33 @@ if st.session_state.page == "dashboard":
             st.plotly_chart(fig_pie, use_container_width=True)
 
         # ════════════════════════════════════════════════════════════════════
-        # ROW 2 : P&L par trade (barres) + P&L mensuel
+        # ROW 2 : P&L par position + P&L mensuel
         # ════════════════════════════════════════════════════════════════════
         r2c1, r2c2 = st.columns([3,2])
 
         with r2c1:
-            _card("P&L par Trade", x_eq_lbl)
+            _card("P&L par Position", f"{n_pos} trades — 1 barre = 1 position")
             fig_tl = go.Figure(go.Bar(
-                x=x_eq,
+                x=pos_labels,
                 y=df_s["pnl"].tolist(),
                 marker_color=[_win if p>0 else _loss for p in df_s["pnl"]],
                 marker_opacity=0.75,
                 hovertemplate=(
-                    "<b>%{x}</b><br>"
+                    "<b>#%{pointNumber+1} · %{x}</b><br>"
                     "%{customdata[0]} %{customdata[1]}<br>"
-                    "P&L : %{y:+,.2f}$<extra></extra>"
+                    "P&L : <b>%{y:+,.2f}$</b><extra></extra>"
                 ),
-                customdata=list(zip(df_s["symbol"].tolist(), df_s["direction"].tolist())),
+                customdata=list(zip(
+                    df_s["symbol"].tolist(),
+                    df_s["direction"].tolist(),
+                )),
                 showlegend=False,
             ))
             fig_tl.add_hline(y=0, line_color=_grid, line_width=1)
             fig_tl.update_layout(**_base_layout(height=280))
             _style_axes(fig_tl, yprefix="$")
-            fig_tl.update_xaxes(
-                rangeslider=dict(visible=True, thickness=0.06, bgcolor="#0d111d",
-                                 bordercolor=_grid, borderwidth=1),
-                tickformat="%d/%m %H:%M" if x_eq_lbl == "Date · Heure" else "%d/%m/%Y",
-                tickangle=-30,
-            )
-            st.plotly_chart(fig_tl, use_container_width=True,
-                            config={"scrollZoom": True, "displayModeBar": True,
-                                    "modeBarButtonsToRemove": ["lasso2d","select2d"],
-                                    "toImageButtonOptions": {"format":"png","scale":2}})
+            fig_tl.update_xaxes(**_xaxis_pos(n_pos))
+            st.plotly_chart(fig_tl, use_container_width=True, config=_chart_cfg)
 
         with r2c2:
             _card("P&L Mensuel")
