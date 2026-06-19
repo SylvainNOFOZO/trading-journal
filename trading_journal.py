@@ -1391,36 +1391,60 @@ elif st.session_state.page == "import":
 
         # ── Détection colonnes MT5 ────────────────────────────────────────────
         import re as _re
-        def norm_c(s): return _re.sub(r"[\s/_\-]+","_",str(s).strip().lower())
+        def norm_c(s): return _re.sub(r"[\s/_.\-]+","_",str(s).strip().lower())
         col_idx = {norm_c(c): c for c in df_raw.columns}
         def fc(*candidates):
             for cand in candidates:
                 k = norm_c(cand)
                 if k in col_idx: return col_idx[k]
-            for cand in candidates:
-                k = norm_c(cand)
-                for ck, cv in col_idx.items():
-                    if k in ck or ck in k: return cv
             return None
 
+        def norm_symbol(raw):
+            """Normalise un nom de symbole broker (Exness, etc.) vers le nom standard.
+            Gère les suffixes m/M/.m/_m/pro/ecn ajoutés par certains brokers."""
+            s = str(raw).strip().upper()
+            if s in SYM_MAP:
+                return SYM_MAP[s]
+            for suffix in ["M", ".M", "_M", "PRO", "ECN", "RAW"]:
+                if s.endswith(suffix):
+                    base = s[:-len(suffix)]
+                    if base in SYM_MAP:
+                        return SYM_MAP[base]
+            return s
+
+        # Note: pandas renomme automatiquement les colonnes dupliquées
+        # "Time" → "Time" + "Time.1", "Price" → "Price" + "Price.1"
         col_open_time  = fc("time","time_1","open_time","open time","date")
+        col_close_time = fc("time.1","time_2","close_time","close time")
         col_position   = fc("position","deal","ticket","order","pos")
         col_symbol     = fc("symbol","asset","instrument","pair")
         col_type       = fc("type","action","order_type","operation")
         col_volume     = fc("volume","vol","lots","size","quantity")
         col_open_price = fc("price","price_1","open_price","entry_price","entry price")
-        col_close_price= fc("price_2","close_price","exit_price","exit price")
+        col_close_price= fc("price.1","price_2","close_price","exit_price","exit price")
         col_sl         = fc("s / l","s/l","sl","stop_loss","stoploss","stop loss")
         col_tp         = fc("t / p","t/p","tp","take_profit","takeprofit","take profit")
         col_commission = fc("commission","comm","fee","fees")
         col_swap       = fc("swap","rollover")
         col_profit     = fc("profit","p&l","result","net_profit","net profit")
 
+        # Si col_close_price n'a pas été trouvée mais qu'il y a 2 colonnes "Price",
+        # prendre la 2e occurrence directement (gestion robuste du mangling pandas)
+        if not col_close_price:
+            price_cols = [c for c in df_raw.columns if norm_c(c).startswith("price")]
+            if len(price_cols) >= 2:
+                col_close_price = price_cols[1]
+        if not col_close_time:
+            time_cols = [c for c in df_raw.columns if norm_c(c).startswith("time")]
+            if len(time_cols) >= 2:
+                col_close_time = time_cols[1]
+
         # Diagnostic
         with st.expander(f"Colonnes détectées ({len(df_raw.columns)})", expanded=False):
             d1, d2 = st.columns(2)
             mapping = [
                 ("Open Time",    col_open_time),
+                ("Close Time",   col_close_time),
                 ("Position ID",  col_position),
                 ("Symbol",       col_symbol),
                 ("Type",         col_type),
