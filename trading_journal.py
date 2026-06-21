@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import date, datetime
 import json, os, base64, requests, io
+import calendar as _calmod
 
 st.set_page_config(page_title="Trading Journal Pro", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
@@ -365,6 +366,8 @@ with st.sidebar:
         st.session_state.page="add";       st.session_state.edit_id=None; st.rerun()
     if st.button("  Importer MT5",  icon=":material/upload_file:",  use_container_width=True):
         st.session_state.page="import";    st.session_state.edit_id=None; st.rerun()
+    if st.button("  Calendrier",    icon=":material/calendar_month:", use_container_width=True):
+        st.session_state.page="calendar";  st.session_state.edit_id=None; st.rerun()
     if st.button("  Synchroniser",  icon=":material/sync:",  use_container_width=True):
         force_reload(); st.success("Données rechargées."); st.rerun()
 
@@ -1636,3 +1639,318 @@ elif st.session_state.page == "import":
             st.success(f"{len(new_trades)} trades importés ({imp_mode}) — " +
                        ("synchronisés." if ok else "erreur sync GitHub."))
             st.session_state.page = "dashboard"; st.rerun()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE : CALENDRIER
+# ══════════════════════════════════════════════════════════════════════════════
+elif st.session_state.page == "calendar":
+    st.markdown("# Calendrier de Performance")
+    mode_banner()
+
+    df_cal = get_df(st.session_state.mode_filter)
+
+    if df_cal.empty:
+        st.warning("Aucun trade enregistré.")
+    else:
+        df_cal = df_cal.copy()
+        df_cal["_dt"] = pd.to_datetime(df_cal["date"])
+
+        # ── Couleur selon intensité du P&L ──────────────────────────────────
+        def _pnl_color(value, max_abs):
+            if value == 0 or max_abs == 0:
+                return "#13161f", "#3d4760", "rgba(255,255,255,0.04)"
+            intensity = min(abs(value) / max_abs, 1.0)
+            alpha = 0.18 + 0.55 * intensity
+            if value > 0:
+                return f"rgba(0,212,170,{alpha:.2f})", "#e8ecf4", "rgba(0,212,170,0.35)"
+            else:
+                return f"rgba(255,77,109,{alpha:.2f})", "#e8ecf4", "rgba(255,77,109,0.35)"
+
+        # ── Sélecteur de granularité ─────────────────────────────────────────
+        gc1, gc2, gc3 = st.columns([2, 2, 3])
+        with gc1:
+            granularity = st.selectbox(
+                "Vue", ["Jour", "Semaine", "Mois", "Année"],
+                index=["Jour","Semaine","Mois","Année"].index(
+                    st.session_state.get("cal_gran", "Jour")
+                ),
+                key="cal_gran_sel"
+            )
+            st.session_state.cal_gran = granularity
+
+        years_avail = sorted(df_cal["_dt"].dt.year.unique().tolist(), reverse=True)
+        if "cal_year" not in st.session_state:
+            st.session_state.cal_year = years_avail[0] if years_avail else date.today().year
+        if "cal_month" not in st.session_state:
+            st.session_state.cal_month = date.today().month
+
+        # ── Navigation contextuelle selon la vue ────────────────────────────
+        if granularity == "Jour":
+            with gc2:
+                nav1, nav2, nav3 = st.columns([1, 3, 1])
+                with nav1:
+                    if st.button("←", use_container_width=True, key="cal_prev_m"):
+                        m, y = st.session_state.cal_month, st.session_state.cal_year
+                        m -= 1
+                        if m == 0: m = 12; y -= 1
+                        st.session_state.cal_month, st.session_state.cal_year = m, y
+                        st.rerun()
+                with nav2:
+                    mois_fr = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet",
+                               "Août","Septembre","Octobre","Novembre","Décembre"]
+                    st.markdown(
+                        f'<div style="text-align:center;padding-top:6px;font-weight:700;font-size:15px">'
+                        f'{mois_fr[st.session_state.cal_month-1]} {st.session_state.cal_year}</div>',
+                        unsafe_allow_html=True
+                    )
+                with nav3:
+                    if st.button("→", use_container_width=True, key="cal_next_m"):
+                        m, y = st.session_state.cal_month, st.session_state.cal_year
+                        m += 1
+                        if m == 13: m = 1; y += 1
+                        st.session_state.cal_month, st.session_state.cal_year = m, y
+                        st.rerun()
+        elif granularity in ("Semaine", "Mois"):
+            with gc2:
+                sel_year = st.selectbox(
+                    "Année", years_avail,
+                    index=years_avail.index(st.session_state.cal_year)
+                          if st.session_state.cal_year in years_avail else 0,
+                    key="cal_year_sel"
+                )
+                st.session_state.cal_year = sel_year
+
+        st.markdown("---")
+
+        # ════════════════════════════════════════════════════════════════════
+        # VUE JOUR — Calendrier mensuel avec totaux hebdomadaires
+        # ════════════════════════════════════════════════════════════════════
+        if granularity == "Jour":
+            year  = st.session_state.cal_year
+            month = st.session_state.cal_month
+
+            df_month = df_cal[(df_cal["_dt"].dt.year == year) & (df_cal["_dt"].dt.month == month)]
+            day_agg  = df_month.groupby(df_month["_dt"].dt.day).agg(
+                pnl=("pnl", "sum"), trades=("pnl", "count")
+            )
+            max_abs  = day_agg["pnl"].abs().max() if not day_agg.empty else 1
+
+            cal_obj = _calmod.Calendar(firstweekday=6)  # Dimanche en premier
+            weeks   = cal_obj.monthdayscalendar(year, month)
+
+            # KPIs résumé du mois
+            month_total  = day_agg["pnl"].sum() if not day_agg.empty else 0
+            month_trades = int(day_agg["trades"].sum()) if not day_agg.empty else 0
+            active_days  = len(day_agg)
+            mc1, mc2, mc3 = st.columns(3)
+            with mc1: kpi('<i class="fa-solid fa-coins"></i>', "P&L du mois", fmt(month_total),
+                          f"{month_trades} trades", "#00d4aa" if month_total>=0 else "#ff4d6d")
+            with mc2: kpi('<i class="fa-solid fa-calendar-check"></i>', "Jours actifs", str(active_days),
+                          f"sur {len(weeks)*7} jours du calendrier", "#7c6aff")
+            with mc3:
+                avg_day = month_total/active_days if active_days else 0
+                kpi('<i class="fa-solid fa-chart-line"></i>', "Moyenne / jour actif", fmt(avg_day),
+                    "P&L moyen", "#ff9f43")
+            st.markdown(" ")
+
+            # Construction HTML du calendrier
+            html = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:separate;border-spacing:6px">'
+            html += '<thead><tr>'
+            for d in ["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"]:
+                html += f'<th style="color:#6b7894;font-size:11px;font-weight:700;padding:6px;text-transform:uppercase;letter-spacing:.5px">{d}</th>'
+            html += '<th style="color:#6b7894;font-size:11px;font-weight:700;padding:6px;text-transform:uppercase;letter-spacing:.5px">Semaine</th>'
+            html += '</tr></thead><tbody>'
+
+            today_iso = date.today().isoformat()
+
+            for week in weeks:
+                week_pnl, week_trades, week_active = 0, 0, 0
+                row = "<tr>"
+                for day in week:
+                    if day == 0:
+                        row += '<td style="background:#0a0c12;border-radius:10px;height:78px"></td>'
+                        continue
+                    cell_date = date(year, month, day).isoformat()
+                    is_today  = cell_date == today_iso
+                    border_today = "2px solid #00d4aa" if is_today else "1px solid rgba(255,255,255,0.04)"
+
+                    if day in day_agg.index:
+                        pnl_v    = day_agg.loc[day, "pnl"]
+                        trades_v = int(day_agg.loc[day, "trades"])
+                        week_pnl += pnl_v; week_trades += trades_v; week_active += 1
+                        bg, text_col, _ = _pnl_color(pnl_v, max_abs)
+                        row += f'''<td style="background:{bg};border-radius:10px;height:78px;
+                            padding:8px;vertical-align:top;border:{border_today}">
+                            <div style="font-size:10px;color:#8892a4">{day}</div>
+                            <div style="font-size:13px;font-weight:800;color:{text_col};
+                                font-family:'JetBrains Mono',monospace;margin-top:6px">{fmt(pnl_v)}</div>
+                            <div style="font-size:9px;color:#8892a4;margin-top:3px">
+                                {trades_v} trade{"s" if trades_v>1 else ""}</div>
+                        </td>'''
+                    else:
+                        row += f'''<td style="background:#111520;border-radius:10px;height:78px;
+                            padding:8px;vertical-align:top;border:{border_today}">
+                            <div style="font-size:10px;color:#3d4760">{day}</div>
+                        </td>'''
+                # Cellule total semaine
+                if week_active > 0:
+                    wcol = "#00d4aa" if week_pnl >= 0 else "#ff4d6d"
+                    wbg  = "rgba(0,212,170,0.10)" if week_pnl >= 0 else "rgba(255,77,109,0.10)"
+                    wpnl_txt = fmt(week_pnl)
+                else:
+                    wcol = "#3d4760"; wbg = "#0d111d"; wpnl_txt = "—"
+                row += f'''<td style="background:{wbg};border-radius:10px;height:78px;
+                    padding:8px;vertical-align:top;border:1px solid {wcol}33">
+                    <div style="font-size:9px;color:#6b7894;text-transform:uppercase">Total</div>
+                    <div style="font-size:13px;font-weight:800;color:{wcol};
+                        font-family:'JetBrains Mono',monospace;margin-top:6px">{wpnl_txt}</div>
+                    <div style="font-size:9px;color:#8892a4;margin-top:3px">
+                        {week_trades} trade{"s" if week_trades!=1 else ""}</div>
+                </td>'''
+                row += "</tr>"
+                html += row
+            html += '</tbody></table></div>'
+
+            st.markdown(html, unsafe_allow_html=True)
+
+        # ════════════════════════════════════════════════════════════════════
+        # VUE SEMAINE — Grille des semaines de l'année
+        # ════════════════════════════════════════════════════════════════════
+        elif granularity == "Semaine":
+            year = st.session_state.cal_year
+            df_year = df_cal[df_cal["_dt"].dt.year == year].copy()
+            df_year["_week"] = df_year["_dt"].dt.isocalendar().week
+            week_agg = df_year.groupby("_week").agg(pnl=("pnl","sum"), trades=("pnl","count"))
+            max_abs  = week_agg["pnl"].abs().max() if not week_agg.empty else 1
+
+            total_y  = week_agg["pnl"].sum() if not week_agg.empty else 0
+            trades_y = int(week_agg["trades"].sum()) if not week_agg.empty else 0
+            active_w = len(week_agg)
+            mc1, mc2, mc3 = st.columns(3)
+            with mc1: kpi('<i class="fa-solid fa-coins"></i>', f"P&L {year}", fmt(total_y),
+                          f"{trades_y} trades", "#00d4aa" if total_y>=0 else "#ff4d6d")
+            with mc2: kpi('<i class="fa-solid fa-calendar-week"></i>', "Semaines actives", str(active_w),
+                          "sur 52-53 semaines", "#7c6aff")
+            with mc3:
+                avg_w = total_y/active_w if active_w else 0
+                kpi('<i class="fa-solid fa-chart-line"></i>', "Moyenne / semaine", fmt(avg_w),
+                    "P&L moyen", "#ff9f43")
+            st.markdown(" ")
+
+            html = '<div style="display:grid;grid-template-columns:repeat(13,1fr);gap:8px">'
+            for w in range(1, 54):
+                if w in week_agg.index:
+                    pnl_v = week_agg.loc[w,"pnl"]; trades_v = int(week_agg.loc[w,"trades"])
+                    bg, text_col, _ = _pnl_color(pnl_v, max_abs)
+                    pnl_txt = fmt(pnl_v)
+                else:
+                    bg = "#111520"; text_col = "#3d4760"; pnl_txt = "—"; trades_v = 0
+                html += f'''<div title="Semaine {w}, {trades_v} trades" style="background:{bg};
+                    border-radius:9px;padding:10px 4px;text-align:center;
+                    border:1px solid rgba(255,255,255,0.04)">
+                    <div style="font-size:9px;color:#6b7894">S{w}</div>
+                    <div style="font-size:11px;font-weight:800;color:{text_col};
+                        font-family:'JetBrains Mono',monospace;margin-top:4px">{pnl_txt}</div>
+                </div>'''
+            html += '</div>'
+            st.markdown(html, unsafe_allow_html=True)
+
+        # ════════════════════════════════════════════════════════════════════
+        # VUE MOIS — 12 cartes mensuelles
+        # ════════════════════════════════════════════════════════════════════
+        elif granularity == "Mois":
+            year = st.session_state.cal_year
+            df_year  = df_cal[df_cal["_dt"].dt.year == year]
+            month_agg = df_year.groupby(df_year["_dt"].dt.month).agg(
+                pnl=("pnl","sum"), trades=("pnl","count")
+            )
+            max_abs  = month_agg["pnl"].abs().max() if not month_agg.empty else 1
+            mois_fr  = ["Jan","Fév","Mar","Avr","Mai","Juin","Juil","Août","Sep","Oct","Nov","Déc"]
+
+            total_y  = month_agg["pnl"].sum() if not month_agg.empty else 0
+            trades_y = int(month_agg["trades"].sum()) if not month_agg.empty else 0
+            active_m = len(month_agg)
+            mc1, mc2, mc3 = st.columns(3)
+            with mc1: kpi('<i class="fa-solid fa-coins"></i>', f"P&L {year}", fmt(total_y),
+                          f"{trades_y} trades", "#00d4aa" if total_y>=0 else "#ff4d6d")
+            with mc2: kpi('<i class="fa-solid fa-calendar-days"></i>', "Mois actifs", str(active_m),
+                          "sur 12 mois", "#7c6aff")
+            with mc3:
+                avg_m = total_y/active_m if active_m else 0
+                kpi('<i class="fa-solid fa-chart-line"></i>', "Moyenne / mois", fmt(avg_m),
+                    "P&L moyen", "#ff9f43")
+            st.markdown(" ")
+
+            html = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">'
+            for m in range(1, 13):
+                if m in month_agg.index:
+                    pnl_v = month_agg.loc[m,"pnl"]; trades_v = int(month_agg.loc[m,"trades"])
+                    bg, text_col, border_col = _pnl_color(pnl_v, max_abs)
+                    pnl_txt = fmt(pnl_v)
+                else:
+                    bg = "#111520"; text_col = "#3d4760"; border_col = "rgba(255,255,255,0.04)"
+                    pnl_txt = "—"; trades_v = 0
+                html += f'''<div style="background:{bg};border-radius:14px;padding:18px;
+                    border:1px solid {border_col}">
+                    <div style="font-size:12px;color:#8892a4;text-transform:uppercase;
+                        letter-spacing:.5px">{mois_fr[m-1]} {year}</div>
+                    <div style="font-size:22px;font-weight:800;color:{text_col};
+                        font-family:'JetBrains Mono',monospace;margin-top:8px">{pnl_txt}</div>
+                    <div style="font-size:11px;color:#8892a4;margin-top:6px">
+                        {trades_v} trade{"s" if trades_v!=1 else ""}</div>
+                </div>'''
+            html += '</div>'
+            st.markdown(html, unsafe_allow_html=True)
+
+        # ════════════════════════════════════════════════════════════════════
+        # VUE ANNÉE — Cartes par année (historique complet)
+        # ════════════════════════════════════════════════════════════════════
+        elif granularity == "Année":
+            df_all_y  = df_cal.copy()
+            df_all_y["_year"] = df_all_y["_dt"].dt.year
+            year_agg  = df_all_y.groupby("_year").agg(
+                pnl=("pnl","sum"), trades=("pnl","count")
+            ).reset_index().sort_values("_year")
+            max_abs   = year_agg["pnl"].abs().max() if not year_agg.empty else 1
+
+            total_all  = year_agg["pnl"].sum()
+            trades_all = int(year_agg["trades"].sum())
+            mc1, mc2, mc3 = st.columns(3)
+            with mc1: kpi('<i class="fa-solid fa-coins"></i>', "P&L Total", fmt(total_all),
+                          f"{trades_all} trades", "#00d4aa" if total_all>=0 else "#ff4d6d")
+            with mc2: kpi('<i class="fa-solid fa-calendar"></i>', "Années actives", str(len(year_agg)),
+                          "années de trading", "#7c6aff")
+            with mc3:
+                avg_y = total_all/len(year_agg) if len(year_agg) else 0
+                kpi('<i class="fa-solid fa-chart-line"></i>', "Moyenne / année", fmt(avg_y),
+                    "P&L moyen", "#ff9f43")
+            st.markdown(" ")
+
+            html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px">'
+            for _, r in year_agg.iterrows():
+                bg, text_col, border_col = _pnl_color(r["pnl"], max_abs)
+                html += f'''<div style="background:{bg};border-radius:14px;padding:20px;
+                    border:1px solid {border_col}">
+                    <div style="font-size:13px;color:#8892a4">{int(r["_year"])}</div>
+                    <div style="font-size:24px;font-weight:800;color:{text_col};
+                        font-family:'JetBrains Mono',monospace;margin-top:8px">{fmt(r["pnl"])}</div>
+                    <div style="font-size:11px;color:#8892a4;margin-top:6px">
+                        {int(r["trades"])} trade{"s" if r["trades"]!=1 else ""}</div>
+                </div>'''
+            html += '</div>'
+            st.markdown(html, unsafe_allow_html=True)
+
+        # ── Légende couleur ──────────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown(
+            '<div style="display:flex;gap:24px;align-items:center;font-size:12px;color:#6b7894">'
+            '<span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;'
+            'background:rgba(0,212,170,0.65);margin-right:6px;vertical-align:middle"></span>Gain</span>'
+            '<span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;'
+            'background:rgba(255,77,109,0.65);margin-right:6px;vertical-align:middle"></span>Perte</span>'
+            '<span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;'
+            'background:#111520;margin-right:6px;vertical-align:middle;border:1px solid #1e2535"></span>'
+            'Aucun trade</span>'
+            '<span style="color:#8892a4">L\'intensité de la couleur reflète l\'ampleur du P&L</span>'
+            '</div>', unsafe_allow_html=True
+        )
