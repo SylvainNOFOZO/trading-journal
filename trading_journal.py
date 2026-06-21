@@ -41,56 +41,6 @@ if not _sb_url or not _sb_url.startswith("https://") or not _sb_key:
     st.info("En attendant la configuration, vos trades sont sauvegardés localement dans cette session.")
     st.divider()
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
-.fa, .fas, .far, .fab, .fa-solid, .fa-regular { font-family: "Font Awesome 6 Free" !important; }
-.icon { display:inline-flex; align-items:center; justify-content:center;
-        width:32px; height:32px; border-radius:8px; font-size:15px; }
-.icon-green  { color:#00d4aa; background:rgba(0,212,170,.12); }
-.icon-red    { color:#ff4d6d; background:rgba(255,77,109,.12); }
-.icon-purple { color:#7c6aff; background:rgba(124,106,255,.12); }
-.icon-orange { color:#ff9f43; background:rgba(255,159,67,.12); }
-.icon-muted  { color:#6b7894; background:rgba(107,120,148,.1); }
-.mood-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
-.stApp { background-color: #0a0c12; }
-section[data-testid="stSidebar"] > div { background-color: #0c0f1a; border-right: 1px solid #1e2535; }
-h1,h2,h3,h4,h5,h6,p,label,.stMarkdown { color: #e8ecf4 !important; }
-.stSelectbox label,.stNumberInput label,.stTextInput label,.stTextArea label,.stDateInput label {
-    color: #8892a4 !important; font-size: 11px !important; text-transform: uppercase; letter-spacing: 1px; }
-.stButton > button { background-color:#00d4aa;color:#000;font-weight:800;border:none;border-radius:10px; }
-.stButton > button:hover { background-color:#00b898 !important;color:#000 !important; }
-.kpi { background:#111520;border:1px solid #1e2535;border-radius:14px;padding:18px 20px 14px;
-    position:relative;overflow:hidden;min-height:110px; }
-.kpi-bar { position:absolute;top:0;left:0;right:0;height:3px; }
-.kpi-icon { font-size:18px;margin-bottom:6px; }
-.kpi-label { font-size:10px;color:#6b7894;letter-spacing:1.5px;text-transform:uppercase;font-weight:600; }
-.kpi-value { font-size:24px;font-weight:800;font-family:"JetBrains Mono",monospace;margin:4px 0 2px; }
-.kpi-sub { font-size:11px;color:#6b7894; }
-.tj-table { width:100%;border-collapse:collapse;font-size:13px; }
-.tj-table th { padding:10px 12px;text-align:left;font-size:10px;color:#6b7894;letter-spacing:1px;
-    text-transform:uppercase;border-bottom:1px solid #1e2535;background:#0d111d;font-weight:600; }
-.tj-table td { padding:11px 12px;border-bottom:1px solid rgba(30,37,53,.5);color:#e8ecf4; }
-.tj-table tr:hover td { background:#161c2e; }
-.badge { padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.8px;display:inline-block; }
-.b-win  { color:#00d4aa;background:rgba(0,212,170,.15);border:1px solid rgba(0,212,170,.3); }
-.b-loss { color:#ff4d6d;background:rgba(255,77,109,.15);border:1px solid rgba(255,77,109,.3); }
-.b-sym  { color:#7c6aff;background:rgba(124,106,255,.15);border:1px solid rgba(124,106,255,.3); }
-.b-str  { color:#ff9f43;background:rgba(255,159,67,.15);border:1px solid rgba(255,159,67,.3); }
-.b-real { color:#00d4aa;background:rgba(0,212,170,.15);border:1px solid rgba(0,212,170,.3); }
-.b-demo { color:#ff9f43;background:rgba(255,159,67,.15);border:1px solid rgba(255,159,67,.3); }
-hr { border-color:#1e2535 !important; }
-.sync-ok { background:#00d4aa18;border:1px solid #00d4aa44;border-radius:8px;padding:6px 14px;font-size:12px;color:#00d4aa; }
-.mode-banner-real { background:rgba(0,212,170,.08);border:1px solid rgba(0,212,170,.3);border-radius:10px;
-    padding:8px 16px;font-size:12px;color:#00d4aa;font-weight:700;margin-bottom:12px; }
-.mode-banner-demo { background:rgba(255,159,67,.08);border:1px solid rgba(255,159,67,.3);border-radius:10px;
-    padding:8px 16px;font-size:12px;color:#ff9f43;font-weight:700;margin-bottom:12px; }
-.mode-banner-all  { background:rgba(124,106,255,.08);border:1px solid rgba(124,106,255,.3);border-radius:10px;
-    padding:8px 16px;font-size:12px;color:#7c6aff;font-weight:700;margin-bottom:12px; }
-</style>
-""", unsafe_allow_html=True)
-
 STRATEGIES   = ["Breakout","Retracement","Support","Tendance","Range","Divergence","Scalping","News"]
 MOODS        = ["Euphorique","Confiant","Neutre","Anxieux","Peureux","Frustré"]
 SYMBOLS = [
@@ -121,6 +71,100 @@ def mood_html(mood):
     icon, color = MOOD_ICON.get(mood, ('<i class="fa-solid fa-circle" style="color:#6b7894"></i>', "#6b7894"))
     return f'<span title="{mood}" style="display:inline-flex;align-items:center;gap:5px">{icon}</span>'
 CHART_COLORS = ["#00d4aa","#7c6aff","#ff9f43","#ff4d6d","#54a0ff","#5f27cd","#00cec9","#fdcb6e"]
+
+# ── THÈMES ─────────────────────────────────────────────────────────────────────
+THEMES = {
+    "Émeraude Sombre": {
+        "bg":"#0a0c12","bg2":"#0d111d","card":"#111520","border":"#1e2535",
+        "text":"#e8ecf4","muted":"#6b7894","accent":"#00d4aa","win":"#00d4aa",
+        "loss":"#ff4d6d","alt":"#7c6aff","orange":"#ff9f43","sidebar":"#0c0f1a",
+        "btn_text":"#000000",
+    },
+    "Indigo Minuit": {
+        "bg":"#0a0a16","bg2":"#0d0d1a","card":"#13131f","border":"#232336",
+        "text":"#eaeaf5","muted":"#7a7a9a","accent":"#6c5ce7","win":"#2ecc91",
+        "loss":"#ff5c7a","alt":"#00cec9","orange":"#fdcb6e","sidebar":"#0e0e1c",
+        "btn_text":"#ffffff",
+    },
+    "Ardoise Bleu": {
+        "bg":"#0b0e14","bg2":"#0e1118","card":"#141821","border":"#232a38",
+        "text":"#e5e9f0","muted":"#6f7a8c","accent":"#4fa3ff","win":"#2dd4bf",
+        "loss":"#fb7185","alt":"#a78bfa","orange":"#ffb454","sidebar":"#0d1016",
+        "btn_text":"#0b0e14",
+    },
+    "Ambre Doré": {
+        "bg":"#100d0a","bg2":"#14110d","card":"#1c1812","border":"#2e2620",
+        "text":"#f5ece0","muted":"#9c8f7c","accent":"#f0a500","win":"#9ed36c",
+        "loss":"#ff6b5e","alt":"#ff7849","orange":"#ffcb47","sidebar":"#120f0b",
+        "btn_text":"#1c1410",
+    },
+    "Ivoire Clair": {
+        "bg":"#f4f5f9","bg2":"#eceef4","card":"#ffffff","border":"#e1e4ec",
+        "text":"#1a1d29","muted":"#6b7280","accent":"#00a884","win":"#00a884",
+        "loss":"#e74c3c","alt":"#6c5ce7","orange":"#e67e22","sidebar":"#ffffff",
+        "btn_text":"#ffffff",
+    },
+}
+THEME_NAMES = list(THEMES.keys())
+
+def get_theme():
+    name = st.session_state.get("theme_name", THEME_NAMES[0])
+    return THEMES.get(name, THEMES[THEME_NAMES[0]])
+
+def build_css(t):
+    """Génère le CSS complet en fonction du thème actif."""
+    return f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
+.fa, .fas, .far, .fab, .fa-solid, .fa-regular {{ font-family: "Font Awesome 6 Free" !important; }}
+.icon {{ display:inline-flex; align-items:center; justify-content:center;
+        width:32px; height:32px; border-radius:8px; font-size:15px; }}
+.icon-green  {{ color:{t['win']}; background:{t['win']}1f; }}
+.icon-red    {{ color:{t['loss']}; background:{t['loss']}1f; }}
+.icon-purple {{ color:{t['alt']}; background:{t['alt']}1f; }}
+.icon-orange {{ color:{t['orange']}; background:{t['orange']}1f; }}
+.icon-muted  {{ color:{t['muted']}; background:{t['muted']}1a; }}
+.mood-dot {{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }}
+.stApp {{ background-color: {t['bg']}; }}
+section[data-testid="stSidebar"] > div {{ background-color: {t['sidebar']}; border-right: 1px solid {t['border']}; }}
+h1,h2,h3,h4,h5,h6,p,label,.stMarkdown {{ color: {t['text']} !important; }}
+.stSelectbox label,.stNumberInput label,.stTextInput label,.stTextArea label,.stDateInput label {{
+    color: {t['muted']} !important; font-size: 11px !important; text-transform: uppercase; letter-spacing: 1px; }}
+div[data-baseweb="input"] input, div[data-baseweb="textarea"] textarea,
+div[data-baseweb="select"] > div {{
+    background-color: {t['bg2']} !important; border-color: {t['border']} !important; color: {t['text']} !important; }}
+.stButton > button {{ background-color:{t['accent']};color:{t['btn_text']};font-weight:800;border:none;border-radius:10px; }}
+.stButton > button:hover {{ filter:brightness(0.92); color:{t['btn_text']} !important; }}
+.kpi {{ background:{t['card']};border:1px solid {t['border']};border-radius:14px;padding:18px 20px 14px;
+    position:relative;overflow:hidden;min-height:110px; }}
+.kpi-bar {{ position:absolute;top:0;left:0;right:0;height:3px; }}
+.kpi-icon {{ font-size:18px;margin-bottom:6px; }}
+.kpi-label {{ font-size:10px;color:{t['muted']};letter-spacing:1.5px;text-transform:uppercase;font-weight:600; }}
+.kpi-value {{ font-size:24px;font-weight:800;font-family:"JetBrains Mono",monospace;margin:4px 0 2px; }}
+.kpi-sub {{ font-size:11px;color:{t['muted']}; }}
+.tj-table {{ width:100%;border-collapse:collapse;font-size:13px; }}
+.tj-table th {{ padding:10px 12px;text-align:left;font-size:10px;color:{t['muted']};letter-spacing:1px;
+    text-transform:uppercase;border-bottom:1px solid {t['border']};background:{t['bg2']};font-weight:600; }}
+.tj-table td {{ padding:11px 12px;border-bottom:1px solid {t['border']}80;color:{t['text']}; }}
+.tj-table tr:hover td {{ background:{t['border']}55; }}
+.badge {{ padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.8px;display:inline-block; }}
+.b-win  {{ color:{t['win']};background:{t['win']}26;border:1px solid {t['win']}4d; }}
+.b-loss {{ color:{t['loss']};background:{t['loss']}26;border:1px solid {t['loss']}4d; }}
+.b-sym  {{ color:{t['alt']};background:{t['alt']}26;border:1px solid {t['alt']}4d; }}
+.b-str  {{ color:{t['orange']};background:{t['orange']}26;border:1px solid {t['orange']}4d; }}
+.b-real {{ color:{t['win']};background:{t['win']}26;border:1px solid {t['win']}4d; }}
+.b-demo {{ color:{t['orange']};background:{t['orange']}26;border:1px solid {t['orange']}4d; }}
+hr {{ border-color:{t['border']} !important; }}
+.sync-ok {{ background:{t['win']}18;border:1px solid {t['win']}44;border-radius:8px;padding:6px 14px;font-size:12px;color:{t['win']}; }}
+.mode-banner-real {{ background:{t['win']}14;border:1px solid {t['win']}4d;border-radius:10px;
+    padding:8px 16px;font-size:12px;color:{t['win']};font-weight:700;margin-bottom:12px; }}
+.mode-banner-demo {{ background:{t['orange']}14;border:1px solid {t['orange']}4d;border-radius:10px;
+    padding:8px 16px;font-size:12px;color:{t['orange']};font-weight:700;margin-bottom:12px; }}
+.mode-banner-all  {{ background:{t['alt']}14;border:1px solid {t['alt']}4d;border-radius:10px;
+    padding:8px 16px;font-size:12px;color:{t['alt']};font-weight:700;margin-bottom:12px; }}
+</style>
+"""
 TRADE_MODES  = ["Réel", "Démo"]
 # Mapping universel : nom broker → nom normalisé
 # Exness utilise le suffixe "m" (ex: XAUUSDm, BTCUSDm)
@@ -285,6 +329,7 @@ if "trades" not in st.session_state:
     st.session_state.trades = _t
 if "page"        not in st.session_state: st.session_state.page        = "dashboard"
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
+if "theme_name"  not in st.session_state: st.session_state.theme_name  = THEME_NAMES[0]
 if "mode_filter" not in st.session_state: st.session_state.mode_filter = "Tous"
 if st.session_state.mode_filter not in ["Tous","Réel","Démo"]: st.session_state.mode_filter = "Tous"
 
@@ -335,6 +380,17 @@ def safe_float(val):
 with st.sidebar:
     st.markdown("## Trading Journal")
     st.caption("Pro · v3.0 · GitHub Sync")
+
+    _sel_theme = st.selectbox(
+        "Thème", THEME_NAMES,
+        index=THEME_NAMES.index(st.session_state.theme_name)
+              if st.session_state.theme_name in THEME_NAMES else 0,
+        key="theme_selector", label_visibility="collapsed"
+    )
+    if _sel_theme != st.session_state.theme_name:
+        st.session_state.theme_name = _sel_theme
+        st.rerun()
+
     st.divider()
 
     # Filtre global mode
@@ -387,6 +443,9 @@ def mode_banner():
         st.markdown('<div class="mode-banner-demo"><i class="fa-solid fa-flask"></i> Mode DÉMO — Performances sur compte démo</div>', unsafe_allow_html=True)
     else:
         st.markdown('<div class="mode-banner-all"><i class="fa-solid fa-layer-group"></i> Tous les trades — Réel + Démo confondus</div>', unsafe_allow_html=True)
+
+# ── INJECTION CSS SELON LE THÈME ACTIF ──────────────────────────────────────────
+st.markdown(build_css(get_theme()), unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : DASHBOARD
@@ -466,13 +525,14 @@ if st.session_state.page == "dashboard":
         # ════════════════════════════════════════════════════════════════════
         # COULEURS & STYLE COMMUNS
         # ════════════════════════════════════════════════════════════════════
-        _bg   = "#111520"
-        _grid = "#1a2035"
-        _text = "#8892a4"
-        _win  = "#00d4aa"
-        _loss = "#ff4d6d"
-        _alt  = "#7c6aff"
-        _ora  = "#ff9f43"
+        _theme = get_theme()
+        _bg   = _theme["card"]
+        _grid = _theme["border"]
+        _text = _theme["muted"]
+        _win  = _theme["win"]
+        _loss = _theme["loss"]
+        _alt  = _theme["alt"]
+        _ora  = _theme["orange"]
 
         def _base_layout(height=260, showlegend=False, **kwargs):
             """showlegend est un param nommé — jamais en doublon avec **kwargs."""
@@ -1656,15 +1716,24 @@ elif st.session_state.page == "calendar":
         df_cal["_dt"] = pd.to_datetime(df_cal["date"])
 
         # ── Couleur selon intensité du P&L ──────────────────────────────────
+        _cal_theme = get_theme()
+        def _hex2rgb(h):
+            h = h.lstrip("#")
+            return tuple(int(h[i:i+2],16) for i in (0,2,4))
+        _win_rgb  = _hex2rgb(_cal_theme["win"])
+        _loss_rgb = _hex2rgb(_cal_theme["loss"])
+
         def _pnl_color(value, max_abs):
             if value == 0 or max_abs == 0:
-                return "#13161f", "#3d4760", "rgba(255,255,255,0.04)"
+                return _cal_theme["bg2"], _cal_theme["muted"], "rgba(255,255,255,0.04)"
             intensity = min(abs(value) / max_abs, 1.0)
             alpha = 0.18 + 0.55 * intensity
             if value > 0:
-                return f"rgba(0,212,170,{alpha:.2f})", "#e8ecf4", "rgba(0,212,170,0.35)"
+                r,g,b = _win_rgb
+                return f"rgba({r},{g},{b},{alpha:.2f})", _cal_theme["text"], f"rgba({r},{g},{b},0.35)"
             else:
-                return f"rgba(255,77,109,{alpha:.2f})", "#e8ecf4", "rgba(255,77,109,0.35)"
+                r,g,b = _loss_rgb
+                return f"rgba({r},{g},{b},{alpha:.2f})", _cal_theme["text"], f"rgba({r},{g},{b},0.35)"
 
         # ── Sélecteur de granularité ─────────────────────────────────────────
         gc1, gc2, gc3 = st.columns([2, 2, 3])
