@@ -316,21 +316,47 @@ def cloud_save(trades):
     else: st.warning("Sauvegarde échouée — vérifiez la connexion.")
     return ok
 
-def force_reload():
-    trades = db_load()
+# ── MIGRATION DES MODES ─────────────────────────────────────────────────────
+# Ancien schéma ("Réel", "Réel 💰", vide) → nouveau ("Réel Indépendant").
+# Retourne (trades, nb_modifiés). Persistée en base dès qu'un changement a lieu.
+_LEGACY_REAL = ("Réel", "Réel 💰", "Réel Indépendant 💰", "")
+_LEGACY_DEMO = ("Démo 🧪", "Démo")
+
+def migrate_modes(trades):
+    changed = 0
     for t in trades:
-        if t.get("trade_mode","") in ("Réel 💰","","Réel"): t["trade_mode"] = "Réel Indépendant"
-        if t.get("trade_mode","") in ("Démo 🧪","Démo"): t["trade_mode"] = "Démo"
-        if not t.get("trade_mode"): t["trade_mode"] = "Réel Indépendant"
-    st.session_state.trades = trades
+        old_m = t.get("trade_mode", "")
+        if old_m in _LEGACY_DEMO:
+            new_m = "Démo"
+        elif old_m in TRADE_MODES:
+            new_m = old_m                       # déjà au nouveau format
+        elif old_m in _LEGACY_REAL or not old_m:
+            new_m = "Réel Indépendant"
+        else:
+            new_m = old_m                       # valeur inconnue : ne pas toucher
+        if new_m != old_m:
+            t["trade_mode"] = new_m
+            changed += 1
+    return trades, changed
+
+def load_and_migrate():
+    """Charge depuis la base, migre, et persiste la migration si nécessaire."""
+    trades = db_load()
+    trades, changed = migrate_modes(trades)
+    if changed:
+        if db_save(trades):
+            st.session_state["_migration_msg"] = (
+                f"{changed} trade(s) migrés vers « Réel Indépendant » et sauvegardés.")
+        else:
+            st.session_state["_migration_msg"] = (
+                f"{changed} trade(s) migrés (affichage uniquement — sauvegarde échouée).")
+    return trades
+
+def force_reload():
+    st.session_state.trades = load_and_migrate()
 # ── INIT SESSION ────────────────────────────────────────────────────────────
 if "trades" not in st.session_state:
-    _t = db_load()
-    for _x in _t:
-        if _x.get("trade_mode","") in ("Réel 💰","","Réel"): _x["trade_mode"] = "Réel Indépendant"
-        if _x.get("trade_mode","") in ("Démo 🧪","Démo"): _x["trade_mode"] = "Démo"
-        if not _x.get("trade_mode"): _x["trade_mode"] = "Réel Indépendant"
-    st.session_state.trades = _t
+    st.session_state.trades = load_and_migrate()
 if "page"        not in st.session_state: st.session_state.page        = "dashboard"
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
 if "theme_name"  not in st.session_state: st.session_state.theme_name  = THEME_NAMES[0]
@@ -451,6 +477,11 @@ def mode_banner():
 
 # ── INJECTION CSS SELON LE THÈME ACTIF ──────────────────────────────────────────
 st.markdown(build_css(get_theme()), unsafe_allow_html=True)
+
+# ── MESSAGE DE MIGRATION (affiché une seule fois) ───────────────────────────────
+_mig_msg = st.session_state.pop("_migration_msg", None)
+if _mig_msg:
+    st.success(_mig_msg, icon=":material/check_circle:")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : DASHBOARD
