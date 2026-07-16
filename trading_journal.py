@@ -1032,11 +1032,12 @@ if st.session_state.page == "dashboard":
         with cs2:
             if _has_hours:
                 _card("Performance par heure de la journée")
-                df_cal_stats["_hour"] = df_cal_stats["_dtp"].dt.hour
-                hr_agg = df_cal_stats.groupby("_hour").agg(
+                _df_hr = df_cal_stats[df_cal_stats["_dtp"].notna()].copy()
+                _df_hr["_hour"] = _df_hr["_dtp"].dt.hour.astype(int)
+                hr_agg = _df_hr.groupby("_hour").agg(
                     pnl=("pnl","sum"), trades=("pnl","count")).reindex(range(24), fill_value=0)
                 fig_hrd = go.Figure(go.Bar(
-                    x=[f"{h:02d}h" for h in hr_agg.index], y=hr_agg["pnl"].tolist(),
+                    x=[f"{int(h):02d}h" for h in hr_agg.index], y=hr_agg["pnl"].tolist(),
                     marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in hr_agg["pnl"]],
                     marker_opacity=0.85, customdata=hr_agg["trades"].tolist(),
                     hovertemplate="<b>%{x}</b><br>P&L : %{y:+,.2f}$<br>%{customdata} trades<extra></extra>",
@@ -1052,15 +1053,16 @@ if st.session_state.page == "dashboard":
 
         if _has_hours:
             _card("Heatmap Jour de semaine × Heure", "Somme du P&L")
-            df_cal_stats["_hour2"] = df_cal_stats["_dtp"].dt.hour
-            pivot_wh = df_cal_stats.pivot_table(
+            _df_hm = df_cal_stats[df_cal_stats["_dtp"].notna()].copy()
+            _df_hm["_hour2"] = _df_hm["_dtp"].dt.hour.astype(int)
+            pivot_wh = _df_hm.pivot_table(
                 index="_weekday", columns="_hour2", values="pnl",
-                aggfunc="sum", fill_value=0).reindex(_jours_ordre)
+                aggfunc="sum", fill_value=0).reindex(_jours_ordre, fill_value=0)
             if not pivot_wh.empty and pivot_wh.shape[1] > 0:
                 _max_abs_wh = max(abs(pivot_wh.values.min()), abs(pivot_wh.values.max()), 1)
                 fig_hm = go.Figure(go.Heatmap(
                     z=pivot_wh.values,
-                    x=[f"{h:02d}h" for h in pivot_wh.columns],
+                    x=[f"{int(h):02d}h" for h in pivot_wh.columns],
                     y=pivot_wh.index.tolist(),
                     colorscale=[[0,"rgba(255,77,109,0.85)"],[0.5,"#111520"],[1,"rgba(0,212,170,0.85)"]],
                     zmid=0, zmin=-_max_abs_wh, zmax=_max_abs_wh,
@@ -2014,18 +2016,20 @@ elif st.session_state.page == "calendar":
                 df_zoom_day = df_cal[df_cal["_dt"].dt.date.astype(str) == zoom_date_iso].copy()
 
                 if "datetime" in df_zoom_day.columns:
-                    df_zoom_day["_hour"] = pd.to_datetime(
-                        df_zoom_day["datetime"], errors="coerce").dt.hour
+                    df_zoom_day["_dtz"] = pd.to_datetime(
+                        df_zoom_day["datetime"], errors="coerce")
                 else:
-                    df_zoom_day["_hour"] = None
+                    df_zoom_day["_dtz"] = pd.NaT
 
-                if df_zoom_day["_hour"].notna().any():
-                    hour_agg = df_zoom_day.groupby("_hour").agg(
+                if df_zoom_day["_dtz"].notna().any():
+                    _dz = df_zoom_day[df_zoom_day["_dtz"].notna()].copy()
+                    _dz["_hour"] = _dz["_dtz"].dt.hour.astype(int)
+                    hour_agg = _dz.groupby("_hour").agg(
                         pnl=("pnl","sum"), trades=("pnl","count"))
                     hour_agg = hour_agg.reindex(range(24), fill_value=0)
 
                     fig_hr = go.Figure(go.Bar(
-                        x=[f"{h:02d}h" for h in hour_agg.index],
+                        x=[f"{int(h):02d}h" for h in hour_agg.index],
                         y=hour_agg["pnl"].tolist(),
                         marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in hour_agg["pnl"]],
                         marker_opacity=0.85,
@@ -2045,13 +2049,10 @@ elif st.session_state.page == "calendar":
                                            "modeBarButtonsToRemove": ["lasso2d","select2d"]})
 
                     # Liste détaillée des positions de ce jour, triées par heure
-                    df_zoom_sorted = df_zoom_day.sort_values("datetime")
+                    df_zoom_sorted = _dz.sort_values("_dtz")
                     st.markdown("##### Positions prises ce jour")
                     for _, zt in df_zoom_sorted.iterrows():
-                        try:
-                            zh = pd.to_datetime(zt["datetime"]).strftime("%H:%M")
-                        except Exception:
-                            zh = "—"
+                        zh = zt["_dtz"].strftime("%H:%M") if pd.notna(zt["_dtz"]) else "—"
                         zc = "#00d4aa" if zt["pnl"]>=0 else "#ff4d6d"
                         st.markdown(
                             f"<div style='display:flex;gap:14px;align-items:center;"
