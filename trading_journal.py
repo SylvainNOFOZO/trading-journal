@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from datetime import date, datetime
 import json, os, base64, requests, io
@@ -1035,78 +1036,163 @@ if st.session_state.page == "dashboard":
             df_cal_stats["_dtp"] = pd.to_datetime(df_cal_stats["datetime"], errors="coerce")
         else:
             df_cal_stats["_dtp"] = pd.NaT
-        _has_hours = df_cal_stats["_dtp"].notna().any()
 
         _jours_fr = {"Monday":"Lundi","Tuesday":"Mardi","Wednesday":"Mercredi",
                     "Thursday":"Jeudi","Friday":"Vendredi","Saturday":"Samedi","Sunday":"Dimanche"}
         _jours_ordre = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
-
         df_cal_stats["_weekday"] = pd.to_datetime(df_cal_stats["date"]).dt.day_name().map(_jours_fr)
 
-        cs1, cs2 = st.columns(2)
+        # ── FILTRES SPÉCIFIQUES AUX GRAPHIQUES CALENDAIRES ───────────────────
+        st.markdown('<div style="background:#111520;border:1px solid #1e2535;'
+                    'border-radius:14px;padding:14px 18px;margin:8px 0 16px">',
+                    unsafe_allow_html=True)
+        kc1, kc2, kc3 = st.columns([1.4, 2.2, 2])
+        with kc1:
+            cal_metric = st.selectbox(
+                "Métrique", ["P&L net", "Nombre de trades", "Win rate %", "R:R moyen"],
+                key="cal_metric")
+        with kc2:
+            cal_days = st.multiselect(
+                "Jours de semaine", _jours_ordre, default=_jours_ordre,
+                key="cal_days_filter")
+        with kc3:
+            cal_hours = st.slider("Plage horaire", 0, 23, (0, 23), key="cal_hours_filter")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        with cs1:
-            _card("Performance par jour de semaine")
-            wd_agg = df_cal_stats.groupby("_weekday").agg(
-                pnl=("pnl","sum"), trades=("pnl","count")).reindex(_jours_ordre, fill_value=0)
-            fig_wd = go.Figure(go.Bar(
-                x=wd_agg.index.tolist(), y=wd_agg["pnl"].tolist(),
-                marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in wd_agg["pnl"]],
-                marker_opacity=0.85, customdata=wd_agg["trades"].tolist(),
-                hovertemplate="<b>%{x}</b><br>P&L : %{y:+,.2f}$<br>%{customdata} trades<extra></extra>",
-            ))
-            fig_wd.add_hline(y=0, line_color=_grid, line_width=1)
-            fig_wd.update_layout(**_base_layout(height=260))
-            _style_axes(fig_wd, yprefix="$")
-            st.plotly_chart(fig_wd, use_container_width=True)
+        # Application des filtres calendaires
+        if cal_days:
+            df_cal_stats = df_cal_stats[df_cal_stats["_weekday"].isin(cal_days)]
+        _h_series = df_cal_stats["_dtp"].dt.hour
+        _hour_mask = _h_series.between(cal_hours[0], cal_hours[1]) | _h_series.isna()
+        df_cal_stats = df_cal_stats[_hour_mask]
 
-        with cs2:
+        _has_hours = df_cal_stats["_dtp"].notna().any()
+        _days_shown = [d for d in _jours_ordre if d in (cal_days or _jours_ordre)]
+
+        if df_cal_stats.empty:
+            st.info("Aucun trade ne correspond à ces filtres calendaires.")
+        else:
+            # ── Agrégation selon la métrique choisie ─────────────────────────
+            def _agg_metric(grouped):
+                """Retourne (Series valeurs, Series nb trades, suffixe, préfixe axe)."""
+                n = grouped["pnl"].count()
+                if cal_metric == "P&L net":
+                    return grouped["pnl"].sum(), n, "$", "$"
+                if cal_metric == "Nombre de trades":
+                    return n.astype(float), n, "", ""
+                if cal_metric == "Win rate %":
+                    return grouped["pnl"].apply(
+                        lambda s: (s > 0).sum()/len(s)*100 if len(s) else 0), n, "%", ""
+                # R:R moyen
+                return grouped["rr"].mean().fillna(0), n, "R", ""
+
+            _neutral = cal_metric in ("Nombre de trades",)
+            def _bar_colors(vals):
+                if _neutral:
+                    return ["#7c6aff"] * len(vals)
+                if cal_metric == "Win rate %":
+                    return ["#00d4aa" if v >= 50 else "#ff4d6d" for v in vals]
+                if cal_metric == "R:R moyen":
+                    return ["#00d4aa" if v >= 1 else "#ff4d6d" for v in vals]
+                return ["#00d4aa" if v >= 0 else "#ff4d6d" for v in vals]
+
+            cs1, cs2 = st.columns(2)
+
+            with cs1:
+                _card(f"{cal_metric} par jour de semaine")
+                g_wd = df_cal_stats.groupby("_weekday")
+                vals_wd, n_wd, suffix, yprefix = _agg_metric(g_wd)
+                vals_wd = vals_wd.reindex(_days_shown, fill_value=0)
+                n_wd    = n_wd.reindex(_days_shown, fill_value=0)
+                fig_wd = go.Figure(go.Bar(
+                    x=vals_wd.index.tolist(), y=vals_wd.tolist(),
+                    marker_color=_bar_colors(vals_wd), marker_opacity=0.85,
+                    customdata=n_wd.tolist(),
+                    hovertemplate="<b>%{x}</b><br>" + cal_metric +
+                                 " : %{y:,.2f}" + suffix +
+                                 "<br>%{customdata} trades<extra></extra>",
+                ))
+                if not _neutral:
+                    fig_wd.add_hline(y=0, line_color=_grid, line_width=1)
+                fig_wd.update_layout(**_base_layout(height=260))
+                _style_axes(fig_wd, yprefix=yprefix)
+                st.plotly_chart(fig_wd, use_container_width=True)
+
+            with cs2:
+                _card(f"{cal_metric} par heure de la journée")
+                if _has_hours:
+                    _df_hr = df_cal_stats[df_cal_stats["_dtp"].notna()].copy()
+                    _df_hr["_hour"] = _df_hr["_dtp"].dt.hour.astype(int)
+                    _hrange = list(range(cal_hours[0], cal_hours[1] + 1))
+                    g_hr = _df_hr.groupby("_hour")
+                    vals_hr, n_hr, suffix, yprefix = _agg_metric(g_hr)
+                    vals_hr = vals_hr.reindex(_hrange, fill_value=0)
+                    n_hr    = n_hr.reindex(_hrange, fill_value=0)
+                    fig_hrd = go.Figure(go.Bar(
+                        x=[f"{int(h):02d}h" for h in vals_hr.index],
+                        y=vals_hr.tolist(),
+                        marker_color=_bar_colors(vals_hr), marker_opacity=0.85,
+                        customdata=n_hr.tolist(),
+                        hovertemplate="<b>%{x}</b><br>" + cal_metric +
+                                     " : %{y:,.2f}" + suffix +
+                                     "<br>%{customdata} trades<extra></extra>",
+                    ))
+                    if not _neutral:
+                        fig_hrd.add_hline(y=0, line_color=_grid, line_width=1)
+                    fig_hrd.update_layout(**_base_layout(height=260))
+                    _style_axes(fig_hrd, yprefix=yprefix)
+                    st.plotly_chart(fig_hrd, use_container_width=True)
+                else:
+                    st.info("Aucune heure enregistrée sur la période filtrée.")
+
+            # ── Heatmap Jour × Heure ─────────────────────────────────────────
             if _has_hours:
-                _card("Performance par heure de la journée")
-                _df_hr = df_cal_stats[df_cal_stats["_dtp"].notna()].copy()
-                _df_hr["_hour"] = _df_hr["_dtp"].dt.hour.astype(int)
-                hr_agg = _df_hr.groupby("_hour").agg(
-                    pnl=("pnl","sum"), trades=("pnl","count")).reindex(range(24), fill_value=0)
-                fig_hrd = go.Figure(go.Bar(
-                    x=[f"{int(h):02d}h" for h in hr_agg.index], y=hr_agg["pnl"].tolist(),
-                    marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in hr_agg["pnl"]],
-                    marker_opacity=0.85, customdata=hr_agg["trades"].tolist(),
-                    hovertemplate="<b>%{x}</b><br>P&L : %{y:+,.2f}$<br>%{customdata} trades<extra></extra>",
-                ))
-                fig_hrd.add_hline(y=0, line_color=_grid, line_width=1)
-                fig_hrd.update_layout(**_base_layout(height=260))
-                _style_axes(fig_hrd, yprefix="$")
-                st.plotly_chart(fig_hrd, use_container_width=True)
-            else:
-                _card("Performance par heure de la journée")
-                st.info("Aucune heure enregistrée sur la période filtrée "
-                       "(trades saisis sans heure précise).")
-
-        if _has_hours:
-            _card("Heatmap Jour de semaine × Heure", "Somme du P&L")
-            _df_hm = df_cal_stats[df_cal_stats["_dtp"].notna()].copy()
-            _df_hm["_hour2"] = _df_hm["_dtp"].dt.hour.astype(int)
-            pivot_wh = _df_hm.pivot_table(
-                index="_weekday", columns="_hour2", values="pnl",
-                aggfunc="sum", fill_value=0).reindex(_jours_ordre, fill_value=0)
-            if not pivot_wh.empty and pivot_wh.shape[1] > 0:
-                _max_abs_wh = max(abs(pivot_wh.values.min()), abs(pivot_wh.values.max()), 1)
-                fig_hm = go.Figure(go.Heatmap(
-                    z=pivot_wh.values,
-                    x=[f"{int(h):02d}h" for h in pivot_wh.columns],
-                    y=pivot_wh.index.tolist(),
-                    colorscale=[[0,"rgba(255,77,109,0.85)"],[0.5,"#111520"],[1,"rgba(0,212,170,0.85)"]],
-                    zmid=0, zmin=-_max_abs_wh, zmax=_max_abs_wh,
-                    hovertemplate="<b>%{y} · %{x}</b><br>P&L : %{z:+,.2f}$<extra></extra>",
-                    showscale=True,
-                    colorbar=dict(tickfont=dict(color=_text, size=10), thickness=10),
-                ))
-                fig_hm.update_layout(**_base_layout(height=280))
-                fig_hm.update_xaxes(gridcolor=_grid, linecolor=_grid)
-                fig_hm.update_yaxes(gridcolor=_grid, linecolor=_grid)
-                st.plotly_chart(fig_hm, use_container_width=True)
-            else:
-                st.info("Pas assez de données horaires pour la heatmap.")
+                _card(f"Heatmap Jour de semaine × Heure", cal_metric)
+                _df_hm = df_cal_stats[df_cal_stats["_dtp"].notna()].copy()
+                _df_hm["_hour2"] = _df_hm["_dtp"].dt.hour.astype(int)
+                if cal_metric == "P&L net":
+                    _aggf = "sum"; _vcol = "pnl"
+                elif cal_metric == "Nombre de trades":
+                    _aggf = "count"; _vcol = "pnl"
+                elif cal_metric == "Win rate %":
+                    _df_hm["_is_win"] = (_df_hm["pnl"] > 0).astype(float) * 100
+                    _aggf = "mean"; _vcol = "_is_win"
+                else:
+                    _aggf = "mean"; _vcol = "rr"
+                pivot_wh = _df_hm.pivot_table(
+                    index="_weekday", columns="_hour2", values=_vcol,
+                    aggfunc=_aggf, fill_value=0).reindex(_days_shown, fill_value=0)
+                if not pivot_wh.empty and pivot_wh.shape[1] > 0:
+                    _vals = pivot_wh.values.astype(float)
+                    if _neutral:
+                        _cscale = [[0,"#111520"],[1,"rgba(124,106,255,0.9)"]]
+                        _zmid, _zmin, _zmax = None, None, None
+                    elif cal_metric == "Win rate %":
+                        _cscale = [[0,"rgba(255,77,109,0.85)"],[0.5,"#111520"],[1,"rgba(0,212,170,0.85)"]]
+                        _zmid, _zmin, _zmax = 50, 0, 100
+                    else:
+                        _m = max(abs(np.nanmin(_vals)), abs(np.nanmax(_vals)), 1)
+                        _cscale = [[0,"rgba(255,77,109,0.85)"],[0.5,"#111520"],[1,"rgba(0,212,170,0.85)"]]
+                        _zmid, _zmin, _zmax = (1 if cal_metric=="R:R moyen" else 0), -_m if cal_metric!="R:R moyen" else 0, _m
+                    _hm_kwargs = dict(
+                        z=_vals,
+                        x=[f"{int(h):02d}h" for h in pivot_wh.columns],
+                        y=pivot_wh.index.tolist(),
+                        colorscale=_cscale,
+                        hovertemplate="<b>%{y} · %{x}</b><br>" + cal_metric +
+                                     " : %{z:,.2f}" + suffix + "<extra></extra>",
+                        showscale=True,
+                        colorbar=dict(tickfont=dict(color=_text, size=10), thickness=10),
+                    )
+                    if _zmid is not None:
+                        _hm_kwargs.update(zmid=_zmid, zmin=_zmin, zmax=_zmax)
+                    fig_hm = go.Figure(go.Heatmap(**_hm_kwargs))
+                    fig_hm.update_layout(**_base_layout(height=280))
+                    fig_hm.update_xaxes(gridcolor=_grid, linecolor=_grid)
+                    fig_hm.update_yaxes(gridcolor=_grid, linecolor=_grid)
+                    st.plotly_chart(fig_hm, use_container_width=True)
+                else:
+                    st.info("Pas assez de données horaires pour la heatmap.")
         st.markdown(" ")
 
         # ════════════════════════════════════════════════════════════════════
@@ -2017,35 +2103,67 @@ elif st.session_state.page == "calendar":
             # ════════════════════════════════════════════════════════════════
             # ZOOM HORAIRE — détail des prises de position d'un jour précis
             # ════════════════════════════════════════════════════════════════
-            active_day_nums = sorted(day_agg.index.tolist())
-            if active_day_nums:
-                st.markdown("---")
-                st.markdown("#### Détail horaire d'une journée")
-                zc1, zc2 = st.columns([1.4, 3])
-                with zc1:
-                    default_day = active_day_nums[-1]
-                    zoom_day = st.selectbox(
-                        "Jour à zoomer",
-                        active_day_nums,
-                        index=active_day_nums.index(default_day),
-                        format_func=lambda d: f"{d:02d} {mois_fr[month-1]} {year} "
-                                              f"({int(day_agg.loc[d,'trades'])} trades)",
-                        key="cal_zoom_day"
-                    )
-                with zc2:
-                    zpnl = day_agg.loc[zoom_day, "pnl"]
-                    ztrades = int(day_agg.loc[zoom_day, "trades"])
+            st.markdown("---")
+            st.markdown("#### Détail horaire d'une journée")
+
+            _n_days_month = _calmod.monthrange(year, month)[1]
+            _all_days = list(range(1, _n_days_month + 1))
+
+            zc1, zc2, zc3 = st.columns([1.6, 1.2, 2.4])
+            with zc1:
+                _default_day = (int(day_agg["pnl"].abs().idxmax())
+                                if not day_agg.empty else date.today().day)
+                if _default_day not in _all_days:
+                    _default_day = _all_days[0]
+                zoom_day = st.selectbox(
+                    "Jour du mois", _all_days,
+                    index=_all_days.index(_default_day),
+                    format_func=lambda d: (
+                        f"{d:02d} {mois_fr[month-1]}"
+                        + (f" · {int(day_agg.loc[d,'trades'])} trades"
+                           if d in day_agg.index else " · —")
+                    ),
+                    key="cal_zoom_day"
+                )
+            with zc2:
+                _only_active = st.checkbox("Jours actifs seulement", value=False,
+                                           key="cal_zoom_active_only",
+                                           help="Masque les jours sans aucun trade "
+                                                "dans la liste ci-contre")
+                if _only_active and not day_agg.empty:
+                    _act = sorted(day_agg.index.tolist())
+                    if zoom_day not in _act:
+                        zoom_day = _act[-1]
+                        st.caption(f"→ {zoom_day:02d} (1er jour actif)")
+
+            zoom_date_obj = date(year, month, zoom_day)
+            zoom_date_iso = zoom_date_obj.isoformat()
+            df_zoom_day = df_cal[df_cal["_dt"].dt.date.astype(str) == zoom_date_iso].copy()
+
+            with zc3:
+                _jn = {"Monday":"Lundi","Tuesday":"Mardi","Wednesday":"Mercredi",
+                       "Thursday":"Jeudi","Friday":"Vendredi","Saturday":"Samedi",
+                       "Sunday":"Dimanche"}[zoom_date_obj.strftime("%A")]
+                if df_zoom_day.empty:
+                    st.markdown(
+                        f"<div style='padding-top:8px;color:#6b7894'>"
+                        f"{_jn} {zoom_day:02d} {mois_fr[month-1]} {year} — "
+                        f"<i>aucun trade</i></div>", unsafe_allow_html=True)
+                else:
+                    zpnl = df_zoom_day["pnl"].sum()
+                    ztrades = len(df_zoom_day)
                     zcol = "#00d4aa" if zpnl >= 0 else "#ff4d6d"
                     st.markdown(
-                        f"<div style='padding-top:6px'>"
-                        f"<span style='color:#6b7894'>P&L du jour : </span>"
+                        f"<div style='padding-top:8px'>"
+                        f"<span style='color:#6b7894'>{_jn} {zoom_day:02d} · P&L : </span>"
                         f"<b style='color:{zcol};font-family:JetBrains Mono,monospace'>{fmt(zpnl)}</b>"
-                        f"<span style='color:#6b7894'> · {ztrades} position{'s' if ztrades>1 else ''}</span>"
-                        f"</div>", unsafe_allow_html=True)
+                        f"<span style='color:#6b7894'> · {ztrades} position"
+                        f"{'s' if ztrades>1 else ''}</span></div>",
+                        unsafe_allow_html=True)
 
-                zoom_date_iso = date(year, month, zoom_day).isoformat()
-                df_zoom_day = df_cal[df_cal["_dt"].dt.date.astype(str) == zoom_date_iso].copy()
-
+            if df_zoom_day.empty:
+                st.info(f"Aucun trade enregistré le {zoom_day:02d} {mois_fr[month-1]} {year}.")
+            else:
                 if "datetime" in df_zoom_day.columns:
                     df_zoom_day["_dtz"] = pd.to_datetime(
                         df_zoom_day["datetime"], errors="coerce")
@@ -2055,47 +2173,103 @@ elif st.session_state.page == "calendar":
                 if df_zoom_day["_dtz"].notna().any():
                     _dz = df_zoom_day[df_zoom_day["_dtz"].notna()].copy()
                     _dz["_hour"] = _dz["_dtz"].dt.hour.astype(int)
-                    hour_agg = _dz.groupby("_hour").agg(
-                        pnl=("pnl","sum"), trades=("pnl","count"))
-                    hour_agg = hour_agg.reindex(range(24), fill_value=0)
 
-                    fig_hr = go.Figure(go.Bar(
-                        x=[f"{int(h):02d}h" for h in hour_agg.index],
-                        y=hour_agg["pnl"].tolist(),
-                        marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in hour_agg["pnl"]],
-                        marker_opacity=0.85,
-                        customdata=hour_agg["trades"].tolist(),
-                        hovertemplate="<b>%{x}</b><br>P&L : %{y:+,.2f}$<br>"
-                                     "%{customdata} position(s)<extra></extra>",
-                    ))
-                    fig_hr.add_hline(y=0, line_color="#1a2035", line_width=1)
-                    fig_hr.update_layout(
-                        paper_bgcolor="#111520", plot_bgcolor="#111520",
-                        font=dict(color="#8892a4", size=11), height=260,
-                        margin=dict(l=50,r=20,t=10,b=30), showlegend=False)
-                    fig_hr.update_xaxes(gridcolor="#1a2035", linecolor="#1a2035")
-                    fig_hr.update_yaxes(gridcolor="#1a2035", linecolor="#1a2035", tickprefix="$")
-                    st.plotly_chart(fig_hr, use_container_width=True,
-                                    config={"scrollZoom": True, "displayModeBar": True,
-                                           "modeBarButtonsToRemove": ["lasso2d","select2d"]})
+                    # KPIs de la journée
+                    _hr_pnl = _dz.groupby("_hour")["pnl"].sum()
+                    _best_h = int(_hr_pnl.idxmax()); _worst_h = int(_hr_pnl.idxmin())
+                    _wr_day = (_dz["pnl"] > 0).sum()/len(_dz)*100
+                    zk1, zk2, zk3, zk4 = st.columns(4)
+                    with zk1: kpi('<i class="fa-solid fa-clock"></i>', "1ère position",
+                                  _dz["_dtz"].min().strftime("%H:%M"),
+                                  f"dernière : {_dz['_dtz'].max().strftime('%H:%M')}", "#7c6aff")
+                    with zk2: kpi('<i class="fa-solid fa-arrow-trend-up"></i>', "Meilleure heure",
+                                  f"{_best_h:02d}h", fmt(_hr_pnl.max()), "#00d4aa")
+                    with zk3: kpi('<i class="fa-solid fa-arrow-trend-down"></i>', "Pire heure",
+                                  f"{_worst_h:02d}h", fmt(_hr_pnl.min()), "#ff4d6d")
+                    with zk4: kpi('<i class="fa-solid fa-bullseye"></i>', "Win rate du jour",
+                                  f"{_wr_day:.0f}%", f"{len(_dz)} positions",
+                                  "#00d4aa" if _wr_day>=50 else "#ff4d6d")
+                    st.markdown(" ")
 
-                    # Liste détaillée des positions de ce jour, triées par heure
-                    df_zoom_sorted = _dz.sort_values("_dtz")
-                    st.markdown("##### Positions prises ce jour")
-                    for _, zt in df_zoom_sorted.iterrows():
-                        zh = zt["_dtz"].strftime("%H:%M") if pd.notna(zt["_dtz"]) else "—"
-                        zc = "#00d4aa" if zt["pnl"]>=0 else "#ff4d6d"
-                        st.markdown(
-                            f"<div style='display:flex;gap:14px;align-items:center;"
-                            f"background:#111520;border:1px solid #1e2535;border-radius:8px;"
-                            f"padding:7px 14px;margin-bottom:5px;font-size:13px'>"
-                            f"<span style='color:#6b7894;font-family:JetBrains Mono,monospace;"
-                            f"min-width:42px'>{zh}</span>"
-                            f"<span style='color:#e8ecf4;font-weight:600'>{zt['symbol']}</span>"
-                            f"<span style='color:#6b7894'>{zt['direction']}</span>"
-                            f"<span style='color:{zc};font-family:JetBrains Mono,monospace;"
-                            f"font-weight:700;margin-left:auto'>{fmt(zt['pnl'])}</span>"
-                            f"</div>", unsafe_allow_html=True)
+                    # Plage horaire à afficher
+                    _hmin, _hmax = int(_dz["_hour"].min()), int(_dz["_hour"].max())
+                    zh1, zh2 = st.columns([2, 3])
+                    with zh1:
+                        _hr_range = st.slider("Plage horaire affichée", 0, 23,
+                                              (max(0,_hmin-1), min(23,_hmax+1)),
+                                              key="cal_zoom_hours")
+                    _hrange_list = list(range(_hr_range[0], _hr_range[1]+1))
+                    _dz_f = _dz[_dz["_hour"].between(_hr_range[0], _hr_range[1])]
+
+                    if _dz_f.empty:
+                        st.info("Aucune position dans cette plage horaire.")
+                    else:
+                        hour_agg = _dz_f.groupby("_hour").agg(
+                            pnl=("pnl","sum"), trades=("pnl","count")
+                        ).reindex(_hrange_list, fill_value=0)
+
+                        fig_hr = go.Figure(go.Bar(
+                            x=[f"{int(h):02d}h" for h in hour_agg.index],
+                            y=hour_agg["pnl"].tolist(),
+                            marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in hour_agg["pnl"]],
+                            marker_opacity=0.85,
+                            customdata=hour_agg["trades"].tolist(),
+                            hovertemplate="<b>%{x}</b><br>P&L : %{y:+,.2f}$<br>"
+                                         "%{customdata} position(s)<extra></extra>",
+                        ))
+                        fig_hr.add_hline(y=0, line_color="#1a2035", line_width=1)
+                        fig_hr.update_layout(
+                            paper_bgcolor="#111520", plot_bgcolor="#111520",
+                            font=dict(color="#8892a4", size=11), height=260,
+                            margin=dict(l=50,r=20,t=10,b=30), showlegend=False)
+                        fig_hr.update_xaxes(gridcolor="#1a2035", linecolor="#1a2035")
+                        fig_hr.update_yaxes(gridcolor="#1a2035", linecolor="#1a2035", tickprefix="$")
+                        st.plotly_chart(fig_hr, use_container_width=True,
+                                        config={"scrollZoom": True, "displayModeBar": True,
+                                               "modeBarButtonsToRemove": ["lasso2d","select2d"]})
+
+                        # Courbe de P&L cumulé intra-journalier
+                        _dz_sorted = _dz_f.sort_values("_dtz")
+                        _cum = _dz_sorted["pnl"].cumsum()
+                        fig_cum = go.Figure(go.Scatter(
+                            x=_dz_sorted["_dtz"].dt.strftime("%H:%M").tolist(),
+                            y=_cum.tolist(), mode="lines+markers",
+                            line=dict(color="#7c6aff", width=2.5, shape="hv"),
+                            marker=dict(size=7,
+                                        color=["#00d4aa" if p>0 else "#ff4d6d"
+                                               for p in _dz_sorted["pnl"]]),
+                            customdata=list(zip(_dz_sorted["symbol"], _dz_sorted["pnl"])),
+                            hovertemplate="<b>%{x}</b><br>%{customdata[0]}<br>"
+                                         "Trade : %{customdata[1]:+,.2f}$<br>"
+                                         "Cumulé : %{y:+,.2f}$<extra></extra>",
+                        ))
+                        fig_cum.add_hline(y=0, line_color="#1a2035", line_width=1)
+                        fig_cum.update_layout(
+                            paper_bgcolor="#111520", plot_bgcolor="#111520",
+                            font=dict(color="#8892a4", size=11), height=220,
+                            margin=dict(l=50,r=20,t=24,b=30), showlegend=False,
+                            title=dict(text="P&L cumulé au fil de la journée",
+                                      font=dict(size=12, color="#8892a4"), x=0.01))
+                        fig_cum.update_xaxes(gridcolor="#1a2035", linecolor="#1a2035")
+                        fig_cum.update_yaxes(gridcolor="#1a2035", linecolor="#1a2035", tickprefix="$")
+                        st.plotly_chart(fig_cum, use_container_width=True)
+
+                        # Liste détaillée des positions
+                        st.markdown("##### Positions prises ce jour")
+                        for _, zt in _dz_sorted.iterrows():
+                            zh = zt["_dtz"].strftime("%H:%M") if pd.notna(zt["_dtz"]) else "—"
+                            zc = "#00d4aa" if zt["pnl"]>=0 else "#ff4d6d"
+                            st.markdown(
+                                f"<div style='display:flex;gap:14px;align-items:center;"
+                                f"background:#111520;border:1px solid #1e2535;border-radius:8px;"
+                                f"padding:7px 14px;margin-bottom:5px;font-size:13px'>"
+                                f"<span style='color:#6b7894;font-family:JetBrains Mono,monospace;"
+                                f"min-width:42px'>{zh}</span>"
+                                f"<span style='color:#e8ecf4;font-weight:600'>{zt['symbol']}</span>"
+                                f"<span style='color:#6b7894'>{zt['direction']}</span>"
+                                f"<span style='color:{zc};font-family:JetBrains Mono,monospace;"
+                                f"font-weight:700;margin-left:auto'>{fmt(zt['pnl'])}</span>"
+                                f"</div>", unsafe_allow_html=True)
                 else:
                     st.info("Aucune heure précise enregistrée pour ce jour "
                            "(trades saisis sans heure).")
