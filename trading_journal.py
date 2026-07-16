@@ -155,17 +155,21 @@ div[data-baseweb="select"] > div {{
 .b-str  {{ color:{t['orange']};background:{t['orange']}26;border:1px solid {t['orange']}4d; }}
 .b-real {{ color:{t['win']};background:{t['win']}26;border:1px solid {t['win']}4d; }}
 .b-demo {{ color:{t['orange']};background:{t['orange']}26;border:1px solid {t['orange']}4d; }}
+.b-inst {{ color:{t['alt']};background:{t['alt']}26;border:1px solid {t['alt']}4d; }}
 hr {{ border-color:{t['border']} !important; }}
 .sync-ok {{ background:{t['win']}18;border:1px solid {t['win']}44;border-radius:8px;padding:6px 14px;font-size:12px;color:{t['win']}; }}
 .mode-banner-real {{ background:{t['win']}14;border:1px solid {t['win']}4d;border-radius:10px;
     padding:8px 16px;font-size:12px;color:{t['win']};font-weight:700;margin-bottom:12px; }}
+.mode-banner-inst {{ background:{t['alt']}14;border:1px solid {t['alt']}4d;border-radius:10px;
+    padding:8px 16px;font-size:12px;color:{t['alt']};font-weight:700;margin-bottom:12px; }}
 .mode-banner-demo {{ background:{t['orange']}14;border:1px solid {t['orange']}4d;border-radius:10px;
     padding:8px 16px;font-size:12px;color:{t['orange']};font-weight:700;margin-bottom:12px; }}
 .mode-banner-all  {{ background:{t['alt']}14;border:1px solid {t['alt']}4d;border-radius:10px;
     padding:8px 16px;font-size:12px;color:{t['alt']};font-weight:700;margin-bottom:12px; }}
 </style>
 """
-TRADE_MODES  = ["Réel", "Démo"]
+TRADE_MODES  = ["Démo", "Réel Indépendant", "Réel Institutionnel"]
+MODE_FILTER_OPTIONS = ["Tous"] + TRADE_MODES
 # Mapping universel : nom broker → nom normalisé
 # Exness utilise le suffixe "m" (ex: XAUUSDm, BTCUSDm)
 _BASE_PAIRS = {
@@ -315,23 +319,23 @@ def cloud_save(trades):
 def force_reload():
     trades = db_load()
     for t in trades:
-        if t.get("trade_mode","") in ("Réel 💰",""): t["trade_mode"] = "Réel"
-        if t.get("trade_mode","") == "Démo 🧪": t["trade_mode"] = "Démo"
-        if not t.get("trade_mode"): t["trade_mode"] = "Réel"
+        if t.get("trade_mode","") in ("Réel 💰","","Réel"): t["trade_mode"] = "Réel Indépendant"
+        if t.get("trade_mode","") in ("Démo 🧪","Démo"): t["trade_mode"] = "Démo"
+        if not t.get("trade_mode"): t["trade_mode"] = "Réel Indépendant"
     st.session_state.trades = trades
 # ── INIT SESSION ────────────────────────────────────────────────────────────
 if "trades" not in st.session_state:
     _t = db_load()
     for _x in _t:
-        if _x.get("trade_mode","") in ("Réel 💰",""): _x["trade_mode"] = "Réel"
-        if _x.get("trade_mode","") == "Démo 🧪": _x["trade_mode"] = "Démo"
-        if not _x.get("trade_mode"): _x["trade_mode"] = "Réel"
+        if _x.get("trade_mode","") in ("Réel 💰","","Réel"): _x["trade_mode"] = "Réel Indépendant"
+        if _x.get("trade_mode","") in ("Démo 🧪","Démo"): _x["trade_mode"] = "Démo"
+        if not _x.get("trade_mode"): _x["trade_mode"] = "Réel Indépendant"
     st.session_state.trades = _t
 if "page"        not in st.session_state: st.session_state.page        = "dashboard"
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
 if "theme_name"  not in st.session_state: st.session_state.theme_name  = THEME_NAMES[0]
 if "mode_filter" not in st.session_state: st.session_state.mode_filter = "Tous"
-if st.session_state.mode_filter not in ["Tous","Réel","Démo"]: st.session_state.mode_filter = "Tous"
+if st.session_state.mode_filter not in MODE_FILTER_OPTIONS: st.session_state.mode_filter = "Tous"
 
 
 
@@ -353,9 +357,8 @@ def get_df(mode_filter="Tous"):
     rows = [dict(t, pnl=get_pnl(t), rr=calc_rr(t)) for t in st.session_state.trades]
     df = pd.DataFrame(rows) if rows else pd.DataFrame()
     if df.empty: return df
-    if "trade_mode" not in df.columns: df["trade_mode"] = "Réel"
-    if mode_filter == "Réel":  return df[df["trade_mode"] == "Réel"]
-    if mode_filter == "Démo":  return df[df["trade_mode"] == "Démo"]
+    if "trade_mode" not in df.columns: df["trade_mode"] = "Réel Indépendant"
+    if mode_filter in TRADE_MODES: return df[df["trade_mode"] == mode_filter]
     return df
 
 def kpi(icon, label, value, sub, color):
@@ -394,9 +397,9 @@ with st.sidebar:
     st.divider()
 
     # Filtre global mode
-    mode_f = st.radio("Afficher", ["Tous", "Réel", "Démo"],
-        index=["Tous","Réel","Démo"].index(st.session_state.mode_filter) if st.session_state.mode_filter in ["Tous","Réel","Démo"] else 0,
-        horizontal=True, label_visibility="collapsed")
+    mode_f = st.selectbox("Afficher", MODE_FILTER_OPTIONS,
+        index=MODE_FILTER_OPTIONS.index(st.session_state.mode_filter) if st.session_state.mode_filter in MODE_FILTER_OPTIONS else 0,
+        label_visibility="collapsed")
     if mode_f != st.session_state.mode_filter:
         st.session_state.mode_filter = mode_f; st.rerun()
     st.divider()
@@ -405,7 +408,7 @@ with st.sidebar:
     total   = df_side["pnl"].sum() if not df_side.empty else 0
     wr      = (len(df_side[df_side["pnl"]>0])/len(df_side)*100) if not df_side.empty else 0
     col_pnl = "#00d4aa" if total >= 0 else "#ff4d6d"
-    mode_icon = {"Tous":"Tous","Réel":"Réel","Démo":"Démo"}[st.session_state.mode_filter]
+    mode_icon = st.session_state.mode_filter
 
     st.markdown(f"""<div style="margin-bottom:16px;padding:10px 0">
         <div style="font-size:10px;color:#6b7894;letter-spacing:1px;text-transform:uppercase">
@@ -437,12 +440,14 @@ with st.sidebar:
 # ── BANNER MODE ────────────────────────────────────────────────────────────────
 def mode_banner():
     m = st.session_state.mode_filter
-    if m == "Réel":
-        st.markdown('<div class="mode-banner-real"><i class="fa-solid fa-circle-dot"></i> Mode RÉEL — Performances sur compte réel</div>', unsafe_allow_html=True)
+    if m == "Réel Indépendant":
+        st.markdown('<div class="mode-banner-real"><i class="fa-solid fa-circle-dot"></i> Réel Indépendant — Compte personnel</div>', unsafe_allow_html=True)
+    elif m == "Réel Institutionnel":
+        st.markdown('<div class="mode-banner-inst"><i class="fa-solid fa-building-columns"></i> Réel Institutionnel — Fonds commun avec partenaires financiers</div>', unsafe_allow_html=True)
     elif m == "Démo":
         st.markdown('<div class="mode-banner-demo"><i class="fa-solid fa-flask"></i> Mode DÉMO — Performances sur compte démo</div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div class="mode-banner-all"><i class="fa-solid fa-layer-group"></i> Tous les trades — Réel + Démo confondus</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mode-banner-all"><i class="fa-solid fa-layer-group"></i> Tous les trades — tous comptes confondus</div>', unsafe_allow_html=True)
 
 # ── INJECTION CSS SELON LE THÈME ACTIF ──────────────────────────────────────────
 st.markdown(build_css(get_theme()), unsafe_allow_html=True)
@@ -508,18 +513,25 @@ if st.session_state.page == "dashboard":
         with c6: kpi('<i class="fa-solid fa-arrow-trend-up"></i>', "Gain moyen",   fmt(avg_w),       "Par trade gagnant",             "#00d4aa")
         st.markdown(" ")
 
-        # Comparaison Réel/Démo
+        # Comparaison par mode de compte
         if st.session_state.mode_filter == "Tous" and "trade_mode" in df.columns:
-            df_r = df[df["trade_mode"]=="Réel"]; df_d = df[df["trade_mode"]=="Démo"]
-            if not df_r.empty and not df_d.empty:
-                st.markdown("#### Comparaison Réel · Démo")
-                cr1,cr2,cr3,cr4 = st.columns(4)
-                wr_r = len(df_r[df_r["pnl"]>0])/len(df_r)*100 if len(df_r) else 0
-                wr_d = len(df_d[df_d["pnl"]>0])/len(df_d)*100 if len(df_d) else 0
-                with cr1: kpi('<i class="fa-solid fa-coins"></i>',   "P&L Réel",     fmt(df_r["pnl"].sum()),f"{len(df_r)} trades","#00d4aa")
-                with cr2: kpi('<i class="fa-solid fa-flask"></i>',   "P&L Démo",     fmt(df_d["pnl"].sum()),f"{len(df_d)} trades","#ff9f43")
-                with cr3: kpi('<i class="fa-solid fa-bullseye"></i>',"Win Rate Réel",f"{wr_r:.1f}%","Compte réel","#00d4aa")
-                with cr4: kpi('<i class="fa-solid fa-bullseye"></i>',"Win Rate Démo",f"{wr_d:.1f}%","Compte démo","#ff9f43")
+            _mode_cfg = {
+                "Démo":               ("#ff9f43", "fa-flask"),
+                "Réel Indépendant":   ("#00d4aa", "fa-circle-dot"),
+                "Réel Institutionnel":("#7c6aff", "fa-building-columns"),
+            }
+            _active_modes = [m for m in TRADE_MODES if not df[df["trade_mode"]==m].empty]
+            if len(_active_modes) >= 2:
+                st.markdown("#### Comparaison par mode de compte")
+                _cols = st.columns(len(_active_modes))
+                for _col, _m in zip(_cols, _active_modes):
+                    _df_m = df[df["trade_mode"]==_m]
+                    _color, _icon = _mode_cfg.get(_m, ("#8892a4","fa-circle"))
+                    _wr_m = len(_df_m[_df_m["pnl"]>0])/len(_df_m)*100 if len(_df_m) else 0
+                    with _col:
+                        kpi(f'<i class="fa-solid {_icon}"></i>', f"P&L {_m}",
+                            fmt(_df_m["pnl"].sum()),
+                            f"{len(_df_m)} trades · {_wr_m:.0f}% win", _color)
                 st.markdown(" ")
 
         # ════════════════════════════════════════════════════════════════════
@@ -982,6 +994,89 @@ if st.session_state.page == "dashboard":
             st.plotly_chart(fig_mood, use_container_width=True)
 
         # ════════════════════════════════════════════════════════════════════
+        # STATISTIQUES CALENDAIRES — jour de semaine, heure, heatmap
+        # (héritent des filtres actif/émotion/stratégie/dates du dashboard)
+        # ════════════════════════════════════════════════════════════════════
+        st.markdown("### Statistiques calendaires")
+
+        df_cal_stats = df.copy()
+        if "datetime" in df_cal_stats.columns:
+            df_cal_stats["_dtp"] = pd.to_datetime(df_cal_stats["datetime"], errors="coerce")
+        else:
+            df_cal_stats["_dtp"] = pd.NaT
+        _has_hours = df_cal_stats["_dtp"].notna().any()
+
+        _jours_fr = {"Monday":"Lundi","Tuesday":"Mardi","Wednesday":"Mercredi",
+                    "Thursday":"Jeudi","Friday":"Vendredi","Saturday":"Samedi","Sunday":"Dimanche"}
+        _jours_ordre = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
+
+        df_cal_stats["_weekday"] = pd.to_datetime(df_cal_stats["date"]).dt.day_name().map(_jours_fr)
+
+        cs1, cs2 = st.columns(2)
+
+        with cs1:
+            _card("Performance par jour de semaine")
+            wd_agg = df_cal_stats.groupby("_weekday").agg(
+                pnl=("pnl","sum"), trades=("pnl","count")).reindex(_jours_ordre, fill_value=0)
+            fig_wd = go.Figure(go.Bar(
+                x=wd_agg.index.tolist(), y=wd_agg["pnl"].tolist(),
+                marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in wd_agg["pnl"]],
+                marker_opacity=0.85, customdata=wd_agg["trades"].tolist(),
+                hovertemplate="<b>%{x}</b><br>P&L : %{y:+,.2f}$<br>%{customdata} trades<extra></extra>",
+            ))
+            fig_wd.add_hline(y=0, line_color=_grid, line_width=1)
+            fig_wd.update_layout(**_base_layout(height=260))
+            _style_axes(fig_wd, yprefix="$")
+            st.plotly_chart(fig_wd, use_container_width=True)
+
+        with cs2:
+            if _has_hours:
+                _card("Performance par heure de la journée")
+                df_cal_stats["_hour"] = df_cal_stats["_dtp"].dt.hour
+                hr_agg = df_cal_stats.groupby("_hour").agg(
+                    pnl=("pnl","sum"), trades=("pnl","count")).reindex(range(24), fill_value=0)
+                fig_hrd = go.Figure(go.Bar(
+                    x=[f"{h:02d}h" for h in hr_agg.index], y=hr_agg["pnl"].tolist(),
+                    marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in hr_agg["pnl"]],
+                    marker_opacity=0.85, customdata=hr_agg["trades"].tolist(),
+                    hovertemplate="<b>%{x}</b><br>P&L : %{y:+,.2f}$<br>%{customdata} trades<extra></extra>",
+                ))
+                fig_hrd.add_hline(y=0, line_color=_grid, line_width=1)
+                fig_hrd.update_layout(**_base_layout(height=260))
+                _style_axes(fig_hrd, yprefix="$")
+                st.plotly_chart(fig_hrd, use_container_width=True)
+            else:
+                _card("Performance par heure de la journée")
+                st.info("Aucune heure enregistrée sur la période filtrée "
+                       "(trades saisis sans heure précise).")
+
+        if _has_hours:
+            _card("Heatmap Jour de semaine × Heure", "Somme du P&L")
+            df_cal_stats["_hour2"] = df_cal_stats["_dtp"].dt.hour
+            pivot_wh = df_cal_stats.pivot_table(
+                index="_weekday", columns="_hour2", values="pnl",
+                aggfunc="sum", fill_value=0).reindex(_jours_ordre)
+            if not pivot_wh.empty and pivot_wh.shape[1] > 0:
+                _max_abs_wh = max(abs(pivot_wh.values.min()), abs(pivot_wh.values.max()), 1)
+                fig_hm = go.Figure(go.Heatmap(
+                    z=pivot_wh.values,
+                    x=[f"{h:02d}h" for h in pivot_wh.columns],
+                    y=pivot_wh.index.tolist(),
+                    colorscale=[[0,"rgba(255,77,109,0.85)"],[0.5,"#111520"],[1,"rgba(0,212,170,0.85)"]],
+                    zmid=0, zmin=-_max_abs_wh, zmax=_max_abs_wh,
+                    hovertemplate="<b>%{y} · %{x}</b><br>P&L : %{z:+,.2f}$<extra></extra>",
+                    showscale=True,
+                    colorbar=dict(tickfont=dict(color=_text, size=10), thickness=10),
+                ))
+                fig_hm.update_layout(**_base_layout(height=280))
+                fig_hm.update_xaxes(gridcolor=_grid, linecolor=_grid)
+                fig_hm.update_yaxes(gridcolor=_grid, linecolor=_grid)
+                st.plotly_chart(fig_hm, use_container_width=True)
+            else:
+                st.info("Pas assez de données horaires pour la heatmap.")
+        st.markdown(" ")
+
+        # ════════════════════════════════════════════════════════════════════
         # ROW 6 : Derniers trades
         # ════════════════════════════════════════════════════════════════════
         st.markdown("### Derniers Trades")
@@ -990,12 +1085,13 @@ if st.session_state.page == "dashboard":
         for _, t in recent.iterrows():
             c  = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
             dc = "b-win" if t["direction"]=="LONG" else "b-loss"
-            mc = "b-real" if t.get("trade_mode","Réel") in ("Réel","Réel 💰") else "b-demo"
+            _tm = t.get("trade_mode","Réel Indépendant")
+            mc = "b-demo" if _tm == "Démo" else ("b-inst" if _tm == "Réel Institutionnel" else "b-real")
             rows_html += f"""<tr>
                 <td style="color:#6b7894;font-family:monospace">{t["date"]}</td>
                 <td>{badge(t["symbol"],"b-sym")}</td>
                 <td>{badge(t["direction"],dc)}</td>
-                <td>{badge(t.get("trade_mode","Réel"),mc)}</td>
+                <td>{badge(t.get("trade_mode","Réel Indépendant"),mc)}</td>
                 <td style="font-size:15px;text-align:center">{mood_html(t["mood"])}</td>
                 <td>{badge(t["strategy"],"b-str")}</td>
                 <td style="font-family:monospace;font-weight:800;color:{c}">{fmt(t["pnl"])}</td>
@@ -1027,7 +1123,7 @@ elif st.session_state.page == "journal":
             with tab1:
                 df_all_s = df_all.sort_values("date", ascending=False)
                 labels_one = [
-                    f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel')}  ·  {r['direction']}  ·  {fmt(r['pnl'])}"
+                    f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel Indépendant')}  ·  {r['direction']}  ·  {fmt(r['pnl'])}"
                     for _, r in df_all_s.iterrows()
                 ]
                 ids_one = df_all_s["id"].tolist()
@@ -1099,12 +1195,12 @@ elif st.session_state.page == "journal":
                 with mf1: mf_from = st.date_input("Du",    value=d_min_m, key="mf_from")
                 with mf2: mf_to   = st.date_input("Au",    value=d_max_m, key="mf_to")
                 with mf3: mf_sym  = st.selectbox("Actif",  ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="mf_sym")
-                with mf4: mf_mode = st.selectbox("Mode",   ["Tous","Réel","Démo"], key="mf_mode")
+                with mf4: mf_mode = st.selectbox("Mode",   MODE_FILTER_OPTIONS, key="mf_mode")
                 with mf5: mf_dir  = st.selectbox("Dir.",   ["Tous","LONG","SHORT"], key="mf_dir")
 
                 df_multi = df_multi[df_multi["date"].between(str(mf_from), str(mf_to))]
                 if mf_sym  != "Tous": df_multi = df_multi[df_multi["symbol"]   == mf_sym]
-                if mf_mode != "Tous": df_multi = df_multi[df_multi["trade_mode"].isin([mf_mode, mf_mode+" 💰", mf_mode+" 🧪"])]
+                if mf_mode != "Tous": df_multi = df_multi[df_multi["trade_mode"] == mf_mode]
                 if mf_dir  != "Tous": df_multi = df_multi[df_multi["direction"] == mf_dir]
                 filtered_ids = df_multi["id"].tolist()
 
@@ -1196,7 +1292,7 @@ elif st.session_state.page == "journal":
                     c_pnl = "#00d4aa" if row["pnl"] >= 0 else "#ff4d6d"
                     st.checkbox(
                         f"{row['date']}  ·  {row['symbol']}  ·  "
-                        f"{row.get('trade_mode','Réel')}  ·  {row['direction']}  ·  {fmt(row['pnl'])}",
+                        f"{row.get('trade_mode','Réel Indépendant')}  ·  {row['direction']}  ·  {fmt(row['pnl'])}",
                         key=f"chk_{tid}"
                     )
 
@@ -1213,13 +1309,13 @@ elif st.session_state.page == "journal":
         with fa1: f_from = st.date_input("Du",        value=d_min, key="j_from")
         with fa2: f_to   = st.date_input("Au",        value=d_max, key="j_to")
         with fa3: f_sym  = st.selectbox("Actif",      ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="j_sym")
-        with fa4: f_mode = st.selectbox("Mode",       ["Tous","Réel","Démo"], key="j_mode")
+        with fa4: f_mode = st.selectbox("Mode",       MODE_FILTER_OPTIONS, key="j_mode")
         with fa5: f_dir  = st.selectbox("Direction",  ["Tous","LONG","SHORT"], key="j_dir")
 
         df = df_all.copy()
         df = df[df["date"].between(str(f_from), str(f_to))]
         if f_sym  != "Tous": df = df[df["symbol"]    == f_sym]
-        if f_mode != "Tous": df = df[df["trade_mode"].isin([f_mode, f_mode+" 💰", f_mode+" 🧪"])]
+        if f_mode != "Tous": df = df[df["trade_mode"] == f_mode]
         if f_dir  != "Tous": df = df[df["direction"] == f_dir]
         df = df.sort_values("date", ascending=False)
 
@@ -1253,12 +1349,13 @@ elif st.session_state.page == "journal":
                 dc   = "b-win" if t["direction"]=="LONG" else "b-loss"
                 rr_v = t["rr"]
                 rr_c = "#00d4aa" if (rr_v or 0)>=2 else "#ff9f43" if (rr_v or 0)>=1 else "#ff4d6d"
-                mc   = "b-real" if t.get("trade_mode","Réel") in ("Réel","Réel 💰") else "b-demo"
+                _tm2 = t.get("trade_mode","Réel Indépendant")
+                mc   = "b-demo" if _tm2 == "Démo" else ("b-inst" if _tm2 == "Réel Institutionnel" else "b-real")
                 rows_html += f"""<tr>
                     <td style="color:#6b7894;font-family:monospace;white-space:nowrap">{t["date"]}</td>
                     <td>{badge(t["symbol"],"b-sym")}</td>
                     <td>{badge(t["direction"],dc)}</td>
-                    <td>{badge(t.get("trade_mode","Réel"),mc)}</td>
+                    <td>{badge(t.get("trade_mode","Réel Indépendant"),mc)}</td>
                     <td style="font-family:monospace">{t.get("entry","—")}</td>
                     <td style="font-family:monospace">{t.get("exit","—")}</td>
                     <td style="font-family:monospace;font-weight:800;color:{c};white-space:nowrap">{fmt(t["pnl"])}</td>
@@ -1292,7 +1389,7 @@ elif st.session_state.page == "add":
         with r1c2: d_sym  = st.selectbox("Symbole", SYMBOLS, index=SYMBOLS.index(ev("symbol","EUR/USD")) if ev("symbol","EUR/USD") in SYMBOLS else 0)
         with r1c3: d_dir  = st.selectbox("Direction", ["LONG","SHORT"], index=["LONG","SHORT"].index(ev("direction","LONG")))
         with r1c4:
-            cur_mode = ev("trade_mode","Réel")
+            cur_mode = ev("trade_mode","Réel Indépendant")
             d_mode = st.selectbox("Mode", TRADE_MODES, index=TRADE_MODES.index(cur_mode) if cur_mode in TRADE_MODES else 0)
 
         r2c1,r2c2,r2c3,r2c4 = st.columns(4)
@@ -1368,9 +1465,11 @@ elif st.session_state.page == "import":
     # ── Mode du compte ────────────────────────────────────────────────────────
     ic1, ic2 = st.columns([2, 3])
     with ic1:
-        imp_mode = st.radio("Type de compte", ["Réel", "Démo"], horizontal=True)
+        imp_mode = st.radio("Type de compte", TRADE_MODES, horizontal=True)
     with ic2:
-        mc = "mode-banner-real" if imp_mode == "Réel" else "mode-banner-demo"
+        _mc_map = {"Démo":"mode-banner-demo","Réel Indépendant":"mode-banner-real",
+                   "Réel Institutionnel":"mode-banner-inst"}
+        mc = _mc_map.get(imp_mode, "mode-banner-real")
         st.markdown(f'<div class="{mc}" style="margin-top:8px">Trades étiquetés : {imp_mode}</div>',
                     unsafe_allow_html=True)
 
@@ -1881,6 +1980,93 @@ elif st.session_state.page == "calendar":
             html += '</tbody></table></div>'
 
             st.markdown(html, unsafe_allow_html=True)
+
+            # ════════════════════════════════════════════════════════════════
+            # ZOOM HORAIRE — détail des prises de position d'un jour précis
+            # ════════════════════════════════════════════════════════════════
+            active_day_nums = sorted(day_agg.index.tolist())
+            if active_day_nums:
+                st.markdown("---")
+                st.markdown("#### Détail horaire d'une journée")
+                zc1, zc2 = st.columns([1.4, 3])
+                with zc1:
+                    default_day = active_day_nums[-1]
+                    zoom_day = st.selectbox(
+                        "Jour à zoomer",
+                        active_day_nums,
+                        index=active_day_nums.index(default_day),
+                        format_func=lambda d: f"{d:02d} {mois_fr[month-1]} {year} "
+                                              f"({int(day_agg.loc[d,'trades'])} trades)",
+                        key="cal_zoom_day"
+                    )
+                with zc2:
+                    zpnl = day_agg.loc[zoom_day, "pnl"]
+                    ztrades = int(day_agg.loc[zoom_day, "trades"])
+                    zcol = "#00d4aa" if zpnl >= 0 else "#ff4d6d"
+                    st.markdown(
+                        f"<div style='padding-top:6px'>"
+                        f"<span style='color:#6b7894'>P&L du jour : </span>"
+                        f"<b style='color:{zcol};font-family:JetBrains Mono,monospace'>{fmt(zpnl)}</b>"
+                        f"<span style='color:#6b7894'> · {ztrades} position{'s' if ztrades>1 else ''}</span>"
+                        f"</div>", unsafe_allow_html=True)
+
+                zoom_date_iso = date(year, month, zoom_day).isoformat()
+                df_zoom_day = df_cal[df_cal["_dt"].dt.date.astype(str) == zoom_date_iso].copy()
+
+                if "datetime" in df_zoom_day.columns:
+                    df_zoom_day["_hour"] = pd.to_datetime(
+                        df_zoom_day["datetime"], errors="coerce").dt.hour
+                else:
+                    df_zoom_day["_hour"] = None
+
+                if df_zoom_day["_hour"].notna().any():
+                    hour_agg = df_zoom_day.groupby("_hour").agg(
+                        pnl=("pnl","sum"), trades=("pnl","count"))
+                    hour_agg = hour_agg.reindex(range(24), fill_value=0)
+
+                    fig_hr = go.Figure(go.Bar(
+                        x=[f"{h:02d}h" for h in hour_agg.index],
+                        y=hour_agg["pnl"].tolist(),
+                        marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in hour_agg["pnl"]],
+                        marker_opacity=0.85,
+                        customdata=hour_agg["trades"].tolist(),
+                        hovertemplate="<b>%{x}</b><br>P&L : %{y:+,.2f}$<br>"
+                                     "%{customdata} position(s)<extra></extra>",
+                    ))
+                    fig_hr.add_hline(y=0, line_color="#1a2035", line_width=1)
+                    fig_hr.update_layout(
+                        paper_bgcolor="#111520", plot_bgcolor="#111520",
+                        font=dict(color="#8892a4", size=11), height=260,
+                        margin=dict(l=50,r=20,t=10,b=30), showlegend=False)
+                    fig_hr.update_xaxes(gridcolor="#1a2035", linecolor="#1a2035")
+                    fig_hr.update_yaxes(gridcolor="#1a2035", linecolor="#1a2035", tickprefix="$")
+                    st.plotly_chart(fig_hr, use_container_width=True,
+                                    config={"scrollZoom": True, "displayModeBar": True,
+                                           "modeBarButtonsToRemove": ["lasso2d","select2d"]})
+
+                    # Liste détaillée des positions de ce jour, triées par heure
+                    df_zoom_sorted = df_zoom_day.sort_values("datetime")
+                    st.markdown("##### Positions prises ce jour")
+                    for _, zt in df_zoom_sorted.iterrows():
+                        try:
+                            zh = pd.to_datetime(zt["datetime"]).strftime("%H:%M")
+                        except Exception:
+                            zh = "—"
+                        zc = "#00d4aa" if zt["pnl"]>=0 else "#ff4d6d"
+                        st.markdown(
+                            f"<div style='display:flex;gap:14px;align-items:center;"
+                            f"background:#111520;border:1px solid #1e2535;border-radius:8px;"
+                            f"padding:7px 14px;margin-bottom:5px;font-size:13px'>"
+                            f"<span style='color:#6b7894;font-family:JetBrains Mono,monospace;"
+                            f"min-width:42px'>{zh}</span>"
+                            f"<span style='color:#e8ecf4;font-weight:600'>{zt['symbol']}</span>"
+                            f"<span style='color:#6b7894'>{zt['direction']}</span>"
+                            f"<span style='color:{zc};font-family:JetBrains Mono,monospace;"
+                            f"font-weight:700;margin-left:auto'>{fmt(zt['pnl'])}</span>"
+                            f"</div>", unsafe_allow_html=True)
+                else:
+                    st.info("Aucune heure précise enregistrée pour ce jour "
+                           "(trades saisis sans heure).")
 
         # ════════════════════════════════════════════════════════════════════
         # VUE SEMAINE — Grille des semaines de l'année
