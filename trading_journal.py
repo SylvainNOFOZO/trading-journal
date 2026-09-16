@@ -1632,12 +1632,27 @@ elif st.session_state.page == "import":
         try:
             if fname.endswith((".xlsx", ".xls")):
                 xls_scan  = pd.read_excel(io.BytesIO(file_bytes), header=None, dtype=str)
+                # Trouver la ligne d'en-tête des POSITIONS (contient Position + Profit)
                 header_row = 0
                 for i, row in xls_scan.iterrows():
                     vals = [str(v).strip().lower() for v in row.values]
-                    if any(k in vals for k in ["symbol","time","profit","type","position"]):
+                    if "position" in vals and "profit" in vals:
                         header_row = i; break
-                df_raw = pd.read_excel(io.BytesIO(file_bytes), skiprows=header_row, dtype=str)
+                else:
+                    for i, row in xls_scan.iterrows():
+                        vals = [str(v).strip().lower() for v in row.values]
+                        if any(k in vals for k in ["symbol","time","profit","type","position"]):
+                            header_row = i; break
+                # Détecter la fin de la section : 1ère ligne "Orders"/"Deals"/"Results"
+                # ou 1ère ligne vide APRÈS l'en-tête
+                stop_row = len(xls_scan)
+                for i in range(header_row + 1, len(xls_scan)):
+                    first = str(xls_scan.iloc[i, 0]).strip().lower()
+                    if first in ("orders", "deals", "results", "nan", ""):
+                        stop_row = i; break
+                n_read = stop_row - header_row - 1
+                df_raw = pd.read_excel(io.BytesIO(file_bytes), skiprows=header_row,
+                                       nrows=n_read, dtype=str)
             else:
                 raw_text = file_bytes.decode("utf-8", errors="replace")
                 counts   = {"	": raw_text.count("	"), ";": raw_text.count(";"), ",": raw_text.count(",")}
@@ -1646,10 +1661,22 @@ elif st.session_state.page == "import":
                 header_row = 0
                 for i, row in tmp.iterrows():
                     vals = [str(v).strip().lower() for v in row.values]
-                    if any(k in vals for k in ["symbol","time","profit","type","position"]):
+                    if "position" in vals and "profit" in vals:
                         header_row = i; break
+                else:
+                    for i, row in tmp.iterrows():
+                        vals = [str(v).strip().lower() for v in row.values]
+                        if any(k in vals for k in ["symbol","time","profit","type","position"]):
+                            header_row = i; break
+                # Fin de section Positions
+                stop_row = len(tmp)
+                for i in range(header_row + 1, len(tmp)):
+                    first = str(tmp.iloc[i, 0]).strip().lower()
+                    if first in ("orders", "deals", "results", "nan", ""):
+                        stop_row = i; break
+                n_read = stop_row - header_row - 1
                 df_raw = pd.read_csv(io.StringIO(raw_text), sep=sep, skiprows=header_row,
-                                     dtype=str, on_bad_lines="skip")
+                                     nrows=n_read, dtype=str, on_bad_lines="skip")
         except Exception as e:
             st.error(f"Erreur lecture fichier : {e}"); st.stop()
 
@@ -1766,16 +1793,51 @@ elif st.session_state.page == "import":
         df_closed = df_work[df_work["_profit_val"].notna() &
                              df_work["_profit_val"].ne(0)].copy()
 
-        # Dédupliquer par Position si disponible (éviter double-comptage)
+        # Dédupliquer par Position si disponible (éviter double-comptage interne)
         if col_position:
             before = len(df_closed)
             df_closed = df_closed.drop_duplicates(subset=[col_position], keep="last")
             if len(df_closed) < before:
-                st.info(f"Déduplication : {before - len(df_closed)} doublon(s) supprimé(s) "
-                        f"(même Position ID gardée une seule fois).")
+                st.info(f"Déduplication interne : {before - len(df_closed)} ligne(s) en double "
+                        f"dans le fichier (même Position ID).")
 
         if df_closed.empty:
             st.warning("Aucun trade fermé détecté."); st.stop()
+
+        # ── Parser la date d'ouverture pour le filtre de plage ────────────────
+        df_closed["_open_dt"] = pd.to_datetime(
+            df_closed[col_open_time], errors="coerce", format="mixed")
+        _valid_dates = df_closed["_open_dt"].dropna()
+
+        if _valid_dates.empty:
+            st.warning("Impossible de lire les dates d'ouverture des positions.")
+            st.stop()
+
+        _dmin = _valid_dates.min().date()
+        _dmax = _valid_dates.max().date()
+
+        st.markdown("---")
+        st.markdown("##### Plage de dates à importer")
+        st.caption(f"Le fichier couvre du **{_dmin.strftime('%d/%m/%Y')}** "
+                   f"au **{_dmax.strftime('%d/%m/%Y')}** ({len(df_closed)} positions fermées).")
+        dc1, dc2 = st.columns(2)
+        with dc1:
+            imp_from = st.date_input("Depuis le", value=_dmin,
+                                     min_value=_dmin, max_value=_dmax, key="imp_from")
+        with dc2:
+            imp_to = st.date_input("Jusqu'au", value=_dmax,
+                                   min_value=_dmin, max_value=_dmax, key="imp_to")
+
+        # Appliquer le filtre de dates (les positions sans date lisible sont écartées)
+        _mask_date = (df_closed["_open_dt"].dt.date >= imp_from) & \
+                     (df_closed["_open_dt"].dt.date <= imp_to)
+        _before_date = len(df_closed)
+        df_closed = df_closed[_mask_date].copy()
+        st.info(f"{len(df_closed)} position(s) dans la plage sélectionnée "
+                f"(sur {_before_date} au total dans le fichier).")
+
+        if df_closed.empty:
+            st.warning("Aucune position dans cette plage de dates."); st.stop()
 
         # ── Construction trades + aperçu détaillé ────────────────────────────
         new_trades = []; skipped = 0
@@ -1838,8 +1900,12 @@ elif st.session_state.page == "import":
                 except:
                     _dt_full = f"{parsed_date}T00:00"
 
+                # Position ID MT5 : identifiant stable pour la déduplication
+                _mt5_pos = rv(col_position, "").strip() if col_position else ""
+
                 new_trades.append({
                     "id":         int(datetime.now().timestamp()*1000000)+len(new_trades),
+                    "mt5_id":     _mt5_pos,
                     "date":       parsed_date,
                     "time":       _time_str,
                     "datetime":   _dt_full,
@@ -1870,12 +1936,53 @@ elif st.session_state.page == "import":
         if not new_trades:
             st.error("Aucun trade valide extrait."); st.stop()
 
+        # ── Déduplication contre la BASE existante ────────────────────────────
+        # 1) Par Position ID MT5 (fiable, pour les imports récents)
+        # 2) Par signature datetime+symbole+P&L (secours pour les anciens trades
+        #    importés avant l'ajout du champ mt5_id)
+        def _sig(t):
+            return (str(t.get("datetime",""))[:16], str(t.get("symbol","")),
+                    round(float(t.get("pnl",0) or 0), 2))
+        _existing_mt5 = {str(t.get("mt5_id","")).strip()
+                         for t in st.session_state.trades
+                         if str(t.get("mt5_id","")).strip()}
+        _existing_sig = {_sig(t) for t in st.session_state.trades}
+        _dup_count = 0
+        _fresh = []
+        for t in new_trades:
+            _is_dup = (t.get("mt5_id") and t["mt5_id"] in _existing_mt5) \
+                      or (_sig(t) in _existing_sig)
+            if _is_dup:
+                _dup_count += 1
+            else:
+                _fresh.append(t)
+        new_trades = _fresh
+
+        if _dup_count:
+            st.warning(f"{_dup_count} position(s) déjà présente(s) en base — "
+                       f"ignorée(s) automatiquement (aucun doublon créé).")
+
+        if not new_trades:
+            st.success("Toutes les positions de cette plage sont déjà en base. "
+                       "Rien de nouveau à importer.")
+            st.stop()
+
+        # Reconstruire l'aperçu à partir des seuls trades nouveaux
+        preview_rows = [{
+            "Date":        t["date"],
+            "Heure":       t["time"],
+            "Symbole":     t["symbol"],
+            "Dir.":        t["direction"],
+            "P&L net":     t["pnl"],
+            "Position ID": t.get("mt5_id",""),
+        } for t in new_trades]
+
         # ── Aperçu avec détail du calcul ──────────────────────────────────────
         total_imp  = round(sum(t["pnl"] for t in new_trades), 2)
         wins_imp   = [t for t in new_trades if t["pnl"] > 0]
         col_t      = "#00d4aa" if total_imp >= 0 else "#ff4d6d"
 
-        st.markdown(f"### {len(new_trades)} trades prêts à importer"
+        st.markdown(f"### {len(new_trades)} nouveaux trades prêts à importer"
                     + (f" · {skipped} ignorés" if skipped else ""))
 
         s1, s2, s3 = st.columns(3)
@@ -1884,38 +1991,40 @@ elif st.session_state.page == "import":
         with s3: kpi('<i class="fa-solid fa-circle-xmark"></i>', "Perdants", str(len(new_trades)-len(wins_imp)), "Trades négatifs", "#ff4d6d")
         st.markdown(" ")
 
-        # Tableau de vérification du calcul
-        st.markdown("##### Vérification du calcul P&L (25 premiers trades)")
-        df_preview = pd.DataFrame(preview_rows[:25])
+        # Tableau de vérification (30 premiers nouveaux trades)
+        st.markdown("##### Aperçu des nouveaux trades (30 premiers)")
+        df_preview = pd.DataFrame(preview_rows[:30])
         st.dataframe(
             df_preview.style
-            .format({"Profit brut":"{:+.2f}","Commission":"{:+.2f}","Swap":"{:+.2f}","P&L net":"{:+.2f}"})
-            .map(lambda v: f"color:{'#00d4aa' if v>0 else '#ff4d6d' if v<0 else '#6b7894'}" 
+            .format({"P&L net":"{:+.2f}"})
+            .map(lambda v: f"color:{'#00d4aa' if v>0 else '#ff4d6d' if v<0 else '#6b7894'}"
                  if isinstance(v,(int,float)) else "",
-                 subset=["Profit brut","Commission","Swap","P&L net"]),
+                 subset=["P&L net"]),
             use_container_width=True, hide_index=True
         )
         st.caption(
-            f"Méthode : {'Profit + Commission + Swap' if use_costs else 'Profit uniquement'}. "
-            f"Si les valeurs semblent incorrectes, changez la méthode ci-dessus et réimportez."
+            f"Méthode P&L : {'Profit + Commission + Swap' if use_costs else 'Profit uniquement'}. "
+            f"Déduplication par Position ID MT5 : réimporter le même fichier n'ajoutera aucun doublon."
         )
 
         st.markdown("---")
         add_mode = st.radio(
             "Mode d'import",
-            ["Ajouter aux trades existants", "Remplacer tous les trades"],
-            horizontal=True
+            ["Ajouter aux trades existants (recommandé)", "Remplacer TOUS les trades"],
+            horizontal=True,
+            help="« Ajouter » n'insère que les nouveaux trades (doublons déjà écartés). "
+                 "« Remplacer » efface toute la base et la remplace par ces trades."
         )
 
         if st.button("Confirmer l'import", icon=":material/check_circle:", use_container_width=True):
             if "Remplacer" in add_mode:
                 st.session_state.trades = new_trades
             else:
-                existing_ids = {t["id"] for t in st.session_state.trades}
-                st.session_state.trades += [t for t in new_trades if t["id"] not in existing_ids]
+                # Les doublons ont déjà été écartés par mt5_id — ajout direct
+                st.session_state.trades = st.session_state.trades + new_trades
             ok = cloud_save(st.session_state.trades)
-            st.success(f"{len(new_trades)} trades importés ({imp_mode}) — " +
-                       ("synchronisés." if ok else "erreur sync GitHub."))
+            st.success(f"{len(new_trades)} nouveau(x) trade(s) importé(s) ({imp_mode}) — " +
+                       ("synchronisés." if ok else "sauvegarde locale (sync à vérifier)."))
             st.session_state.page = "dashboard"; st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
