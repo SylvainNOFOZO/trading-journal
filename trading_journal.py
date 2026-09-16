@@ -2171,8 +2171,30 @@ elif st.session_state.page == "analyse":
         watched_ccy.update(ASSETS[a]["ccy"])
 
     df_ev = pd.DataFrame(events)
-    if df_ev.empty or "country" not in df_ev.columns:
-        st.warning("Format de calendrier inattendu.")
+    if df_ev.empty:
+        st.warning("Aucune donnée d'annonce disponible.")
+        st.stop()
+
+    # Normaliser les noms de colonnes (le flux peut varier : Country/country, etc.)
+    _rename = {}
+    for c in df_ev.columns:
+        cl = str(c).strip().lower()
+        if cl in ("country", "currency"):        _rename[c] = "country"
+        elif cl in ("impact", "importance"):     _rename[c] = "impact"
+        elif cl in ("title", "event", "name"):   _rename[c] = "title"
+        elif cl == "actual":                     _rename[c] = "actual"
+        elif cl in ("forecast", "estimate"):     _rename[c] = "forecast"
+        elif cl in ("previous", "prior"):        _rename[c] = "previous"
+        elif cl in ("date", "datetime"):         _rename[c] = "date"
+    df_ev = df_ev.rename(columns=_rename)
+
+    # Garantir la présence de toutes les colonnes exploitées
+    for _col in ("country", "impact", "title", "actual", "forecast", "previous", "date"):
+        if _col not in df_ev.columns:
+            df_ev[_col] = ""
+
+    if df_ev["country"].astype(str).str.strip().eq("").all():
+        st.warning("Format de calendrier inattendu (pas de devise identifiable).")
         st.stop()
 
     df_ev["_dt"] = pd.to_datetime(df_ev["date"], errors="coerce", utc=True)
