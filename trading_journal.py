@@ -6,7 +6,7 @@ from datetime import date, datetime
 import json, os, base64, requests, io
 import calendar as _calmod
 
-st.set_page_config(page_title="Trading Journal Pro", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Trading Journal Pro", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
 
 # ── VÉRIFICATION CONFIGURATION ────────────────────────────────────────────────
 _sb_url = st.secrets.get("SUPABASE_URL","")
@@ -127,8 +127,19 @@ def build_css(t):
 .icon-orange {{ color:{t['orange']}; background:{t['orange']}1f; }}
 .icon-muted  {{ color:{t['muted']}; background:{t['muted']}1a; }}
 .mood-dot {{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }}
-.stApp {{ background-color: {t['bg']}; }}
-section[data-testid="stSidebar"] > div {{ background-color: {t['sidebar']}; border-right: 1px solid {t['border']}; }}
+.stApp {{ background-color: {t['bg']}; font-size:14px; }}
+/* Navigation horizontale : masquer la sidebar */
+section[data-testid="stSidebar"] {{ display:none; }}
+button[data-testid="stBaseButton-headerNoPadding"] {{ display:none; }}
+.block-container {{ padding-top:2.2rem; max-width:1500px; }}
+/* Police réduite globale */
+h1 {{ font-size:1.5rem !important; }}
+h2 {{ font-size:1.2rem !important; }}
+h3 {{ font-size:1.05rem !important; }}
+h4 {{ font-size:0.92rem !important; }}
+p,label,.stMarkdown,.stMarkdown li {{ font-size:13px; }}
+/* Boutons de navigation compacts */
+.stButton > button {{ font-size:13px; padding:6px 10px; }}
 h1,h2,h3,h4,h5,h6,p,label,.stMarkdown {{ color: {t['text']} !important; }}
 .stSelectbox label,.stNumberInput label,.stTextInput label,.stTextArea label,.stDateInput label {{
     color: {t['muted']} !important; font-size: 11px !important; text-transform: uppercase; letter-spacing: 1px; }}
@@ -407,62 +418,70 @@ def safe_float(val):
     except: return 0.0
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("## Trading Journal")
-    st.caption("Pro · v3.0 · GitHub Sync")
+# ── INJECTION CSS (avant le header pour que le thème s'applique) ─────────────────
+st.markdown(build_css(get_theme()), unsafe_allow_html=True)
 
-    _sel_theme = st.selectbox(
-        "Thème", THEME_NAMES,
+# ── HEADER HORIZONTAL COMPACT ───────────────────────────────────────────────────
+_thd = get_theme()
+df_side = get_df(st.session_state.mode_filter)
+total   = df_side["pnl"].sum() if not df_side.empty else 0
+wr      = (len(df_side[df_side["pnl"]>0])/len(df_side)*100) if not df_side.empty else 0
+col_pnl = _thd["win"] if total >= 0 else _thd["loss"]
+
+_hh1, _hh2, _hh3 = st.columns([2.3, 2, 2.4])
+with _hh1:
+    st.markdown(
+        f"<div style='padding-top:2px'>"
+        f"<span style='font-size:16px;font-weight:800;color:{_thd['text']}'>Trading Journal</span> "
+        f"<span style='font-size:11px;color:{_thd['muted']}'>Pro</span></div>",
+        unsafe_allow_html=True)
+with _hh2:
+    _sel_theme = st.selectbox("Thème", THEME_NAMES,
         index=THEME_NAMES.index(st.session_state.theme_name)
               if st.session_state.theme_name in THEME_NAMES else 0,
-        key="theme_selector", label_visibility="collapsed"
-    )
+        key="theme_selector", label_visibility="collapsed")
     if _sel_theme != st.session_state.theme_name:
-        st.session_state.theme_name = _sel_theme
-        st.rerun()
-
-    st.divider()
-
-    # Filtre global mode
-    mode_f = st.selectbox("Afficher", MODE_FILTER_OPTIONS,
-        index=MODE_FILTER_OPTIONS.index(st.session_state.mode_filter) if st.session_state.mode_filter in MODE_FILTER_OPTIONS else 0,
+        st.session_state.theme_name = _sel_theme; st.rerun()
+with _hh3:
+    _mf = st.selectbox("Afficher", MODE_FILTER_OPTIONS,
+        index=MODE_FILTER_OPTIONS.index(st.session_state.mode_filter)
+              if st.session_state.mode_filter in MODE_FILTER_OPTIONS else 0,
         label_visibility="collapsed")
-    if mode_f != st.session_state.mode_filter:
-        st.session_state.mode_filter = mode_f; st.rerun()
-    st.divider()
+    if _mf != st.session_state.mode_filter:
+        st.session_state.mode_filter = _mf; st.rerun()
 
-    df_side = get_df(st.session_state.mode_filter)
-    total   = df_side["pnl"].sum() if not df_side.empty else 0
-    wr      = (len(df_side[df_side["pnl"]>0])/len(df_side)*100) if not df_side.empty else 0
-    col_pnl = "#00d4aa" if total >= 0 else "#ff4d6d"
-    mode_icon = st.session_state.mode_filter
+# Bandeau capital compact
+st.markdown(
+    f"<div style='display:flex;gap:20px;align-items:baseline;padding:2px 0 8px'>"
+    f"<span style='font-size:11px;color:{_thd['muted']};text-transform:uppercase;"
+    f"letter-spacing:1px'>Capital {st.session_state.mode_filter}</span>"
+    f"<span style='font-size:18px;font-weight:800;color:{col_pnl};"
+    f"font-family:JetBrains Mono,monospace'>{fmt(total)}</span>"
+    f"<span style='font-size:11px;color:{_thd['muted']}'>{len(df_side)} trades · {wr:.0f}% win</span>"
+    f"</div>", unsafe_allow_html=True)
 
-    st.markdown(f"""<div style="margin-bottom:16px;padding:10px 0">
-        <div style="font-size:10px;color:#6b7894;letter-spacing:1px;text-transform:uppercase">
-            Capital Net · {mode_icon} {st.session_state.mode_filter}</div>
-        <div style="font-size:22px;font-weight:800;color:{col_pnl};font-family:\'JetBrains Mono\',monospace">{fmt(total)}</div>
-        <div style="font-size:11px;color:#6b7894;margin-top:2px">{len(df_side)} trades · {wr:.0f}% win</div>
-    </div>""", unsafe_allow_html=True)
+# ── NAVIGATION HORIZONTALE ──────────────────────────────────────────────────────
+_NAV = [
+    ("dashboard", "Dashboard",  ":material/dashboard:"),
+    ("journal",   "Journal",    ":material/table_rows:"),
+    ("add",       "Nouveau",    ":material/add_circle:"),
+    ("import",    "Import MT5", ":material/upload_file:"),
+    ("analyse",   "Analyse & News", ":material/newspaper:"),
+    ("calendar",  "Calendrier", ":material/calendar_month:"),
+]
+_nav_cols = st.columns(len(_NAV) + 1)
+for _c, (_k, _lbl, _ic) in zip(_nav_cols, _NAV):
+    with _c:
+        if st.button(_lbl, icon=_ic, use_container_width=True,
+                     type="primary" if st.session_state.page == _k else "secondary",
+                     key=f"nav_{_k}"):
+            st.session_state.page = _k; st.session_state.edit_id = None; st.rerun()
+with _nav_cols[-1]:
+    if st.button("Sync", icon=":material/sync:", use_container_width=True, key="nav_sync"):
+        force_reload(); st.rerun()
 
-    if st.button("  Dashboard",     icon=":material/dashboard:",     use_container_width=True):
-        st.session_state.page="dashboard"; st.session_state.edit_id=None; st.rerun()
-    if st.button("  Journal",       icon=":material/table_rows:",       use_container_width=True):
-        st.session_state.page="journal";   st.session_state.edit_id=None; st.rerun()
-    if st.button("  Nouveau Trade", icon=":material/add_circle:", use_container_width=True):
-        st.session_state.page="add";       st.session_state.edit_id=None; st.rerun()
-    if st.button("  Importer MT5",  icon=":material/upload_file:",  use_container_width=True):
-        st.session_state.page="import";    st.session_state.edit_id=None; st.rerun()
-    if st.button("  Calendrier",    icon=":material/calendar_month:", use_container_width=True):
-        st.session_state.page="calendar";  st.session_state.edit_id=None; st.rerun()
-    if st.button("  Synchroniser",  icon=":material/sync:",  use_container_width=True):
-        force_reload(); st.success("Données rechargées."); st.rerun()
-
-    st.divider()
-    if not df_side.empty:
-        csv = df_side.to_csv(index=False).encode("utf-8")
-        st.download_button("  Exporter CSV", data=csv, file_name="trades.csv", mime="text/csv", icon=":material/download:", use_container_width=True)
-
-    st.markdown('<div class="sync-ok"><i class="fa-solid fa-database"></i> Supabase · connecté</div>', unsafe_allow_html=True)
+st.markdown(f"<hr style='margin:6px 0 16px;border-color:{_thd['border']}'>",
+            unsafe_allow_html=True)
 
 # ── BANNER MODE ────────────────────────────────────────────────────────────────
 def mode_banner():
@@ -475,9 +494,6 @@ def mode_banner():
         st.markdown('<div class="mode-banner-demo"><i class="fa-solid fa-flask"></i> Mode DÉMO — Performances sur compte démo</div>', unsafe_allow_html=True)
     else:
         st.markdown('<div class="mode-banner-all"><i class="fa-solid fa-layer-group"></i> Tous les trades — tous comptes confondus</div>', unsafe_allow_html=True)
-
-# ── INJECTION CSS SELON LE THÈME ACTIF ──────────────────────────────────────────
-st.markdown(build_css(get_theme()), unsafe_allow_html=True)
 
 # ── MESSAGE DE MIGRATION (affiché une seule fois) ───────────────────────────────
 _mig_msg = st.session_state.pop("_migration_msg", None)
@@ -578,31 +594,41 @@ if st.session_state.page == "dashboard":
         _alt  = _theme["alt"]
         _ora  = _theme["orange"]
 
+        _gridline = _theme["border"]
+
         def _base_layout(height=260, showlegend=False, **kwargs):
-            """showlegend est un param nommé — jamais en doublon avec **kwargs."""
             return dict(
                 paper_bgcolor=_bg, plot_bgcolor=_bg,
-                font=dict(color=_text, family="DM Sans, sans-serif", size=12),
+                font=dict(color=_text, family="Inter, sans-serif", size=12),
                 height=height,
-                margin=dict(l=50,r=20,t=30,b=40),
+                margin=dict(l=54, r=18, t=18, b=36),
                 showlegend=showlegend,
-                hovermode="x unified",
+                hovermode="closest",
+                bargap=0.25,
                 **kwargs
             )
 
         def _style_axes(fig, xprefix="", yprefix="", xtickangle=0, free_y=False):
-            fig.update_xaxes(gridcolor=_grid, linecolor=_grid, tickcolor=_grid,
+            # Grille horizontale discrète uniquement, pas de bordures d'axe agressives
+            fig.update_xaxes(showgrid=False, linecolor=_gridline, tickcolor=_gridline,
                              tickprefix=xprefix, tickangle=xtickangle,
-                             showline=True, zeroline=False)
-            fig.update_yaxes(gridcolor=_grid, linecolor=_grid, tickcolor=_grid,
-                             tickprefix=yprefix, showline=True, zeroline=True,
-                             zerolinecolor="#2a3248", zerolinewidth=1,
-                             fixedrange=not free_y)
+                             showline=False, zeroline=False,
+                             tickfont=dict(size=11))
+            fig.update_yaxes(gridcolor=_gridline, linecolor=_gridline, tickcolor=_gridline,
+                             tickprefix=yprefix, showline=False, zeroline=True,
+                             zerolinecolor=_gridline, zerolinewidth=1,
+                             tickfont=dict(size=11), fixedrange=not free_y)
 
         def _card(title, subtitle=""):
-            sub_html = f' <span style="font-size:12px;color:#6b7894">{subtitle}</span>' if subtitle else ""
+            accent = _theme["accent"]
+            sub_html = (f' <span style="font-size:11px;color:{_theme["muted"]}">{subtitle}</span>'
+                        if subtitle else "")
             st.markdown(
-                f'<div style="margin-bottom:4px"><span style="font-size:15px;font-weight:700;color:#e8ecf4">{title}</span>{sub_html}</div>',
+                f'<div style="margin:8px 0 6px;display:flex;align-items:center;gap:8px">'
+                f'<span style="width:3px;height:15px;background:{accent};border-radius:2px;'
+                f'display:inline-block"></span>'
+                f'<span style="font-size:14px;font-weight:700;color:{_theme["text"]}">{title}</span>'
+                f'{sub_html}</div>',
                 unsafe_allow_html=True)
 
         # ════════════════════════════════════════════════════════════════════
@@ -646,20 +672,16 @@ if st.session_state.page == "dashboard":
         _tick_vals = pos_idx[::_tick_step]
         _tick_text = [pos_labels[i] for i in _tick_vals]
 
-        # Config commune
+        # Config commune : barre d'outils masquée par défaut (apparait au survol)
         _chart_cfg = {
-            "scrollZoom": True,
-            "displayModeBar": True,
-            "modeBarButtonsToRemove": ["lasso2d","select2d"],
-            "toImageButtonOptions": {"format":"png","scale":2},
+            "displayModeBar": False,
+            "displaylogo": False,
+            "responsive": True,
         }
 
         def _xaxis_pos(n):
-            return dict(
-                showticklabels=False,   # pas de labels sur l'axe X
-                rangeslider=dict(visible=True, thickness=0.04,
-                                 bgcolor="#0d111d", bordercolor=_grid, borderwidth=1),
-            )
+            return dict(showticklabels=False, showgrid=False,
+                        showline=False, zeroline=False)
 
         # ════════════════════════════════════════════════════════════════════
         # ROW 1 : Capital cumulé + Win/Loss
@@ -668,30 +690,26 @@ if st.session_state.page == "dashboard":
         r1c1, r1c2 = st.columns([3,2])
 
         with r1c1:
-            _card("Capital Cumulé par Position")
-            fig_eq = go.Figure(go.Bar(
-                x=pos_idx,
-                y=cumul.tolist(),
-                marker_color=[_win if v >= 0 else _loss for v in cumul],
-                marker_opacity=0.8,
-                hovertemplate=(
-                    "<b>Position #%{pointNumber+1}</b><br>"
-                    "%{customdata[2]}<br>"
-                    "%{customdata[0]} · %{customdata[1]}<br>"
-                    "Capital cumulé : <b>%{y:+,.2f}$</b><extra></extra>"
-                ),
-                customdata=list(zip(
-                    df_s["symbol"].tolist(),
-                    df_s["direction"].tolist(),
-                    pos_labels,
-                )),
+            _card("Courbe de capital", "P&L cumulé, trade après trade")
+            _eq_final = cumul.iloc[-1] if len(cumul) else 0
+            _eq_col = _win if _eq_final >= 0 else _loss
+            def _hex_rgba(h, a):
+                h = h.lstrip("#"); r,g,b = int(h[0:2],16),int(h[2:4],16),int(h[4:6],16)
+                return f"rgba({r},{g},{b},{a})"
+            fig_eq = go.Figure(go.Scatter(
+                x=pos_idx, y=cumul.tolist(), mode="lines",
+                line=dict(color=_eq_col, width=2.2, shape="linear"),
+                fill="tozeroy", fillcolor=_hex_rgba(_eq_col, 0.10),
+                customdata=list(zip(df_s["symbol"].tolist(),
+                                    df_s["direction"].tolist(), pos_labels)),
+                hovertemplate=("<b>#%{x}</b> · %{customdata[2]}<br>"
+                               "%{customdata[0]} %{customdata[1]}<br>"
+                               "Capital : <b>%{y:+,.2f}$</b><extra></extra>"),
                 showlegend=False,
             ))
-            fig_eq.add_hline(y=0, line_color=_grid, line_width=1)
             fig_eq.update_layout(**_base_layout(height=300))
-            _style_axes(fig_eq, yprefix="$", free_y=True)
+            _style_axes(fig_eq, yprefix="$")
             fig_eq.update_xaxes(**_xaxis_pos(n_pos))
-            fig_eq.update_layout(dragmode="zoom")
             st.plotly_chart(fig_eq, use_container_width=True, config=_chart_cfg)
 
         with r1c2:
@@ -710,7 +728,7 @@ if st.session_state.page == "dashboard":
             fig_pie.update_layout(**_base_layout(height=260, showlegend=True),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.08,
                             font=dict(color=_text)))
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_pie, use_container_width=True, config=_chart_cfg)
 
         # ════════════════════════════════════════════════════════════════════
         # ROW 2 : P&L par position + P&L mensuel
@@ -739,9 +757,8 @@ if st.session_state.page == "dashboard":
             ))
             fig_tl.add_hline(y=0, line_color=_grid, line_width=1)
             fig_tl.update_layout(**_base_layout(height=280))
-            _style_axes(fig_tl, yprefix="$", free_y=True)
+            _style_axes(fig_tl, yprefix="$")
             fig_tl.update_xaxes(**_xaxis_pos(n_pos))
-            fig_tl.update_layout(dragmode="zoom")
             st.plotly_chart(fig_tl, use_container_width=True, config=_chart_cfg)
 
         with r2c2:
@@ -758,7 +775,7 @@ if st.session_state.page == "dashboard":
             fig_mo.add_hline(y=0, line_dash="dot", line_color=_grid, line_width=1)
             fig_mo.update_layout(**_base_layout(height=230))
             _style_axes(fig_mo, yprefix="$")
-            st.plotly_chart(fig_mo, use_container_width=True)
+            st.plotly_chart(fig_mo, use_container_width=True, config=_chart_cfg)
 
         # ════════════════════════════════════════════════════════════════════
         # ROW 3 : Évolution R:R + P&L vs Volume
@@ -799,23 +816,15 @@ if st.session_state.page == "dashboard":
                     customdata=list(zip(df_rr["symbol"].tolist(), df_rr["direction"].tolist())),
                     name="R:R",
                 ))
-                # Zones de référence
-                fig_rr.add_hrect(y0=2, y1=max(df_rr["rr"].max()*1.1,3),
-                    fillcolor="rgba(0,212,170,0.04)", line_width=0)
-                fig_rr.add_hrect(y0=1, y1=2,
-                    fillcolor="rgba(255,159,67,0.04)", line_width=0)
-                fig_rr.add_hrect(y0=0, y1=1,
-                    fillcolor="rgba(255,77,109,0.04)", line_width=0)
-                fig_rr.add_hline(y=1, line_dash="dot", line_color=_ora, line_width=1,
-                    annotation_text="1R", annotation_font=dict(color=_ora, size=10))
-                fig_rr.add_hline(y=2, line_dash="dot", line_color=_win, line_width=1,
-                    annotation_text="2R", annotation_font=dict(color=_win, size=10))
-                fig_rr.update_layout(**_base_layout(height=260, showlegend=True),
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.15,
-                                font=dict(color=_text, size=11)))
+                # Repères sobres 1R / 2R (lignes fines, sans bandes de couleur)
+                fig_rr.add_hline(y=1, line_dash="dot", line_color=_text, line_width=1,
+                    annotation_text="1R", annotation_font=dict(color=_text, size=10))
+                fig_rr.add_hline(y=2, line_dash="dot", line_color=_text, line_width=1,
+                    annotation_text="2R", annotation_font=dict(color=_text, size=10))
+                fig_rr.update_layout(**_base_layout(height=260, showlegend=False))
                 _style_axes(fig_rr)
                 fig_rr.update_yaxes(ticksuffix="R")
-                st.plotly_chart(fig_rr, use_container_width=True)
+                st.plotly_chart(fig_rr, use_container_width=True, config=_chart_cfg)
                 # Légende couleurs
                 st.markdown(
                     '<div style="display:flex;gap:20px;font-size:11px;color:#6b7894;margin-top:-8px">'
@@ -863,7 +872,7 @@ if st.session_state.page == "dashboard":
                 fig_vol.update_layout(**_base_layout(height=260))
                 _style_axes(fig_vol, xprefix="$")
                 fig_vol.update_yaxes(categoryorder="total ascending")
-                st.plotly_chart(fig_vol, use_container_width=True)
+                st.plotly_chart(fig_vol, use_container_width=True, config=_chart_cfg)
                 st.caption("Volume non disponible dans les données — affichage P&L par actif. "
                            "Le volume est extrait des notes lors de l'import MT5.")
             else:
@@ -897,7 +906,7 @@ if st.session_state.page == "dashboard":
                     legend=dict(orientation="h", yanchor="bottom", y=-0.15))
                 _style_axes(fig_vol, yprefix="$")
                 fig_vol.update_xaxes(title_text="Volume (lots)")
-                st.plotly_chart(fig_vol, use_container_width=True)
+                st.plotly_chart(fig_vol, use_container_width=True, config=_chart_cfg)
 
         # ════════════════════════════════════════════════════════════════════
         # ROW 4 : Classement actifs + Stratégies
@@ -928,7 +937,7 @@ if st.session_state.page == "dashboard":
             fig_sym.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
             fig_sym.update_layout(**_base_layout(height=max(280,len(by_sym)*48)))
             _style_axes(fig_sym, xprefix="$")
-            st.plotly_chart(fig_sym, use_container_width=True)
+            st.plotly_chart(fig_sym, use_container_width=True, config=_chart_cfg)
 
         with r4c2:
             _card("P&L par Stratégie")
@@ -951,7 +960,7 @@ if st.session_state.page == "dashboard":
             fig_st.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
             fig_st.update_layout(**_base_layout(height=max(280,len(by_strat)*48)))
             _style_axes(fig_st, xprefix="$")
-            st.plotly_chart(fig_st, use_container_width=True)
+            st.plotly_chart(fig_st, use_container_width=True, config=_chart_cfg)
 
         # ════════════════════════════════════════════════════════════════════
         # ROW 5 : Heatmap + P&L par émotion
@@ -994,7 +1003,7 @@ if st.session_state.page == "dashboard":
                 fig_hm.update_xaxes(side="bottom", tickangle=-30,
                                     gridcolor=_grid, linecolor=_grid)
                 fig_hm.update_yaxes(gridcolor=_grid, linecolor=_grid)
-                st.plotly_chart(fig_hm, use_container_width=True)
+                st.plotly_chart(fig_hm, use_container_width=True, config=_chart_cfg)
             else:
                 st.info("Pas assez de données pour la heatmap.")
 
@@ -1023,7 +1032,7 @@ if st.session_state.page == "dashboard":
             fig_mood.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
             fig_mood.update_layout(**_base_layout(height=max(280,len(by_mood)*60)))
             _style_axes(fig_mood, xprefix="$")
-            st.plotly_chart(fig_mood, use_container_width=True)
+            st.plotly_chart(fig_mood, use_container_width=True, config=_chart_cfg)
 
         # ════════════════════════════════════════════════════════════════════
         # STATISTIQUES CALENDAIRES — jour de semaine, heure, heatmap
@@ -1116,7 +1125,7 @@ if st.session_state.page == "dashboard":
                     fig_wd.add_hline(y=0, line_color=_grid, line_width=1)
                 fig_wd.update_layout(**_base_layout(height=260))
                 _style_axes(fig_wd, yprefix=yprefix)
-                st.plotly_chart(fig_wd, use_container_width=True)
+                st.plotly_chart(fig_wd, use_container_width=True, config=_chart_cfg)
 
             with cs2:
                 _card(f"{cal_metric} par heure de la journée")
@@ -1141,7 +1150,7 @@ if st.session_state.page == "dashboard":
                         fig_hrd.add_hline(y=0, line_color=_grid, line_width=1)
                     fig_hrd.update_layout(**_base_layout(height=260))
                     _style_axes(fig_hrd, yprefix=yprefix)
-                    st.plotly_chart(fig_hrd, use_container_width=True)
+                    st.plotly_chart(fig_hrd, use_container_width=True, config=_chart_cfg)
                 else:
                     st.info("Aucune heure enregistrée sur la période filtrée.")
 
@@ -1190,7 +1199,7 @@ if st.session_state.page == "dashboard":
                     fig_hm.update_layout(**_base_layout(height=280))
                     fig_hm.update_xaxes(gridcolor=_grid, linecolor=_grid)
                     fig_hm.update_yaxes(gridcolor=_grid, linecolor=_grid)
-                    st.plotly_chart(fig_hm, use_container_width=True)
+                    st.plotly_chart(fig_hm, use_container_width=True, config=_chart_cfg)
                 else:
                     st.info("Pas assez de données horaires pour la heatmap.")
         st.markdown(" ")
@@ -2030,6 +2039,270 @@ elif st.session_state.page == "import":
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : CALENDRIER
 # ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE : ANALYSE & NEWS — chiffres des annonces + impact sur les actifs
+# ══════════════════════════════════════════════════════════════════════════════
+elif st.session_state.page == "analyse":
+    _ta = get_theme()
+    st.markdown("# Analyse & News économiques")
+    st.caption("Chiffres annoncés en temps réel et lecture professionnelle de leur "
+               "impact sur les actifs majeurs.")
+
+    # ── Actifs majeurs suivis et devises qui les pilotent ────────────────────
+    ASSETS = {
+        "XAUUSD (Or)":      {"ccy": ["USD"], "icon": "fa-coins", "color": "#f5a524"},
+        "DXY (Dollar US)":  {"ccy": ["USD"], "icon": "fa-dollar-sign", "color": "#2dd4a7"},
+        "EUR/USD":          {"ccy": ["EUR", "USD"], "icon": "fa-euro-sign", "color": "#4f8cff"},
+        "GBP/USD":          {"ccy": ["GBP", "USD"], "icon": "fa-sterling-sign", "color": "#9d7bff"},
+        "USD/JPY":          {"ccy": ["USD", "JPY"], "icon": "fa-yen-sign", "color": "#f0506e"},
+        "BTC/USD":          {"ccy": ["USD"], "icon": "fa-bitcoin", "color": "#f7931a"},
+        "WTI (Pétrole)":    {"ccy": ["USD", "CAD"], "icon": "fa-oil-well", "color": "#8892a4"},
+    }
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _fetch_ff_calendar():
+        """Calendrier ForexFactory de la semaine (JSON public) avec actual/forecast/previous."""
+        url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+        try:
+            r = requests.get(url, timeout=12,
+                             headers={"User-Agent": "Mozilla/5.0 TradingJournal"})
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            pass
+        return []
+
+    def _to_num(x):
+        """Extrait un nombre d'une chaîne type '3.5%', '250K', '-1.2', '1.3M'."""
+        if x is None:
+            return None
+        s = str(x).strip().replace("%", "").replace(",", "")
+        mult = 1.0
+        if s.upper().endswith("K"): mult, s = 1e3, s[:-1]
+        elif s.upper().endswith("M"): mult, s = 1e6, s[:-1]
+        elif s.upper().endswith("B"): mult, s = 1e9, s[:-1]
+        try:
+            return float(s) * mult
+        except Exception:
+            return None
+
+    def _surprise(actual, forecast):
+        """Signe et ampleur de la surprise (actual vs forecast)."""
+        a, f = _to_num(actual), _to_num(forecast)
+        if a is None or f is None:
+            return None, None
+        diff = a - f
+        pct = (diff / abs(f) * 100) if f != 0 else None
+        return diff, pct
+
+    # Événements où un chiffre PLUS ÉLEVÉ est favorable à la devise (hawkish)
+    _POSITIVE_FOR_CCY = [
+        "cpi", "inflation", "ppi", "gdp", "retail", "employment change",
+        "nonfarm", "non-farm", "payroll", "wage", "earnings", "pmi",
+        "ism", "confidence", "sentiment", "rate decision", "interest rate",
+        "durable", "industrial", "trade balance", "current account",
+    ]
+    # Événements INVERSÉS (un chiffre plus élevé est défavorable)
+    _NEGATIVE_FOR_CCY = ["unemployment rate", "jobless", "claims"]
+
+    def _event_polarity(title):
+        t = title.lower()
+        for k in _NEGATIVE_FOR_CCY:
+            if k in t:
+                return -1
+        for k in _POSITIVE_FOR_CCY:
+            if k in t:
+                return 1
+        return 0
+
+    def _impact_on_asset(asset, asset_cfg, ccy, polarity, diff, pct):
+        """Génère une phrase d'impact professionnelle pour un actif donné."""
+        if diff is None or polarity == 0:
+            return None
+        # Direction sur la DEVISE : surprise haussière × polarité
+        ccy_dir = 1 if (diff > 0 and polarity > 0) or (diff < 0 and polarity < 0) else -1
+        strong = abs(pct) >= 10 if pct is not None else abs(diff) > 0
+
+        is_usd_quote = asset in ("XAUUSD (Or)", "BTC/USD", "WTI (Pétrole)")
+        usd_involved = "USD" in asset_cfg["ccy"]
+
+        # Pour l'or/BTC/pétrole cotés en USD : USD fort → actif sous pression
+        if is_usd_quote and ccy == "USD":
+            asset_dir = -ccy_dir
+        elif asset in ("EUR/USD", "GBP/USD"):
+            # paire XXX/USD : USD est la devise cotée
+            asset_dir = ccy_dir if ccy != "USD" else -ccy_dir
+        elif asset == "USD/JPY":
+            asset_dir = ccy_dir if ccy == "USD" else -ccy_dir
+        elif asset == "DXY (Dollar US)":
+            asset_dir = ccy_dir if ccy == "USD" else 0
+        else:
+            asset_dir = ccy_dir if usd_involved and ccy == "USD" else 0
+
+        if asset_dir == 0:
+            return None
+        sens = "haussière" if asset_dir > 0 else "baissière"
+        force = "marquée" if strong else "modérée"
+        return (asset, asset_dir, force,
+                f"Pression {sens} {force} sur {asset}")
+
+    # ── Interface ────────────────────────────────────────────────────────────
+    ac1, ac2 = st.columns([2.5, 1.5])
+    with ac1:
+        sel_assets = st.multiselect("Actifs à analyser", list(ASSETS.keys()),
+                                    default=["XAUUSD (Or)", "DXY (Dollar US)",
+                                             "EUR/USD", "BTC/USD"],
+                                    key="an_assets")
+    with ac2:
+        impact_filter = st.multiselect("Importance", ["High", "Medium", "Low"],
+                                       default=["High", "Medium"],
+                                       format_func=lambda x: {"High":"Forte","Medium":"Moyenne","Low":"Faible"}[x],
+                                       key="an_impact")
+
+    events = _fetch_ff_calendar()
+    if not events:
+        st.error("Impossible de récupérer les annonces économiques pour le moment. "
+                 "Réessayez dans quelques minutes.")
+        st.stop()
+
+    # Devises pertinentes selon les actifs choisis
+    watched_ccy = set()
+    for a in sel_assets:
+        watched_ccy.update(ASSETS[a]["ccy"])
+
+    df_ev = pd.DataFrame(events)
+    if df_ev.empty or "country" not in df_ev.columns:
+        st.warning("Format de calendrier inattendu.")
+        st.stop()
+
+    df_ev["_dt"] = pd.to_datetime(df_ev["date"], errors="coerce", utc=True)
+    df_ev = df_ev[df_ev["country"].isin(watched_ccy)]
+    if impact_filter:
+        df_ev = df_ev[df_ev["impact"].isin(impact_filter)]
+    df_ev = df_ev.sort_values("_dt")
+
+    if df_ev.empty:
+        st.info("Aucune annonce ne correspond à vos filtres cette semaine.")
+        st.stop()
+
+    # ── KPIs synthèse ────────────────────────────────────────────────────────
+    _released = df_ev[df_ev["actual"].notna() & (df_ev["actual"].astype(str).str.strip() != "")]
+    n_high = len(df_ev[df_ev["impact"] == "High"])
+    k1, k2, k3, k4 = st.columns(4)
+    def _an_kpi(col, icon, label, value, sub, color):
+        with col:
+            st.markdown(
+                f"<div class='rfh-kpi' style='background:{_ta['card']};"
+                f"border:1px solid {_ta['border']};border-radius:14px;padding:14px 16px;"
+                f"display:flex;gap:12px;align-items:flex-start'>"
+                f"<div style='width:38px;height:38px;border-radius:10px;background:{color}1c;"
+                f"color:{color};display:flex;align-items:center;justify-content:center;"
+                f"font-size:15px'><i class='fa-solid {icon}'></i></div>"
+                f"<div><div style='font-size:10px;color:{_ta['muted']};text-transform:uppercase;"
+                f"letter-spacing:1px;font-weight:600'>{label}</div>"
+                f"<div style='font-size:20px;font-weight:800;color:{_ta['text']};"
+                f"font-family:JetBrains Mono,monospace'>{value}</div>"
+                f"<div style='font-size:11px;color:{_ta['muted']}'>{sub}</div></div></div>",
+                unsafe_allow_html=True)
+    _an_kpi(k1, "fa-calendar-day", "Annonces", str(len(df_ev)), "cette semaine", _ta["accent"])
+    _an_kpi(k2, "fa-bolt", "Impact fort", str(n_high), "événements majeurs", _ta["loss"])
+    _an_kpi(k3, "fa-check-double", "Déjà publiées", str(len(_released)), "chiffres connus", _ta["win"])
+    _an_kpi(k4, "fa-coins", "Devises suivies", ", ".join(sorted(watched_ccy)), "selon vos actifs", _ta["alt"])
+    st.markdown(" ")
+
+    # ── Fil des annonces avec chiffres + analyse d'impact ────────────────────
+    _jours_fr = {"Monday":"Lundi","Tuesday":"Mardi","Wednesday":"Mercredi",
+                 "Thursday":"Jeudi","Friday":"Vendredi","Saturday":"Samedi","Sunday":"Dimanche"}
+    _imp_col = {"High": _ta["loss"], "Medium": _ta["orange"], "Low": _ta["alt"]}
+    _imp_fr = {"High":"Fort","Medium":"Moyen","Low":"Faible"}
+    now = pd.Timestamp.now(tz="UTC")
+
+    df_ev["_day"] = df_ev["_dt"].dt.strftime("%A %d/%m")
+    for day_label, grp in df_ev.groupby("_day", sort=False):
+        _dfr = day_label
+        for en, fr in _jours_fr.items():
+            _dfr = _dfr.replace(en, fr)
+        st.markdown(f"##### {_dfr}")
+        for _, ev in grp.iterrows():
+            imp = ev.get("impact", "Low")
+            icol = _imp_col.get(imp, _ta["muted"])
+            t = ev["_dt"]
+            heure = t.strftime("%H:%M") if pd.notna(t) else "--:--"
+            past = pd.notna(t) and t < now
+            actual = ev.get("actual", "")
+            forecast = ev.get("forecast", "")
+            previous = ev.get("previous", "")
+            has_actual = str(actual).strip() not in ("", "nan", "None")
+
+            diff, pct = _surprise(actual, forecast) if has_actual else (None, None)
+            polarity = _event_polarity(ev.get("title", ""))
+
+            # Couleur de la surprise
+            if diff is not None and polarity != 0:
+                surp_good = (diff > 0 and polarity > 0) or (diff < 0 and polarity < 0)
+                surp_col = _ta["win"] if surp_good else _ta["loss"]
+                surp_txt = f"{'▲' if diff>0 else '▼'} {abs(diff):.2f}" + (f" ({pct:+.1f}%)" if pct is not None else "")
+            else:
+                surp_col = _ta["muted"]; surp_txt = "—"
+
+            # En-tête de l'événement
+            st.markdown(
+                f"<div style='background:{_ta['card']};border:1px solid {_ta['border']};"
+                f"border-left:3px solid {icol};border-radius:10px;padding:11px 16px;"
+                f"margin-bottom:6px;opacity:{'0.6' if past and not has_actual else '1'}'>"
+                f"<div style='display:flex;gap:14px;align-items:center;flex-wrap:wrap'>"
+                f"<span style='color:{_ta['muted']};font-family:JetBrains Mono,monospace;"
+                f"min-width:46px'>{heure}</span>"
+                f"<span style='background:{icol}22;color:{icol};padding:2px 9px;"
+                f"border-radius:8px;font-size:11px;font-weight:700'>{ev.get('country','')}</span>"
+                f"<span style='color:{_ta['text']};font-weight:600;flex:1;min-width:180px'>"
+                f"{ev.get('title','')}</span>"
+                f"<span style='color:{icol};font-size:11px;font-weight:700'>{_imp_fr.get(imp,'?')}</span>"
+                f"</div>"
+                # Ligne des chiffres
+                f"<div style='display:flex;gap:22px;margin-top:8px;padding-left:60px;"
+                f"font-size:12px;flex-wrap:wrap'>"
+                f"<span style='color:{_ta['muted']}'>Publié : "
+                f"<b style='color:{_ta['text']};font-family:JetBrains Mono,monospace'>"
+                f"{actual if has_actual else '—'}</b></span>"
+                f"<span style='color:{_ta['muted']}'>Prévu : "
+                f"<b style='font-family:JetBrains Mono,monospace'>{forecast or '—'}</b></span>"
+                f"<span style='color:{_ta['muted']}'>Précédent : "
+                f"<b style='font-family:JetBrains Mono,monospace'>{previous or '—'}</b></span>"
+                f"<span style='color:{_ta['muted']}'>Surprise : "
+                f"<b style='color:{surp_col};font-family:JetBrains Mono,monospace'>{surp_txt}</b></span>"
+                f"</div></div>", unsafe_allow_html=True)
+
+            # Analyse d'impact sur les actifs (seulement si chiffre publié + surprise)
+            if has_actual and diff is not None and polarity != 0:
+                impacts = []
+                for a in sel_assets:
+                    res = _impact_on_asset(a, ASSETS[a], ev.get("country",""),
+                                           polarity, diff, pct)
+                    if res:
+                        impacts.append(res)
+                if impacts:
+                    chips = ""
+                    for (aname, adir, force, phrase) in impacts:
+                        acol = _ta["win"] if adir > 0 else _ta["loss"]
+                        arrow = "▲" if adir > 0 else "▼"
+                        chips += (f"<span style='background:{acol}1a;color:{acol};"
+                                  f"border:1px solid {acol}44;border-radius:8px;"
+                                  f"padding:3px 10px;font-size:11px;font-weight:700;"
+                                  f"margin:0 6px 6px 0;display:inline-block'>"
+                                  f"{arrow} {aname} · {force}</span>")
+                    st.markdown(
+                        f"<div style='padding:2px 0 12px 60px'>"
+                        f"<span style='font-size:11px;color:{_ta['muted']};"
+                        f"text-transform:uppercase;letter-spacing:.5px'>"
+                        f"Impact estimé </span><br>{chips}</div>",
+                        unsafe_allow_html=True)
+
+    st.caption("Heures UTC. Analyse d'impact générée à partir de l'écart chiffre "
+               "publié / prévision. Un chiffre supérieur aux attentes renforce "
+               "généralement la devise concernée (sauf chômage / inscriptions, "
+               "logique inversée). À recouper avec le contexte de marché.")
+
 elif st.session_state.page == "calendar":
     st.markdown("# Calendrier de Performance")
     mode_banner()
