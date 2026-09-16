@@ -2060,17 +2060,26 @@ elif st.session_state.page == "analyse":
     }
 
     @st.cache_data(ttl=1800, show_spinner=False)
-    def _fetch_ff_calendar():
-        """Calendrier ForexFactory de la semaine (JSON public) avec actual/forecast/previous."""
-        url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-        try:
-            r = requests.get(url, timeout=12,
-                             headers={"User-Agent": "Mozilla/5.0 TradingJournal"})
-            if r.status_code == 200:
-                return r.json()
-        except Exception:
-            pass
-        return []
+    def _fetch_ff_calendar(scope="thisweek"):
+        """Calendrier ForexFactory (JSON public). scope: lastweek / thisweek / nextweek.
+        'all' combine les trois pour ~3 semaines d'historique + prévisions."""
+        base = "https://nfs.faireconomy.media/ff_calendar_{}.json"
+        scopes = ["lastweek", "thisweek", "nextweek"] if scope == "all" else [scope]
+        out, seen = [], set()
+        for sc in scopes:
+            try:
+                r = requests.get(base.format(sc), timeout=12,
+                                 headers={"User-Agent": "Mozilla/5.0 TradingJournal"})
+                if r.status_code == 200:
+                    for ev in r.json():
+                        # Dédupliquer les événements chevauchant deux flux
+                        key = (str(ev.get("title","")), str(ev.get("date","")),
+                               str(ev.get("country", ev.get("currency",""))))
+                        if key not in seen:
+                            seen.add(key); out.append(ev)
+            except Exception:
+                pass
+        return out
 
     def _to_num(x):
         """Extrait un nombre d'une chaîne type '3.5%', '250K', '-1.2', '1.3M'."""
@@ -2146,8 +2155,63 @@ elif st.session_state.page == "analyse":
         return (asset, asset_dir, force,
                 f"Pression {sens} {force} sur {asset}")
 
+    # ── Génération d'analyse fondamentale détaillée ──────────────────────────
+    # Catégorie d'indicateur → verbe de lecture + mécanisme de transmission
+    def _indicator_kind(title):
+        t = title.lower()
+        if any(k in t for k in ["cpi","inflation","ppi","pce"]):        return "inflation"
+        if any(k in t for k in ["nonfarm","non-farm","payroll","employment change","adp"]): return "emploi"
+        if "unemployment rate" in t:                                    return "chomage"
+        if any(k in t for k in ["jobless","claims"]):                   return "chomage_hebdo"
+        if any(k in t for k in ["gdp","growth"]):                       return "croissance"
+        if any(k in t for k in ["rate decision","interest rate","cash rate","refi"]): return "taux"
+        if any(k in t for k in ["pmi","ism"]):                          return "activite"
+        if any(k in t for k in ["retail","consumer spending"]):         return "consommation"
+        if any(k in t for k in ["confidence","sentiment"]):             return "confiance"
+        if any(k in t for k in ["trade balance","current account"]):    return "commerce"
+        return "generique"
+
+    def _read_figure(kind, ccy, diff, pct, actual, forecast, better):
+        """Phrase de lecture fondamentale du chiffre."""
+        amp = "nettement " if (pct is not None and abs(pct) >= 15) else ""
+        sens = "supérieur" if diff > 0 else "inférieur"
+        base = {
+            "inflation": f"L'inflation ressort {amp}{sens}e aux attentes ({actual} vs {forecast} prévu). "
+                         f"Une inflation plus forte pousse la banque centrale vers une politique plus restrictive (hausse ou maintien des taux), ce qui soutient le {ccy}.",
+            "emploi":    f"Les créations d'emplois sont {amp}{sens}es aux attentes ({actual} vs {forecast}). "
+                         f"Un marché du travail solide renforce la trajectoire des taux et soutient le {ccy}.",
+            "chomage":   f"Le taux de chômage est {amp}{sens} aux attentes ({actual} vs {forecast}). "
+                         f"Un chômage plus élevé qu'attendu affaiblit le {ccy} (logique inversée : c'est une mauvaise nouvelle économique).",
+            "chomage_hebdo": f"Les inscriptions au chômage sont {amp}{sens}es aux attentes ({actual} vs {forecast}). "
+                         f"Davantage d'inscriptions signale un marché du travail qui se dégrade, ce qui pèse sur le {ccy}.",
+            "croissance":f"La croissance ressort {amp}{sens}e aux attentes ({actual} vs {forecast}). "
+                         f"Une activité plus dynamique soutient le {ccy}.",
+            "taux":      f"La décision de taux surprend le marché ({actual} vs {forecast} anticipé). "
+                         f"Un ton plus restrictif que prévu soutient directement le {ccy}.",
+            "activite":  f"L'indice d'activité (PMI/ISM) est {amp}{sens} aux attentes ({actual} vs {forecast}). "
+                         f"Au-dessus de 50 il signale l'expansion ; une surprise haussière soutient le {ccy}.",
+            "consommation": f"Les ventes au détail sont {amp}{sens}es aux attentes ({actual} vs {forecast}). "
+                         f"Une consommation robuste soutient la croissance et le {ccy}.",
+            "confiance": f"L'indice de confiance est {amp}{sens} aux attentes ({actual} vs {forecast}). "
+                         f"Une confiance en hausse est favorable au {ccy}.",
+            "commerce":  f"La balance commerciale ressort {amp}{sens}e aux attentes ({actual} vs {forecast}), "
+                         f"ce qui influence la demande de {ccy}.",
+            "generique": f"Le chiffre ressort {amp}{sens} aux attentes ({actual} vs {forecast}).",
+        }
+        return base.get(kind, base["generique"])
+
+    _ASSET_COMMENT = {
+        "XAUUSD (Or)":     ("l'or", "actif refuge sans rendement, il baisse quand le dollar et les taux réels montent"),
+        "DXY (Dollar US)": ("l'indice dollar", "il mesure directement la force du billet vert"),
+        "EUR/USD":         ("l'euro-dollar", "un dollar fort fait mécaniquement baisser la paire"),
+        "GBP/USD":         ("le câble", "un dollar fort fait baisser la paire"),
+        "USD/JPY":         ("le dollar-yen", "un dollar fort fait monter la paire"),
+        "BTC/USD":         ("le bitcoin", "actif risqué, il tend à souffrir d'un dollar fort et de taux élevés"),
+        "WTI (Pétrole)":   ("le pétrole", "coté en dollar, il est sous pression quand le billet vert se renforce"),
+    }
+
     # ── Interface ────────────────────────────────────────────────────────────
-    ac1, ac2 = st.columns([2.5, 1.5])
+    ac1, ac2, ac3 = st.columns([2.2, 1.5, 1.5])
     with ac1:
         sel_assets = st.multiselect("Actifs à analyser", list(ASSETS.keys()),
                                     default=["XAUUSD (Or)", "DXY (Dollar US)",
@@ -2158,8 +2222,18 @@ elif st.session_state.page == "analyse":
                                        default=["High", "Medium"],
                                        format_func=lambda x: {"High":"Forte","Medium":"Moyenne","Low":"Faible"}[x],
                                        key="an_impact")
+    with ac3:
+        _scope_map = {"Semaine passée": "lastweek", "Semaine en cours": "thisweek",
+                      "Semaine à venir": "nextweek", "Les trois semaines": "all"}
+        _scope_lbl = st.selectbox("Période", list(_scope_map.keys()),
+                                  index=3, key="an_scope")
+        _scope = _scope_map[_scope_lbl]
 
-    events = _fetch_ff_calendar()
+    only_released = st.checkbox(
+        "Afficher uniquement les annonces déjà publiées (avec chiffres réels)",
+        value=False, key="an_released_only")
+
+    events = _fetch_ff_calendar(_scope)
     if not events:
         st.error("Impossible de récupérer les annonces économiques pour le moment. "
                  "Réessayez dans quelques minutes.")
@@ -2203,8 +2277,14 @@ elif st.session_state.page == "analyse":
         df_ev = df_ev[df_ev["impact"].isin(impact_filter)]
     df_ev = df_ev.sort_values("_dt")
 
+    # Filtre "déjà publiées" : actual renseigné
+    if only_released:
+        _has = df_ev["actual"].astype(str).str.strip().replace(
+            {"nan":"", "None":""}) != ""
+        df_ev = df_ev[_has]
+
     if df_ev.empty:
-        st.info("Aucune annonce ne correspond à vos filtres cette semaine.")
+        st.info("Aucune annonce ne correspond à vos filtres sur cette période.")
         st.stop()
 
     # ── KPIs synthèse ────────────────────────────────────────────────────────
@@ -2295,7 +2375,7 @@ elif st.session_state.page == "analyse":
                 f"<b style='color:{surp_col};font-family:JetBrains Mono,monospace'>{surp_txt}</b></span>"
                 f"</div></div>", unsafe_allow_html=True)
 
-            # Analyse d'impact sur les actifs (seulement si chiffre publié + surprise)
+            # ── ANALYSE FONDAMENTALE DÉTAILLÉE (chiffre publié + surprise) ────
             if has_actual and diff is not None and polarity != 0:
                 impacts = []
                 for a in sel_assets:
@@ -2304,21 +2384,44 @@ elif st.session_state.page == "analyse":
                     if res:
                         impacts.append(res)
                 if impacts:
-                    chips = ""
+                    _ccy = ev.get("country","")
+                    _kind = _indicator_kind(ev.get("title",""))
+                    _better = (diff > 0 and polarity > 0) or (diff < 0 and polarity < 0)
+                    _reading = _read_figure(_kind, _ccy, diff, pct, actual, forecast, _better)
+                    _ccy_word = "renforce" if _better else "affaiblit"
+                    _ccy_col = _ta["win"] if _better else _ta["loss"]
+
+                    # Lignes détaillées par actif
+                    _asset_lines = ""
                     for (aname, adir, force, phrase) in impacts:
                         acol = _ta["win"] if adir > 0 else _ta["loss"]
-                        arrow = "▲" if adir > 0 else "▼"
-                        chips += (f"<span style='background:{acol}1a;color:{acol};"
-                                  f"border:1px solid {acol}44;border-radius:8px;"
-                                  f"padding:3px 10px;font-size:11px;font-weight:700;"
-                                  f"margin:0 6px 6px 0;display:inline-block'>"
-                                  f"{arrow} {aname} · {force}</span>")
+                        arrow = "▲ hausse" if adir > 0 else "▼ baisse"
+                        _word, _why = _ASSET_COMMENT.get(aname, (aname, ""))
+                        _asset_lines += (
+                            f"<div style='display:flex;gap:10px;align-items:baseline;"
+                            f"margin-bottom:5px'>"
+                            f"<span style='color:{acol};font-weight:700;min-width:74px;"
+                            f"font-size:12px'>{arrow}</span>"
+                            f"<span style='color:{_ta['text']};font-weight:600;"
+                            f"min-width:130px;font-size:12px'>{aname}</span>"
+                            f"<span style='color:{_ta['muted']};font-size:12px'>"
+                            f"Biais {'haussier' if adir>0 else 'baissier'} {force} sur "
+                            f"{_word} : {_why}.</span></div>")
+
                     st.markdown(
-                        f"<div style='padding:2px 0 12px 60px'>"
-                        f"<span style='font-size:11px;color:{_ta['muted']};"
-                        f"text-transform:uppercase;letter-spacing:.5px'>"
-                        f"Impact estimé </span><br>{chips}</div>",
-                        unsafe_allow_html=True)
+                        f"<div style='margin:2px 0 14px 60px;background:{_ta['bg2']};"
+                        f"border:1px solid {_ta['border']};border-left:3px solid {_ccy_col};"
+                        f"border-radius:10px;padding:12px 16px'>"
+                        f"<div style='font-size:11px;color:{_ta['muted']};"
+                        f"text-transform:uppercase;letter-spacing:.5px;font-weight:600;"
+                        f"margin-bottom:6px'>"
+                        f"<i class='fa-solid fa-lightbulb'></i> Lecture fondamentale</div>"
+                        f"<div style='color:{_ta['text']};font-size:12.5px;line-height:1.55;"
+                        f"margin-bottom:4px'>{_reading}</div>"
+                        f"<div style='color:{_ta['muted']};font-size:12px;margin-bottom:10px'>"
+                        f"Bilan : ce chiffre <b style='color:{_ccy_col}'>{_ccy_word} le {_ccy}</b>.</div>"
+                        f"{_asset_lines}"
+                        f"</div>", unsafe_allow_html=True)
 
     st.caption("Heures UTC. Analyse d'impact générée à partir de l'écart chiffre "
                "publié / prévision. Un chiffre supérieur aux attentes renforce "
