@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import date, datetime
-import json, os, base64, requests, io
+import json, os, base64, requests, io, hashlib, secrets as _secrets
 import calendar as _calmod
 
 st.set_page_config(page_title="Trading Journal Pro", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
@@ -168,10 +168,13 @@ div[data-baseweb="select"] > div {{
 .b-real {{ color:{t['win']};background:{t['win']}26;border:1px solid {t['win']}4d; }}
 .b-demo {{ color:{t['orange']};background:{t['orange']}26;border:1px solid {t['orange']}4d; }}
 .b-inst {{ color:{t['alt']};background:{t['alt']}26;border:1px solid {t['alt']}4d; }}
+.b-sec  {{ color:{t['orange']};background:{t['orange']}20;border:1px dashed {t['orange']}66; }}
 hr {{ border-color:{t['border']} !important; }}
 .sync-ok {{ background:{t['win']}18;border:1px solid {t['win']}44;border-radius:8px;padding:6px 14px;font-size:12px;color:{t['win']}; }}
 .mode-banner-real {{ background:{t['win']}14;border:1px solid {t['win']}4d;border-radius:10px;
     padding:8px 16px;font-size:12px;color:{t['win']};font-weight:700;margin-bottom:12px; }}
+.mode-banner-sec {{ background:{t['orange']}12;border:1px dashed {t['orange']}66;border-radius:10px;
+    padding:8px 16px;font-size:12px;color:{t['orange']};font-weight:700;margin-bottom:12px; }}
 .mode-banner-inst {{ background:{t['alt']}14;border:1px solid {t['alt']}4d;border-radius:10px;
     padding:8px 16px;font-size:12px;color:{t['alt']};font-weight:700;margin-bottom:12px; }}
 .mode-banner-demo {{ background:{t['orange']}14;border:1px solid {t['orange']}4d;border-radius:10px;
@@ -180,8 +183,10 @@ hr {{ border-color:{t['border']} !important; }}
     padding:8px 16px;font-size:12px;color:{t['alt']};font-weight:700;margin-bottom:12px; }}
 </style>
 """
-TRADE_MODES  = ["Démo", "Réel Indépendant", "Réel Institutionnel"]
+TRADE_MODES  = ["Démo", "Réel Indépendant", "Réel Institutionnel", "Compte Secondaire"]
 MODE_FILTER_OPTIONS = ["Tous"] + TRADE_MODES
+# Le Compte Secondaire est rattaché au compte Réel Institutionnel (même stratégie de fonds)
+ACCOUNT_LINKS = {"Compte Secondaire": "Réel Institutionnel"}
 # Mapping universel : nom broker → nom normalisé
 # Exness utilise le suffixe "m" (ex: XAUUSDm, BTCUSDm)
 _BASE_PAIRS = {
@@ -369,6 +374,8 @@ def force_reload():
 # ── INIT SESSION ────────────────────────────────────────────────────────────
 if "trades" not in st.session_state:
     st.session_state.trades = load_and_migrate()
+if "account_capital" not in st.session_state:
+    st.session_state.account_capital = capital_load()
 if "page"        not in st.session_state: st.session_state.page        = "dashboard"
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
 if "theme_name"  not in st.session_state: st.session_state.theme_name  = THEME_NAMES[0]
@@ -377,6 +384,53 @@ if st.session_state.mode_filter not in MODE_FILTER_OPTIONS: st.session_state.mod
 
 
 
+
+
+
+# ── CAPITAL DE DÉPART PAR COMPTE ────────────────────────────────────────────
+def capital_load():
+    if not _sb_ready():
+        return st.session_state.get("_local_capital", {})
+    try:
+        r = requests.get(f"{SB_EP}?key=eq.account_capital&select=value", headers=SB_HDR, timeout=10)
+        if r.status_code == 200 and r.json():
+            val = r.json()[0].get("value", {})
+            return val if isinstance(val, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+def capital_save(cap):
+    if not _sb_ready():
+        st.session_state["_local_capital"] = cap
+        return False
+    try:
+        r = requests.patch(f"{SB_EP}?key=eq.account_capital",
+            headers={**SB_HDR, "Prefer": "return=representation"},
+            json={"value": cap, "updated_at": "now()"}, timeout=15)
+        if r.status_code == 200 and isinstance(r.json(), list) and r.json():
+            return True
+        if r.status_code == 204:
+            return True
+        r2 = requests.post(SB_EP,
+            headers={**SB_HDR, "Prefer": "resolution=merge-duplicates,return=representation"},
+            json={"key": "account_capital", "value": cap}, timeout=15)
+        return r2.status_code in (200, 201)
+    except Exception:
+        return False
+
+def get_capital(mode_filter="Tous"):
+    """Capital de départ pour le périmètre affiché (somme si plusieurs comptes)."""
+    caps = st.session_state.get("account_capital", {})
+    allowed = allowed_accounts()
+    if mode_filter in TRADE_MODES:
+        scope = [mode_filter]
+    else:
+        scope = allowed
+    return sum(float(caps.get(a, 0) or 0) for a in scope)
+
+def is_admin():
+    return st.session_state.get("auth_role") == "admin"
 
 
 def get_pnl(t): return float(t.get("pnl", 0))
@@ -396,7 +450,13 @@ def get_df(mode_filter="Tous"):
     df = pd.DataFrame(rows) if rows else pd.DataFrame()
     if df.empty: return df
     if "trade_mode" not in df.columns: df["trade_mode"] = "Réel Indépendant"
-    if mode_filter in TRADE_MODES: return df[df["trade_mode"] == mode_filter]
+    # 1) Restreindre TOUJOURS aux comptes autorisés pour l'utilisateur connecté
+    allowed = allowed_accounts()
+    if allowed:
+        df = df[df["trade_mode"].isin(allowed)]
+    # 2) Puis appliquer le filtre de compte précis s'il est demandé et autorisé
+    if mode_filter in TRADE_MODES and mode_filter in allowed:
+        return df[df["trade_mode"] == mode_filter]
     return df
 
 def kpi(icon, label, value, sub, color):
@@ -408,6 +468,9 @@ def kpi(icon, label, value, sub, color):
         <div class="kpi-sub">{sub}</div></div>""", unsafe_allow_html=True)
 
 def badge(text, cls): return f'<span class="badge {cls}">{text}</span>'
+def mode_badge_class(m):
+    return {"Démo":"b-demo","Réel Indépendant":"b-real",
+            "Réel Institutionnel":"b-inst","Compte Secondaire":"b-sec"}.get(m,"b-real")
 
 def ev(key, default):
     ex = next((t for t in st.session_state.trades if t["id"]==st.session_state.edit_id), None)
@@ -416,6 +479,144 @@ def ev(key, default):
 def safe_float(val):
     try: return float(str(val).replace(" ","").replace(",",".").strip() or 0)
     except: return 0.0
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTHENTIFICATION & PERMISSIONS PAR COMPTE
+# Les utilisateurs sont stockés dans journal_data (key='users'). Seul l'admin
+# crée les comptes et choisit, pour chacun, les comptes de trading visibles.
+# ══════════════════════════════════════════════════════════════════════════════
+def _users_ep():
+    return f"{SB_URL}/rest/v1/journal_data?key=eq.users"
+
+def hash_password(password, salt=None):
+    if salt is None:
+        salt = _secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000)
+    return f"{salt}${dk.hex()}"
+
+def verify_password(password, stored):
+    try:
+        salt, _ = str(stored).split("$", 1)
+        return hash_password(password, salt) == stored
+    except Exception:
+        return False
+
+def users_load():
+    if not _sb_ready():
+        return st.session_state.get("_local_users", [])
+    try:
+        r = requests.get(f"{SB_EP}?key=eq.users&select=value", headers=SB_HDR, timeout=10)
+        if r.status_code == 200 and r.json():
+            val = r.json()[0].get("value", [])
+            return val if isinstance(val, list) else []
+    except Exception:
+        pass
+    return []
+
+def users_save(users):
+    if not _sb_ready():
+        st.session_state["_local_users"] = users
+        return False
+    try:
+        r = requests.patch(f"{SB_EP}?key=eq.users",
+            headers={**SB_HDR, "Prefer": "return=representation"},
+            json={"value": users, "updated_at": "now()"}, timeout=15)
+        if r.status_code == 200 and isinstance(r.json(), list) and r.json():
+            return True
+        if r.status_code == 204:
+            return True
+        r2 = requests.post(SB_EP,
+            headers={**SB_HDR, "Prefer": "resolution=merge-duplicates,return=representation"},
+            json={"key": "users", "value": users}, timeout=15)
+        return r2.status_code in (200, 201)
+    except Exception:
+        return False
+
+def bootstrap_admin():
+    """Crée l'admin initial depuis les secrets si aucun utilisateur n'existe."""
+    users = users_load()
+    if users:
+        return users
+    admin_user = st.secrets.get("ADMIN_USERNAME", os.environ.get("ADMIN_USERNAME", "admin"))
+    admin_pass = st.secrets.get("ADMIN_PASSWORD", os.environ.get("ADMIN_PASSWORD", "admin123"))
+    users = [{
+        "username": admin_user,
+        "password_hash": hash_password(admin_pass),
+        "role": "admin",
+        "accounts": list(TRADE_MODES),
+        "active": True,
+    }]
+    users_save(users)
+    return users
+
+def authenticate(username, password):
+    users = bootstrap_admin()
+    u = next((x for x in users if x.get("username") == username), None)
+    if not u:
+        return False, None, "Identifiants incorrects."
+    if not u.get("active", True):
+        return False, None, "Compte désactivé. Contactez l'administrateur."
+    if verify_password(password, u.get("password_hash", "")):
+        return True, u, "OK"
+    return False, None, "Identifiants incorrects."
+
+def allowed_accounts():
+    """Comptes de trading que l'utilisateur connecté a le droit de voir."""
+    if st.session_state.get("auth_role") == "admin":
+        return list(TRADE_MODES)
+    acc = st.session_state.get("auth_accounts", [])
+    return [a for a in acc if a in TRADE_MODES]
+
+def user_mode_options():
+    """Options du filtre 'Afficher' selon les droits (≥2 comptes → + 'Tous')."""
+    allowed = allowed_accounts()
+    return (["Tous"] + allowed) if len(allowed) >= 2 else allowed
+
+def logout():
+    for k in ("auth_user", "auth_role", "auth_accounts"):
+        st.session_state.pop(k, None)
+    st.rerun()
+
+def login_gate():
+    """Affiche le formulaire de connexion. Retourne True si connecté."""
+    if st.session_state.get("auth_user"):
+        return True
+    _t = get_theme()
+    st.markdown(build_css(_t), unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='text-align:center;padding:36px 0 8px'>"
+        f"<div style='font-size:26px;font-weight:800;color:{_t['text']}'>Trading Journal Pro</div>"
+        f"<div style='color:{_t['muted']};font-size:13px;margin-top:4px'>"
+        f"Accès réservé — connectez-vous avec vos identifiants</div></div>",
+        unsafe_allow_html=True)
+    _, cmid, _ = st.columns([1, 1.3, 1])
+    with cmid:
+        with st.form("login_form"):
+            st.markdown("#### Connexion")
+            u = st.text_input("Utilisateur")
+            p = st.text_input("Mot de passe", type="password")
+            if st.form_submit_button("Se connecter", use_container_width=True, type="primary"):
+                ok, user, msg = authenticate(u.strip(), p)
+                if ok:
+                    st.session_state.auth_user = user["username"]
+                    st.session_state.auth_role = user.get("role", "user")
+                    st.session_state.auth_accounts = user.get("accounts", [])
+                    # Filtre par défaut adapté aux droits
+                    opts = (["Tous"] + [a for a in user.get("accounts", []) if a in TRADE_MODES]) \
+                           if user.get("role") == "admin" or len(user.get("accounts", [])) >= 2 \
+                           else [a for a in user.get("accounts", []) if a in TRADE_MODES]
+                    st.session_state.mode_filter = opts[0] if opts else "Tous"
+                    st.rerun()
+                else:
+                    st.error(msg)
+        st.caption("Accès sur invitation uniquement — l'administrateur crée les comptes "
+                   "et attribue les mots de passe.")
+    return False
+
+# Porte d'authentification : rien ne s'affiche tant qu'on n'est pas connecté
+if not login_gate():
+    st.stop()
+
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 # ── INJECTION CSS (avant le header pour que le thème s'applique) ─────────────────
@@ -430,10 +631,12 @@ col_pnl = _thd["win"] if total >= 0 else _thd["loss"]
 
 _hh1, _hh2, _hh3 = st.columns([2.3, 2, 2.4])
 with _hh1:
+    _role_lbl = "Admin" if is_admin() else "Utilisateur"
     st.markdown(
         f"<div style='padding-top:2px'>"
         f"<span style='font-size:16px;font-weight:800;color:{_thd['text']}'>Trading Journal</span> "
-        f"<span style='font-size:11px;color:{_thd['muted']}'>Pro</span></div>",
+        f"<span style='font-size:11px;color:{_thd['muted']}'>Pro · {st.session_state.get('auth_user','')} "
+        f"({_role_lbl})</span></div>",
         unsafe_allow_html=True)
 with _hh2:
     _sel_theme = st.selectbox("Thème", THEME_NAMES,
@@ -443,9 +646,11 @@ with _hh2:
     if _sel_theme != st.session_state.theme_name:
         st.session_state.theme_name = _sel_theme; st.rerun()
 with _hh3:
-    _mf = st.selectbox("Afficher", MODE_FILTER_OPTIONS,
-        index=MODE_FILTER_OPTIONS.index(st.session_state.mode_filter)
-              if st.session_state.mode_filter in MODE_FILTER_OPTIONS else 0,
+    _opts = user_mode_options()
+    if st.session_state.mode_filter not in _opts:
+        st.session_state.mode_filter = _opts[0] if _opts else "Tous"
+    _mf = st.selectbox("Afficher", _opts,
+        index=_opts.index(st.session_state.mode_filter) if st.session_state.mode_filter in _opts else 0,
         label_visibility="collapsed")
     if _mf != st.session_state.mode_filter:
         st.session_state.mode_filter = _mf; st.rerun()
@@ -464,21 +669,36 @@ st.markdown(
 _NAV = [
     ("dashboard", "Dashboard",  ":material/dashboard:"),
     ("journal",   "Journal",    ":material/table_rows:"),
-    ("add",       "Nouveau",    ":material/add_circle:"),
-    ("import",    "Import MT5", ":material/upload_file:"),
+]
+if is_admin():
+    _NAV += [
+        ("add",     "Nouveau",    ":material/add_circle:"),
+        ("import",  "Import MT5", ":material/upload_file:"),
+    ]
+_NAV += [
     ("analyse",   "Analyse & News", ":material/newspaper:"),
     ("calendar",  "Calendrier", ":material/calendar_month:"),
 ]
-_nav_cols = st.columns(len(_NAV) + 1)
+if is_admin():
+    _NAV += [("users", "Utilisateurs", ":material/manage_accounts:")]
+
+# Garde-fou : une page réservée admin demandée par un non-admin retombe sur dashboard
+if not is_admin() and st.session_state.page in ("add", "import", "users"):
+    st.session_state.page = "dashboard"
+
+_nav_cols = st.columns(len(_NAV) + 2)
 for _c, (_k, _lbl, _ic) in zip(_nav_cols, _NAV):
     with _c:
         if st.button(_lbl, icon=_ic, use_container_width=True,
                      type="primary" if st.session_state.page == _k else "secondary",
                      key=f"nav_{_k}"):
             st.session_state.page = _k; st.session_state.edit_id = None; st.rerun()
-with _nav_cols[-1]:
+with _nav_cols[-2]:
     if st.button("Sync", icon=":material/sync:", use_container_width=True, key="nav_sync"):
         force_reload(); st.rerun()
+with _nav_cols[-1]:
+    if st.button("Quitter", icon=":material/logout:", use_container_width=True, key="nav_logout"):
+        logout()
 
 st.markdown(f"<hr style='margin:6px 0 16px;border-color:{_thd['border']}'>",
             unsafe_allow_html=True)
@@ -490,6 +710,8 @@ def mode_banner():
         st.markdown('<div class="mode-banner-real"><i class="fa-solid fa-circle-dot"></i> Réel Indépendant — Compte personnel</div>', unsafe_allow_html=True)
     elif m == "Réel Institutionnel":
         st.markdown('<div class="mode-banner-inst"><i class="fa-solid fa-building-columns"></i> Réel Institutionnel — Fonds commun avec partenaires financiers</div>', unsafe_allow_html=True)
+    elif m == "Compte Secondaire":
+        st.markdown('<div class="mode-banner-sec"><i class="fa-solid fa-layer-group"></i> Compte Secondaire — rattaché au Réel Institutionnel</div>', unsafe_allow_html=True)
     elif m == "Démo":
         st.markdown('<div class="mode-banner-demo"><i class="fa-solid fa-flask"></i> Mode DÉMO — Performances sur compte démo</div>', unsafe_allow_html=True)
     else:
@@ -687,6 +909,44 @@ if st.session_state.page == "dashboard":
         # ROW 1 : Capital cumulé + Win/Loss
         # ════════════════════════════════════════════════════════════════════
         st.markdown("### Performance dans le temps")
+
+        # ── Progression du capital en % (base = capital de départ du compte) ──
+        _base_cap = get_capital(st.session_state.mode_filter)
+        _card("Progression du capital (%)",
+              f"Base : {_base_cap:,.0f}$" if _base_cap > 0
+              else "Capital de départ non défini")
+        if _base_cap > 0:
+            _pct = (cumul / _base_cap * 100.0)
+            _pcol = _win if (_pct.iloc[-1] if len(_pct) else 0) >= 0 else _loss
+            def _hx_rgba(h, a):
+                h = h.lstrip("#"); r,g,b = int(h[0:2],16),int(h[2:4],16),int(h[4:6],16)
+                return f"rgba({r},{g},{b},{a})"
+            fig_pct = go.Figure(go.Scatter(
+                x=pos_idx, y=_pct.tolist(), mode="lines",
+                line=dict(color=_pcol, width=2.2),
+                fill="tozeroy", fillcolor=_hx_rgba(_pcol, 0.10),
+                customdata=pos_labels,
+                hovertemplate="<b>#%{x}</b> · %{customdata}<br>"
+                              "Progression : <b>%{y:+.2f}%</b><extra></extra>",
+                showlegend=False,
+            ))
+            fig_pct.add_hline(y=0, line_color=_grid, line_width=1)
+            fig_pct.update_layout(**_base_layout(height=240))
+            _style_axes(fig_pct)
+            fig_pct.update_yaxes(ticksuffix="%")
+            fig_pct.update_xaxes(**_xaxis_pos(n_pos))
+            st.plotly_chart(fig_pct, use_container_width=True, config=_chart_cfg)
+            _final_pct = _pct.iloc[-1] if len(_pct) else 0
+            st.markdown(
+                f"<div style='color:{_thd['muted']};font-size:12px;margin:-4px 0 10px'>"
+                f"Progression cumulée : <b style='color:{_pcol}'>{_final_pct:+.2f}%</b> "
+                f"sur un capital de départ de {_base_cap:,.0f}$.</div>",
+                unsafe_allow_html=True)
+        else:
+            st.info("Définissez le capital de départ de ce compte dans "
+                    "**Utilisateurs & comptes** (réservé à l'admin) pour afficher la progression en %.")
+        st.markdown(" ")
+
         r1c1, r1c2 = st.columns([3,2])
 
         with r1c1:
@@ -1214,7 +1474,7 @@ if st.session_state.page == "dashboard":
             c  = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
             dc = "b-win" if t["direction"]=="LONG" else "b-loss"
             _tm = t.get("trade_mode","Réel Indépendant")
-            mc = "b-demo" if _tm == "Démo" else ("b-inst" if _tm == "Réel Institutionnel" else "b-real")
+            mc = mode_badge_class(_tm)
             rows_html += f"""<tr>
                 <td style="color:#6b7894;font-family:monospace">{t["date"]}</td>
                 <td>{badge(t["symbol"],"b-sym")}</td>
@@ -1242,9 +1502,10 @@ elif st.session_state.page == "journal":
         st.info("Aucun trade. Ajoutez-en un avec **Nouveau Trade** ou importez depuis MT5.")
     else:
         # ══════════════════════════════════════════════════════════════════════
-        # ACTIONS EN HAUT — modifier / supprimer
+        # ACTIONS EN HAUT — modifier / supprimer (ADMIN uniquement)
         # ══════════════════════════════════════════════════════════════════════
-        with st.expander("Modifier ou supprimer des trades", expanded=True):
+        if is_admin():
+          with st.expander("Modifier ou supprimer des trades", expanded=True):
             tab1, tab2 = st.tabs(["  Un trade", "  Plusieurs trades"])
 
             # ── Onglet : UN TRADE ─────────────────────────────────────────────
@@ -1323,7 +1584,7 @@ elif st.session_state.page == "journal":
                 with mf1: mf_from = st.date_input("Du",    value=d_min_m, key="mf_from")
                 with mf2: mf_to   = st.date_input("Au",    value=d_max_m, key="mf_to")
                 with mf3: mf_sym  = st.selectbox("Actif",  ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="mf_sym")
-                with mf4: mf_mode = st.selectbox("Mode",   MODE_FILTER_OPTIONS, key="mf_mode")
+                with mf4: mf_mode = st.selectbox("Mode",   user_mode_options(), key="mf_mode")
                 with mf5: mf_dir  = st.selectbox("Dir.",   ["Tous","LONG","SHORT"], key="mf_dir")
 
                 df_multi = df_multi[df_multi["date"].between(str(mf_from), str(mf_to))]
@@ -1437,7 +1698,7 @@ elif st.session_state.page == "journal":
         with fa1: f_from = st.date_input("Du",        value=d_min, key="j_from")
         with fa2: f_to   = st.date_input("Au",        value=d_max, key="j_to")
         with fa3: f_sym  = st.selectbox("Actif",      ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="j_sym")
-        with fa4: f_mode = st.selectbox("Mode",       MODE_FILTER_OPTIONS, key="j_mode")
+        with fa4: f_mode = st.selectbox("Mode",       user_mode_options(), key="j_mode")
         with fa5: f_dir  = st.selectbox("Direction",  ["Tous","LONG","SHORT"], key="j_dir")
 
         df = df_all.copy()
@@ -1478,7 +1739,7 @@ elif st.session_state.page == "journal":
                 rr_v = t["rr"]
                 rr_c = "#00d4aa" if (rr_v or 0)>=2 else "#ff9f43" if (rr_v or 0)>=1 else "#ff4d6d"
                 _tm2 = t.get("trade_mode","Réel Indépendant")
-                mc   = "b-demo" if _tm2 == "Démo" else ("b-inst" if _tm2 == "Réel Institutionnel" else "b-real")
+                mc   = mode_badge_class(_tm2)
                 rows_html += f"""<tr>
                     <td style="color:#6b7894;font-family:monospace;white-space:nowrap">{t["date"]}</td>
                     <td>{badge(t["symbol"],"b-sym")}</td>
@@ -1505,6 +1766,9 @@ elif st.session_state.page == "journal":
 # PAGE : ADD / EDIT
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.page == "add":
+    if not is_admin():
+        st.error("Seul l'administrateur peut ajouter ou modifier des trades.")
+        st.stop()
     is_edit = st.session_state.edit_id is not None
     st.markdown(f"# {'Modifier le Trade' if is_edit else 'Nouveau Trade'}")
     if st.button("Retour", icon=":material/arrow_back:"):
@@ -1585,6 +1849,9 @@ elif st.session_state.page == "add":
 # PAGE : IMPORT MT5
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.page == "import":
+    if not is_admin():
+        st.error("Seul l'administrateur peut importer des trades.")
+        st.stop()
     st.markdown("# Importer depuis MetaTrader 5")
     if st.button("Retour", icon=":material/arrow_back:"):
         st.session_state.page = "journal"; st.rerun()
@@ -1596,7 +1863,7 @@ elif st.session_state.page == "import":
         imp_mode = st.radio("Type de compte", TRADE_MODES, horizontal=True)
     with ic2:
         _mc_map = {"Démo":"mode-banner-demo","Réel Indépendant":"mode-banner-real",
-                   "Réel Institutionnel":"mode-banner-inst"}
+                   "Réel Institutionnel":"mode-banner-inst","Compte Secondaire":"mode-banner-sec"}
         mc = _mc_map.get(imp_mode, "mode-banner-real")
         st.markdown(f'<div class="{mc}" style="margin-top:8px">Trades étiquetés : {imp_mode}</div>',
                     unsafe_allow_html=True)
@@ -2922,3 +3189,142 @@ elif st.session_state.page == "calendar":
             '<span style="color:#8892a4">L\'intensité de la couleur reflète l\'ampleur du P&L</span>'
             '</div>', unsafe_allow_html=True
         )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE : UTILISATEURS (ADMIN) — comptes, permissions, capital de départ
+# ══════════════════════════════════════════════════════════════════════════════
+elif st.session_state.page == "users":
+    if not is_admin():
+        st.error("Accès réservé à l'administrateur."); st.stop()
+    _t = get_theme()
+    st.markdown("# Utilisateurs & comptes")
+    st.caption("Créez les accès, choisissez les comptes visibles par utilisateur, "
+               "et définissez le capital de départ de chaque compte.")
+
+    users = users_load()
+
+    # ── CAPITAL DE DÉPART PAR COMPTE ─────────────────────────────────────────
+    st.markdown("### Capital de départ par compte")
+    st.caption("Sert de base au calcul de la progression en %.")
+    caps = dict(st.session_state.get("account_capital", {}))
+    with st.form("capital_form"):
+        cap_cols = st.columns(len(TRADE_MODES))
+        new_caps = {}
+        for _cc, acc in zip(cap_cols, TRADE_MODES):
+            with _cc:
+                new_caps[acc] = st.number_input(
+                    acc, min_value=0.0, step=100.0,
+                    value=float(caps.get(acc, 0) or 0), key=f"cap_{acc}")
+        if st.form_submit_button("Enregistrer les capitaux", icon=":material/save:",
+                                 type="primary"):
+            st.session_state.account_capital = new_caps
+            ok = capital_save(new_caps)
+            st.success("Capitaux enregistrés." if ok else "Enregistré en session (sync à vérifier).")
+
+    st.markdown("---")
+
+    # ── CRÉER UN UTILISATEUR ─────────────────────────────────────────────────
+    st.markdown("### Créer un utilisateur")
+    with st.form("create_user_form"):
+        cu1, cu2 = st.columns(2)
+        with cu1:
+            nu_name = st.text_input("Nom d'utilisateur")
+        with cu2:
+            nu_pass = st.text_input("Mot de passe", type="password",
+                                    help="À transmettre à l'utilisateur de façon sécurisée")
+        nu_accounts = st.multiselect("Comptes visibles par cet utilisateur", TRADE_MODES,
+                                     default=[], help="L'utilisateur ne verra QUE ces comptes.")
+        cc1, cc2 = st.columns([1, 1])
+        with cc1:
+            submit_new = st.form_submit_button("Créer le compte", icon=":material/person_add:",
+                                               type="primary", use_container_width=True)
+        with cc2:
+            gen_pw = st.form_submit_button("Suggérer un mot de passe", use_container_width=True)
+        if gen_pw:
+            st.info(f"Mot de passe suggéré : `{_secrets.token_urlsafe(9)}`")
+        if submit_new:
+            if not nu_name.strip() or not nu_pass:
+                st.error("Nom d'utilisateur et mot de passe requis.")
+            elif len(nu_pass) < 6:
+                st.error("Mot de passe : 6 caractères minimum.")
+            elif any(x.get("username") == nu_name.strip() for x in users):
+                st.error("Ce nom d'utilisateur existe déjà.")
+            elif not nu_accounts:
+                st.error("Sélectionnez au moins un compte visible.")
+            else:
+                users.append({
+                    "username": nu_name.strip(),
+                    "password_hash": hash_password(nu_pass),
+                    "role": "user",
+                    "accounts": nu_accounts,
+                    "active": True,
+                })
+                if users_save(users):
+                    st.success(f"Utilisateur « {nu_name.strip()} » créé "
+                               f"(accès : {', '.join(nu_accounts)}).")
+                    st.rerun()
+                else:
+                    st.error("Échec de la sauvegarde.")
+
+    st.markdown("---")
+    st.markdown("### Utilisateurs existants")
+    if not users:
+        st.info("Aucun utilisateur.")
+    else:
+        me = st.session_state.get("auth_user")
+        for i, u in enumerate(users):
+            uname = u.get("username", "")
+            is_adm = u.get("role") == "admin"
+            active = u.get("active", True)
+            status_col = _t["win"] if active else _t["loss"]
+            with st.container():
+                st.markdown(
+                    f"<div style='background:{_t['card']};border:1px solid {_t['border']};"
+                    f"border-radius:12px;padding:12px 16px;margin-bottom:4px'>"
+                    f"<b style='color:{_t['text']}'>{uname}</b> "
+                    f"{'👑 admin' if is_adm else ''} "
+                    f"<span style='color:{status_col};font-size:12px'>"
+                    f"● {'actif' if active else 'désactivé'}</span><br>"
+                    f"<span style='color:{_t['muted']};font-size:12px'>Comptes : "
+                    f"{', '.join(u.get('accounts', [])) if not is_adm else 'tous (admin)'}</span></div>",
+                    unsafe_allow_html=True)
+                if not is_adm:
+                    e1, e2, e3, e4 = st.columns([2.4, 1.4, 1.4, 1.2])
+                    with e1:
+                        new_acc = st.multiselect("Comptes", TRADE_MODES,
+                            default=[a for a in u.get("accounts", []) if a in TRADE_MODES],
+                            key=f"acc_{i}", label_visibility="collapsed")
+                    with e2:
+                        if st.button("Enregistrer accès", key=f"save_acc_{i}",
+                                     use_container_width=True):
+                            users[i]["accounts"] = new_acc
+                            (st.success if users_save(users) else st.error)(
+                                "Accès mis à jour." if new_acc else "Aucun compte : l'utilisateur ne verra rien.")
+                            st.rerun()
+                    with e3:
+                        if st.button("Activer" if not active else "Désactiver",
+                                     key=f"tog_{i}", use_container_width=True):
+                            users[i]["active"] = not active
+                            users_save(users); st.rerun()
+                    with e4:
+                        if st.button("Supprimer", key=f"del_{i}", use_container_width=True):
+                            st.session_state[f"confirm_del_{i}"] = True
+                    npw = st.text_input("Nouveau mot de passe", key=f"npw_{i}",
+                                        label_visibility="collapsed",
+                                        placeholder="Réinitialiser le mot de passe…")
+                    if npw:
+                        if len(npw) < 6:
+                            st.warning("6 caractères minimum.")
+                        elif st.button("Réinitialiser", key=f"rst_{i}"):
+                            users[i]["password_hash"] = hash_password(npw)
+                            (st.success if users_save(users) else st.error)("Mot de passe réinitialisé.")
+                    if st.session_state.get(f"confirm_del_{i}"):
+                        st.error(f"Supprimer définitivement « {uname} » ?")
+                        dc1, dc2, _ = st.columns([1, 1, 4])
+                        with dc1:
+                            if st.button("Oui, supprimer", key=f"cfd_{i}"):
+                                users.pop(i); users_save(users)
+                                st.session_state.pop(f"confirm_del_{i}", None); st.rerun()
+                        with dc2:
+                            if st.button("Annuler", key=f"cfn_{i}"):
+                                st.session_state.pop(f"confirm_del_{i}", None); st.rerun()
