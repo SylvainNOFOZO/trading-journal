@@ -374,8 +374,6 @@ def force_reload():
 # ── INIT SESSION ────────────────────────────────────────────────────────────
 if "trades" not in st.session_state:
     st.session_state.trades = load_and_migrate()
-if "account_capital" not in st.session_state:
-    st.session_state.account_capital = capital_load()
 if "page"        not in st.session_state: st.session_state.page        = "dashboard"
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
 if "theme_name"  not in st.session_state: st.session_state.theme_name  = THEME_NAMES[0]
@@ -431,6 +429,9 @@ def get_capital(mode_filter="Tous"):
 
 def is_admin():
     return st.session_state.get("auth_role") == "admin"
+
+if "account_capital" not in st.session_state:
+    st.session_state.account_capital = capital_load()
 
 
 def get_pnl(t): return float(t.get("pnl", 0))
