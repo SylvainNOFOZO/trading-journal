@@ -1785,6 +1785,10 @@ elif st.session_state.page == "add":
             cur_mode = ev("trade_mode","Réel Indépendant")
             d_mode = st.selectbox("Mode", TRADE_MODES, index=TRADE_MODES.index(cur_mode) if cur_mode in TRADE_MODES else 0)
 
+        rtc1, _rtc2 = st.columns([1, 3])
+        with rtc1:
+            d_time = st.text_input("Heure (HH:MM)", value=str(ev("time", "00:00") or "00:00"))
+
         r2c1,r2c2,r2c3,r2c4 = st.columns(4)
         with r2c1: d_entry = st.number_input("Prix d'entrée",  value=float(ev("entry",0.0)), format="%.5f",step=0.0001)
         with r2c2: d_exit  = st.number_input("Prix de sortie", value=float(ev("exit",0.0)),  format="%.5f",step=0.0001)
