@@ -378,7 +378,7 @@ if "page"        not in st.session_state: st.session_state.page        = "dashbo
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
 if "theme_name"  not in st.session_state: st.session_state.theme_name  = THEME_NAMES[0]
 if "mode_filter" not in st.session_state: st.session_state.mode_filter = "Tous"
-if st.session_state.mode_filter not in MODE_FILTER_OPTIONS: st.session_state.mode_filter = "Tous"
+if "mode_selection" not in st.session_state: st.session_state.mode_selection = []
 
 
 
@@ -417,21 +417,93 @@ def capital_save(cap):
     except Exception:
         return False
 
-def get_capital(mode_filter="Tous"):
-    """Capital de départ pour le périmètre affiché (somme si plusieurs comptes)."""
-    caps = st.session_state.get("account_capital", {})
+def _resolve_scope(sel):
+    """Normalise sel (str 'Tous'/compte, liste de comptes, ou None) en liste
+    de comptes effectivement affichés, toujours restreinte aux droits."""
     allowed = allowed_accounts()
-    if mode_filter in TRADE_MODES:
-        scope = [mode_filter]
-    else:
-        scope = allowed
+    if sel is None:
+        sel = st.session_state.get("mode_selection", [])
+    if isinstance(sel, str):
+        sel = [sel] if sel in TRADE_MODES else []   # 'Tous' -> [] = tous les comptes autorisés
+    scope = [m for m in sel if m in allowed]
+    return scope if scope else list(allowed)
+
+# ── CAPTURES D'ÉCRAN DES TRADES ─────────────────────────────────────────────
+def screenshots_load():
+    if not _sb_ready():
+        return st.session_state.get("_local_shots", {})
+    try:
+        r = requests.get(f"{SB_EP}?key=eq.trade_screenshots&select=value", headers=SB_HDR, timeout=15)
+        if r.status_code == 200 and r.json():
+            val = r.json()[0].get("value", {})
+            return val if isinstance(val, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+def screenshots_save(shots):
+    if not _sb_ready():
+        st.session_state["_local_shots"] = shots
+        return False
+    try:
+        r = requests.patch(f"{SB_EP}?key=eq.trade_screenshots",
+            headers={**SB_HDR, "Prefer": "return=representation"},
+            json={"value": shots, "updated_at": "now()"}, timeout=30)
+        if r.status_code == 200 and isinstance(r.json(), list) and r.json():
+            return True
+        if r.status_code == 204:
+            return True
+        r2 = requests.post(SB_EP,
+            headers={**SB_HDR, "Prefer": "resolution=merge-duplicates,return=representation"},
+            json={"key": "trade_screenshots", "value": shots}, timeout=30)
+        return r2.status_code in (200, 201)
+    except Exception:
+        return False
+
+def compress_image(raw_bytes, max_side=1600, quality=80):
+    """Redimensionne/compresse en JPEG et renvoie une data-URI base64.
+    Repli sur l'image brute encodée si PIL indisponible."""
+    try:
+        from PIL import Image
+        import io as _io
+        im = Image.open(_io.BytesIO(raw_bytes))
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        im.thumbnail((max_side, max_side))
+        buf = _io.BytesIO()
+        im.save(buf, format="JPEG", quality=quality, optimize=True)
+        data = buf.getvalue()
+        # Réduire encore si trop lourd
+        if len(data) > 900_000:
+            buf = _io.BytesIO(); im.save(buf, format="JPEG", quality=60, optimize=True)
+            data = buf.getvalue()
+        return "data:image/jpeg;base64," + base64.b64encode(data).decode()
+    except Exception:
+        return "data:image/png;base64," + base64.b64encode(raw_bytes).decode()
+
+def get_capital(mode_filter=None):
+    """Capital de départ pour le périmètre affiché (somme des comptes sélectionnés)."""
+    caps = st.session_state.get("account_capital", {})
+    scope = _resolve_scope(mode_filter)
     return sum(float(caps.get(a, 0) or 0) for a in scope)
 
 def is_admin():
     return st.session_state.get("auth_role") == "admin"
 
+def selection_label():
+    """Libellé lisible du périmètre de comptes actuellement affiché."""
+    allowed = allowed_accounts()
+    scope = _resolve_scope(None)
+    if not scope or set(scope) == set(allowed):
+        return "Tous les comptes" if len(allowed) != 1 else (allowed[0] if allowed else "—")
+    if len(scope) == 1:
+        return scope[0]
+    return f"{len(scope)} comptes : " + ", ".join(scope)
+
 if "account_capital" not in st.session_state:
     st.session_state.account_capital = capital_load()
+if "trade_screenshots" not in st.session_state:
+    st.session_state.trade_screenshots = screenshots_load()
 
 
 def get_pnl(t): return float(t.get("pnl", 0))
@@ -446,18 +518,18 @@ def fmt(n):
     if n is None: return "—"
     return f"+${n:,.2f}" if n >= 0 else f"-${abs(n):,.2f}"
 
-def get_df(mode_filter="Tous"):
+def get_df(mode_filter=None):
     rows = [dict(t, pnl=get_pnl(t), rr=calc_rr(t)) for t in st.session_state.trades]
     df = pd.DataFrame(rows) if rows else pd.DataFrame()
     if df.empty: return df
     if "trade_mode" not in df.columns: df["trade_mode"] = "Réel Indépendant"
-    # 1) Restreindre TOUJOURS aux comptes autorisés pour l'utilisateur connecté
     allowed = allowed_accounts()
     if allowed:
         df = df[df["trade_mode"].isin(allowed)]
-    # 2) Puis appliquer le filtre de compte précis s'il est demandé et autorisé
-    if mode_filter in TRADE_MODES and mode_filter in allowed:
-        return df[df["trade_mode"] == mode_filter]
+    # Filtrer sur les comptes sélectionnés (un, plusieurs, ou tous)
+    scope = _resolve_scope(mode_filter)
+    if scope and set(scope) != set(allowed):
+        df = df[df["trade_mode"].isin(scope)]
     return df
 
 def kpi(icon, label, value, sub, color):
@@ -602,11 +674,8 @@ def login_gate():
                     st.session_state.auth_user = user["username"]
                     st.session_state.auth_role = user.get("role", "user")
                     st.session_state.auth_accounts = user.get("accounts", [])
-                    # Filtre par défaut adapté aux droits
-                    opts = (["Tous"] + [a for a in user.get("accounts", []) if a in TRADE_MODES]) \
-                           if user.get("role") == "admin" or len(user.get("accounts", [])) >= 2 \
-                           else [a for a in user.get("accounts", []) if a in TRADE_MODES]
-                    st.session_state.mode_filter = opts[0] if opts else "Tous"
+                    # Sélection par défaut : tous les comptes autorisés (liste vide = tous)
+                    st.session_state.mode_selection = []
                     st.rerun()
                 else:
                     st.error(msg)
@@ -625,7 +694,7 @@ st.markdown(build_css(get_theme()), unsafe_allow_html=True)
 
 # ── HEADER HORIZONTAL COMPACT ───────────────────────────────────────────────────
 _thd = get_theme()
-df_side = get_df(st.session_state.mode_filter)
+df_side = get_df()
 total   = df_side["pnl"].sum() if not df_side.empty else 0
 wr      = (len(df_side[df_side["pnl"]>0])/len(df_side)*100) if not df_side.empty else 0
 col_pnl = _thd["win"] if total >= 0 else _thd["loss"]
@@ -647,20 +716,29 @@ with _hh2:
     if _sel_theme != st.session_state.theme_name:
         st.session_state.theme_name = _sel_theme; st.rerun()
 with _hh3:
-    _opts = user_mode_options()
-    if st.session_state.mode_filter not in _opts:
-        st.session_state.mode_filter = _opts[0] if _opts else "Tous"
-    _mf = st.selectbox("Afficher", _opts,
-        index=_opts.index(st.session_state.mode_filter) if st.session_state.mode_filter in _opts else 0,
-        label_visibility="collapsed")
-    if _mf != st.session_state.mode_filter:
-        st.session_state.mode_filter = _mf; st.rerun()
+    _allowed = allowed_accounts()
+    if "mode_selection" not in st.session_state:
+        st.session_state.mode_selection = []
+    # Nettoyer la sélection des comptes non autorisés
+    _cur_sel = [m for m in st.session_state.mode_selection if m in _allowed]
+    if len(_allowed) <= 1:
+        # Un seul compte : pas de choix à faire
+        st.session_state.mode_selection = list(_allowed)
+        st.markdown(f"<div style='padding-top:8px;font-size:12px;color:{_thd['muted']}'>"
+                    f"Compte : <b style='color:{_thd['text']}'>{(_allowed[0] if _allowed else '—')}</b></div>",
+                    unsafe_allow_html=True)
+    else:
+        _new_sel = st.multiselect("Afficher", _allowed, default=_cur_sel,
+            placeholder="Tous les comptes", label_visibility="collapsed",
+            key="mode_multiselect")
+        if _new_sel != _cur_sel:
+            st.session_state.mode_selection = _new_sel; st.rerun()
 
 # Bandeau capital compact
 st.markdown(
     f"<div style='display:flex;gap:20px;align-items:baseline;padding:2px 0 8px'>"
     f"<span style='font-size:11px;color:{_thd['muted']};text-transform:uppercase;"
-    f"letter-spacing:1px'>Capital {st.session_state.mode_filter}</span>"
+    f"letter-spacing:1px'>Capital · {selection_label()}</span>"
     f"<span style='font-size:18px;font-weight:800;color:{col_pnl};"
     f"font-family:JetBrains Mono,monospace'>{fmt(total)}</span>"
     f"<span style='font-size:11px;color:{_thd['muted']}'>{len(df_side)} trades · {wr:.0f}% win</span>"
@@ -679,6 +757,7 @@ if is_admin():
 _NAV += [
     ("analyse",   "Analyse & News", ":material/newspaper:"),
     ("calendar",  "Calendrier", ":material/calendar_month:"),
+    ("captures",  "Captures", ":material/image:"),
 ]
 if is_admin():
     _NAV += [("users", "Utilisateurs", ":material/manage_accounts:")]
@@ -706,7 +785,17 @@ st.markdown(f"<hr style='margin:6px 0 16px;border-color:{_thd['border']}'>",
 
 # ── BANNER MODE ────────────────────────────────────────────────────────────────
 def mode_banner():
-    m = st.session_state.mode_filter
+    _sc = _resolve_scope(None)
+    _al = allowed_accounts()
+    if not _sc or set(_sc) == set(_al):
+        m = "Tous"
+    elif len(_sc) == 1:
+        m = _sc[0]
+    else:
+        st.markdown(f'<div class="mode-banner-all"><i class="fa-solid fa-layer-group"></i> '
+                    f'{len(_sc)} comptes sélectionnés : {", ".join(_sc)}</div>', unsafe_allow_html=True)
+        return
+    m = m
     if m == "Réel Indépendant":
         st.markdown('<div class="mode-banner-real"><i class="fa-solid fa-circle-dot"></i> Réel Indépendant — Compte personnel</div>', unsafe_allow_html=True)
     elif m == "Réel Institutionnel":
@@ -749,7 +838,7 @@ if st.session_state.page == "dashboard":
     with fc5: f_date_to   = st.date_input("Jusqu'au",   value=d_max, key="d_to")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    df = get_df(st.session_state.mode_filter)
+    df = get_df()
     if not df.empty:
         if f_sym   != "Tous":   df = df[df["symbol"]   == f_sym]
         if f_mood  != "Toutes": df = df[df["mood"]     == f_mood]
@@ -785,7 +874,8 @@ if st.session_state.page == "dashboard":
         st.markdown(" ")
 
         # Comparaison par mode de compte
-        if st.session_state.mode_filter == "Tous" and "trade_mode" in df.columns:
+        _sc_dash = _resolve_scope(None)
+        if len(_sc_dash) >= 2 and "trade_mode" in df.columns:
             _mode_cfg = {
                 "Démo":               ("#ff9f43", "fa-flask"),
                 "Réel Indépendant":   ("#00d4aa", "fa-circle-dot"),
@@ -912,7 +1002,7 @@ if st.session_state.page == "dashboard":
         st.markdown("### Performance dans le temps")
 
         # ── Progression du capital en % (base = capital de départ du compte) ──
-        _base_cap = get_capital(st.session_state.mode_filter)
+        _base_cap = get_capital()
         _card("Progression du capital (%)",
               f"Base : {_base_cap:,.0f}$" if _base_cap > 0
               else "Capital de départ non défini")
@@ -1573,6 +1663,52 @@ elif st.session_state.page == "journal":
                             st.session_state.pop("confirm_del", None)
                             st.rerun()
 
+                # ── CAPTURES D'ÉCRAN DU TRADE ─────────────────────────────
+                st.markdown("---")
+                st.markdown("##### Captures d'écran du setup")
+                _sid = str(sel_id)
+                _shots = st.session_state.trade_screenshots
+                _cur = _shots.get(_sid, [])
+                up = st.file_uploader(
+                    "Ajouter des captures (PNG/JPG)", type=["png", "jpg", "jpeg"],
+                    accept_multiple_files=True, key=f"up_{_sid}",
+                    label_visibility="collapsed")
+                if up:
+                    if st.button("Enregistrer les captures", icon=":material/save:",
+                                 key=f"save_shot_{_sid}", type="primary"):
+                        added = 0
+                        for f in up:
+                            try:
+                                data_uri = compress_image(f.getvalue())
+                                _cur.append({"name": f.name, "data": data_uri,
+                                             "ts": datetime.now().isoformat(timespec="seconds")})
+                                added += 1
+                            except Exception as e:
+                                st.warning(f"Échec {f.name} : {e}")
+                        _shots[_sid] = _cur
+                        st.session_state.trade_screenshots = _shots
+                        ok = screenshots_save(_shots)
+                        st.success(f"{added} capture(s) enregistrée(s)."
+                                   if ok else f"{added} ajoutée(s) en session (sync à vérifier).")
+                        st.rerun()
+                if _cur:
+                    st.caption(f"{len(_cur)} capture(s) sur ce trade")
+                    gcols = st.columns(3)
+                    for _i, sh in enumerate(list(_cur)):
+                        with gcols[_i % 3]:
+                            st.image(sh["data"], use_container_width=True,
+                                     caption=sh.get("name", ""))
+                            if st.button("Supprimer", icon=":material/delete:",
+                                         key=f"delshot_{_sid}_{_i}", use_container_width=True):
+                                _cur.pop(_i)
+                                if _cur: _shots[_sid] = _cur
+                                else: _shots.pop(_sid, None)
+                                st.session_state.trade_screenshots = _shots
+                                screenshots_save(_shots)
+                                st.rerun()
+                else:
+                    st.caption("Aucune capture pour ce trade.")
+
             # ── Onglet : PLUSIEURS TRADES ────────────────────────────────────
             with tab2:
                 df_multi = df_all.sort_values("date", ascending=False)
@@ -1585,12 +1721,12 @@ elif st.session_state.page == "journal":
                 with mf1: mf_from = st.date_input("Du",    value=d_min_m, key="mf_from")
                 with mf2: mf_to   = st.date_input("Au",    value=d_max_m, key="mf_to")
                 with mf3: mf_sym  = st.selectbox("Actif",  ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="mf_sym")
-                with mf4: mf_mode = st.selectbox("Mode",   user_mode_options(), key="mf_mode")
+                with mf4: mf_mode = st.multiselect("Comptes", allowed_accounts(), default=[], placeholder="Tous", key="mf_mode")
                 with mf5: mf_dir  = st.selectbox("Dir.",   ["Tous","LONG","SHORT"], key="mf_dir")
 
                 df_multi = df_multi[df_multi["date"].between(str(mf_from), str(mf_to))]
                 if mf_sym  != "Tous": df_multi = df_multi[df_multi["symbol"]   == mf_sym]
-                if mf_mode != "Tous": df_multi = df_multi[df_multi["trade_mode"] == mf_mode]
+                if mf_mode: df_multi = df_multi[df_multi["trade_mode"].isin(mf_mode)]
                 if mf_dir  != "Tous": df_multi = df_multi[df_multi["direction"] == mf_dir]
                 filtered_ids = df_multi["id"].tolist()
 
@@ -1699,13 +1835,13 @@ elif st.session_state.page == "journal":
         with fa1: f_from = st.date_input("Du",        value=d_min, key="j_from")
         with fa2: f_to   = st.date_input("Au",        value=d_max, key="j_to")
         with fa3: f_sym  = st.selectbox("Actif",      ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="j_sym")
-        with fa4: f_mode = st.selectbox("Mode",       user_mode_options(), key="j_mode")
+        with fa4: f_mode = st.multiselect("Comptes",     allowed_accounts(), default=[], placeholder="Tous", key="j_mode")
         with fa5: f_dir  = st.selectbox("Direction",  ["Tous","LONG","SHORT"], key="j_dir")
 
         df = df_all.copy()
         df = df[df["date"].between(str(f_from), str(f_to))]
         if f_sym  != "Tous": df = df[df["symbol"]    == f_sym]
-        if f_mode != "Tous": df = df[df["trade_mode"] == f_mode]
+        if f_mode: df = df[df["trade_mode"].isin(f_mode)]
         if f_dir  != "Tous": df = df[df["direction"] == f_dir]
         df = df.sort_values("date", ascending=False)
 
@@ -2704,7 +2840,7 @@ elif st.session_state.page == "calendar":
     st.markdown("# Calendrier de Performance")
     mode_banner()
 
-    df_cal = get_df(st.session_state.mode_filter)
+    df_cal = get_df()
 
     if df_cal.empty:
         st.warning("Aucun trade enregistré.")
@@ -3333,3 +3469,93 @@ elif st.session_state.page == "users":
                         with dc2:
                             if st.button("Annuler", key=f"cfn_{i}"):
                                 st.session_state.pop(f"confirm_del_{i}", None); st.rerun()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE : CAPTURES — galerie des screenshots de trades, filtrable par date/compte
+# ══════════════════════════════════════════════════════════════════════════════
+elif st.session_state.page == "captures":
+    _t = get_theme()
+    st.markdown("# Captures d'écran des trades")
+    st.caption("Toutes les captures de setups, filtrables par date et par compte. "
+               + ("L'ajout se fait dans le Journal (trade sélectionné)."
+                  if is_admin() else "Consultation limitée à vos comptes."))
+
+    _shots = st.session_state.get("trade_screenshots", {})
+    _allowed = allowed_accounts()
+    # Index des trades par id
+    _by_id = {str(t["id"]): t for t in st.session_state.trades}
+
+    # Construire la liste (trade, screenshot) visible selon droits
+    _items = []
+    for tid, lst in _shots.items():
+        tr = _by_id.get(str(tid))
+        if not tr:
+            continue
+        if tr.get("trade_mode", "Réel Indépendant") not in _allowed:
+            continue
+        for sh in lst:
+            _items.append((tr, sh))
+
+    if not _items:
+        st.info("Aucune capture disponible pour vos comptes. "
+                + ("Ajoutez-en depuis le Journal." if is_admin() else ""))
+    else:
+        # Bornes de dates
+        _dts = sorted([tr.get("date", "") for tr, _ in _items if tr.get("date")])
+        _dmin = date.fromisoformat(_dts[0]) if _dts else date(2024, 1, 1)
+        _dmax = date.fromisoformat(_dts[-1]) if _dts else date.today()
+
+        fc1, fc2, fc3 = st.columns([1.2, 1.2, 2.4])
+        with fc1:
+            c_from = st.date_input("Du", value=_dmin, key="cap_from")
+        with fc2:
+            c_to = st.date_input("Au", value=_dmax, key="cap_to")
+        with fc3:
+            c_acc = st.multiselect("Comptes", _allowed, default=[],
+                                   placeholder="Tous mes comptes", key="cap_acc")
+
+        # Filtrage
+        def _in_range(tr):
+            d = tr.get("date", "")
+            try:
+                dd = date.fromisoformat(d)
+            except Exception:
+                return False
+            if dd < c_from or dd > c_to:
+                return False
+            if c_acc and tr.get("trade_mode") not in c_acc:
+                return False
+            return True
+
+        _filtered = [(tr, sh) for tr, sh in _items if _in_range(tr)]
+        # Trier par date décroissante
+        _filtered.sort(key=lambda x: (x[0].get("date", ""), x[1].get("ts", "")), reverse=True)
+
+        st.markdown(
+            f"<div style='color:{_t['muted']};font-size:13px;margin:6px 0 12px'>"
+            f"<b style='color:{_t['accent']};font-family:JetBrains Mono,monospace'>"
+            f"{len(_filtered)}</b> capture(s) sur la période.</div>",
+            unsafe_allow_html=True)
+
+        if not _filtered:
+            st.info("Aucune capture sur cette plage de dates.")
+        else:
+            gcols = st.columns(3)
+            for _i, (tr, sh) in enumerate(_filtered):
+                with gcols[_i % 3]:
+                    _pnl = tr.get("pnl", 0)
+                    _pc = _t["win"] if _pnl >= 0 else _t["loss"]
+                    st.markdown(
+                        f"<div style='font-size:12px;margin-bottom:2px'>"
+                        f"<b style='color:{_t['text']}'>{tr.get('date','')} "
+                        f"{tr.get('time','') or ''}</b> · "
+                        f"<span style='color:{_t['muted']}'>{tr.get('symbol','')} "
+                        f"{tr.get('direction','')}</span> · "
+                        f"<span style='color:{_pc};font-family:JetBrains Mono,monospace'>"
+                        f"{fmt(_pnl)}</span></div>",
+                        unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div style='font-size:10px;color:{_t['muted']};margin-bottom:4px'>"
+                        f"{tr.get('trade_mode','')} · {tr.get('strategy','')}</div>",
+                        unsafe_allow_html=True)
+                    st.image(sh["data"], use_container_width=True)
