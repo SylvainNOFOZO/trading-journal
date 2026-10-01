@@ -829,6 +829,7 @@ if is_admin():
 _NAV += [
     ("analyse",   "Analyse & News", ":material/newspaper:"),
     ("calendar",  "Calendrier", ":material/calendar_month:"),
+    ("sessions",  "Sessions", ":material/schedule:"),
     ("captures",  "Captures", ":material/image:"),
 ]
 if is_admin():
@@ -3502,6 +3503,127 @@ elif st.session_state.page == "users":
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : CAPTURES — galerie des screenshots de trades, filtrable par date/compte
 # ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE : SESSIONS DE TRADING (heures en GMT+1)
+# ══════════════════════════════════════════════════════════════════════════════
+elif st.session_state.page == "sessions":
+    _t = get_theme()
+    from datetime import timezone as _tz, timedelta as _tdl
+    GMT1 = _tz(_tdl(hours=1))
+
+    st.markdown("# Sessions de trading")
+    st.caption("Horaires des grandes places financières, ajustés à votre fuseau (GMT+1). "
+               "Le Forex est fermé le week-end.")
+
+    # Horaires standard des sessions en UTC : (début_h, fin_h) ; fin<début = passage minuit
+    SESSIONS = [
+        {"name": "Sydney",   "icon": "fa-earth-oceania", "utc": (21, 6), "color": "#f0506e"},
+        {"name": "Tokyo",    "icon": "fa-earth-asia",    "utc": (0, 9),  "color": "#9d7bff"},
+        {"name": "Londres",  "icon": "fa-earth-europe",  "utc": (8, 17), "color": "#4f8cff"},
+        {"name": "New York", "icon": "fa-earth-americas","utc": (13, 22),"color": "#2dd4a7"},
+    ]
+
+    now_utc = datetime.now(_tz.utc)
+
+    def _weekend_closed(dt_utc):
+        """Forex fermé du vendredi 21:00 UTC au dimanche 21:00 UTC."""
+        wd = dt_utc.weekday()  # 0=lundi ... 6=dimanche
+        if wd == 5:  # samedi
+            return True
+        if wd == 4 and dt_utc.hour >= 21:   # vendredi soir
+            return True
+        if wd == 6 and dt_utc.hour < 21:    # dimanche avant 21h
+            return True
+        return False
+
+    def _session_window(sess, ref_utc):
+        """Retourne (is_open, open_utc, close_utc) pour la fenêtre courante ou la prochaine."""
+        sh, eh = sess["utc"]
+        wrap = eh <= sh  # la session passe minuit (ex. Sydney 21->6)
+        # Candidats d'ouverture : hier, aujourd'hui, demain
+        for delta in (-1, 0, 1):
+            day = (ref_utc + _tdl(days=delta)).replace(hour=sh, minute=0, second=0, microsecond=0)
+            close = day + _tdl(hours=((eh + 24 - sh) if wrap else (eh - sh)))
+            if day <= ref_utc < close:
+                return True, day, close
+        # Sinon : prochaine ouverture
+        for delta in (0, 1, 2, 3):
+            day = (ref_utc + _tdl(days=delta)).replace(hour=sh, minute=0, second=0, microsecond=0)
+            if day > ref_utc:
+                close = day + _tdl(hours=((eh + 24 - sh) if wrap else (eh - sh)))
+                return False, day, close
+        return False, None, None
+
+    def _fmt(dt_utc):
+        if dt_utc is None: return "—"
+        return dt_utc.astimezone(GMT1).strftime("%a %d/%m · %H:%M")
+
+    market_closed = _weekend_closed(now_utc)
+    open_count = 0
+
+    # Bandeau heure locale + état marché
+    _mk_col = _t["loss"] if market_closed else _t["win"]
+    st.markdown(
+        f"<div style='display:flex;gap:20px;align-items:center;margin-bottom:14px'>"
+        f"<span style='font-size:12px;color:{_t['muted']};text-transform:uppercase;"
+        f"letter-spacing:1px'>Heure locale (GMT+1)</span>"
+        f"<span style='font-size:18px;font-weight:800;color:{_t['text']};"
+        f"font-family:JetBrains Mono,monospace'>{now_utc.astimezone(GMT1).strftime('%A %d/%m %H:%M')}</span>"
+        f"<span style='background:{_mk_col}22;color:{_mk_col};border:1px solid {_mk_col}55;"
+        f"border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700'>"
+        f"{'Marché FERMÉ (week-end)' if market_closed else 'Marché OUVERT'}</span>"
+        f"</div>", unsafe_allow_html=True)
+
+    cols = st.columns(len(SESSIONS))
+    for _col, sess in zip(cols, SESSIONS):
+        is_open, o_utc, c_utc = _session_window(sess, now_utc)
+        if market_closed:
+            is_open = False
+        if is_open:
+            open_count += 1
+        col = sess["color"]
+        status_col = _t["win"] if is_open else _t["muted"]
+        status_txt = "OUVERTE" if is_open else "Fermée"
+        with _col:
+            if is_open:
+                body = (f"<div style='font-size:11px;color:{_t['muted']};margin-top:8px'>Ouverture</div>"
+                        f"<div style='font-size:13px;font-weight:700;color:{_t['text']};"
+                        f"font-family:JetBrains Mono,monospace'>{_fmt(o_utc)}</div>"
+                        f"<div style='font-size:11px;color:{_t['muted']};margin-top:4px'>Fermeture</div>"
+                        f"<div style='font-size:13px;font-weight:700;color:{_t['text']};"
+                        f"font-family:JetBrains Mono,monospace'>{_fmt(c_utc)}</div>")
+            else:
+                body = (f"<div style='font-size:11px;color:{_t['muted']};margin-top:8px'>Prochaine ouverture</div>"
+                        f"<div style='font-size:13px;font-weight:700;color:{_t['muted']};"
+                        f"font-family:JetBrains Mono,monospace'>{_fmt(o_utc)}</div>"
+                        f"<div style='font-size:11px;color:{_t['muted']};margin-top:4px'>Clôture prévue</div>"
+                        f"<div style='font-size:12px;color:{_t['muted']};"
+                        f"font-family:JetBrains Mono,monospace'>{_fmt(c_utc)}</div>")
+            st.markdown(
+                f"<div class='grad-card' style='border-top:3px solid {col}'>"
+                f"<div style='display:flex;align-items:center;justify-content:space-between'>"
+                f"<span style='font-size:15px;font-weight:800;color:{_t['text']}'>"
+                f"<i class='fa-solid {sess['icon']}' style='color:{col};margin-right:6px'></i>{sess['name']}</span>"
+                f"<span style='background:{status_col}22;color:{status_col};border:1px solid {status_col}55;"
+                f"border-radius:20px;padding:2px 10px;font-size:10px;font-weight:800'>{status_txt}</span>"
+                f"</div>"
+                f"<div style='font-size:10px;color:{_t['muted']};margin-top:4px'>"
+                f"Standard : {sess['utc'][0]:02d}:00–{sess['utc'][1]:02d}:00 UTC</div>"
+                f"{body}</div>",
+                unsafe_allow_html=True)
+
+    st.markdown(" ")
+    if market_closed:
+        st.info("Marché Forex fermé pour le week-end. Réouverture dimanche soir (session de Sydney).")
+    else:
+        # Chevauchements notables
+        st.markdown(
+            f"<div style='color:{_t['muted']};font-size:12px;margin-top:6px'>"
+            f"<b style='color:{_t['text']}'>{open_count}</b> session(s) ouverte(s) actuellement. "
+            f"Le chevauchement <b style='color:{_t['text']}'>Londres · New York</b> "
+            f"(14:00–18:00 GMT+1) concentre la plus forte liquidité.</div>",
+            unsafe_allow_html=True)
+
 elif st.session_state.page == "captures":
     _t = get_theme()
     st.markdown("# Captures d'écran des trades")
