@@ -3515,51 +3515,62 @@ elif st.session_state.page == "sessions":
     st.caption("Horaires des grandes places financières, ajustés à votre fuseau (GMT+1). "
                "Le Forex est fermé le week-end.")
 
-    # Horaires standard des sessions en UTC : (début_h, fin_h) ; fin<début = passage minuit
+    # Fuseaux RÉELS de chaque place (le DST été/hiver est géré automatiquement)
+    # Heures d'ouverture exprimées en HEURE LOCALE de la place.
+    try:
+        from zoneinfo import ZoneInfo
+    except Exception:
+        ZoneInfo = None
     SESSIONS = [
-        {"name": "Sydney",   "icon": "fa-earth-oceania", "utc": (21, 6), "color": "#f0506e"},
-        {"name": "Tokyo",    "icon": "fa-earth-asia",    "utc": (0, 9),  "color": "#9d7bff"},
-        {"name": "Londres",  "icon": "fa-earth-europe",  "utc": (8, 17), "color": "#4f8cff"},
-        {"name": "New York", "icon": "fa-earth-americas","utc": (13, 22),"color": "#2dd4a7"},
+        {"name": "Sydney",   "icon": "fa-earth-oceania", "tz": "Australia/Sydney",  "open": 7, "close": 16, "color": "#f0506e"},
+        {"name": "Tokyo",    "icon": "fa-earth-asia",    "tz": "Asia/Tokyo",        "open": 9, "close": 18, "color": "#9d7bff"},
+        {"name": "Londres",  "icon": "fa-earth-europe",  "tz": "Europe/London",     "open": 8, "close": 17, "color": "#4f8cff"},
+        {"name": "New York", "icon": "fa-earth-americas","tz": "America/New_York",  "open": 8, "close": 17, "color": "#2dd4a7"},
     ]
 
     now_utc = datetime.now(_tz.utc)
 
-    def _weekend_closed(dt_utc):
-        """Forex fermé du vendredi 21:00 UTC au dimanche 21:00 UTC."""
-        wd = dt_utc.weekday()  # 0=lundi ... 6=dimanche
-        if wd == 5:  # samedi
-            return True
-        if wd == 4 and dt_utc.hour >= 21:   # vendredi soir
-            return True
-        if wd == 6 and dt_utc.hour < 21:    # dimanche avant 21h
-            return True
-        return False
-
     def _session_window(sess, ref_utc):
-        """Retourne (is_open, open_utc, close_utc) pour la fenêtre courante ou la prochaine."""
-        sh, eh = sess["utc"]
-        wrap = eh <= sh  # la session passe minuit (ex. Sydney 21->6)
-        # Candidats d'ouverture : hier, aujourd'hui, demain
-        for delta in (-1, 0, 1):
-            day = (ref_utc + _tdl(days=delta)).replace(hour=sh, minute=0, second=0, microsecond=0)
-            close = day + _tdl(hours=((eh + 24 - sh) if wrap else (eh - sh)))
-            if day <= ref_utc < close:
-                return True, day, close
-        # Sinon : prochaine ouverture
-        for delta in (0, 1, 2, 3):
-            day = (ref_utc + _tdl(days=delta)).replace(hour=sh, minute=0, second=0, microsecond=0)
-            if day > ref_utc:
-                close = day + _tdl(hours=((eh + 24 - sh) if wrap else (eh - sh)))
-                return False, day, close
+        """Fenêtre courante (ou prochaine), calculée dans le vrai fuseau de la place.
+        Pas de session le week-end local. Retourne (is_open, open_utc, close_utc)."""
+        if ZoneInfo is None:
+            return False, None, None
+        try:
+            tz = ZoneInfo(sess["tz"])
+        except Exception:
+            return False, None, None
+        oh, ch = sess["open"], sess["close"]
+        here = ref_utc.astimezone(tz)
+        # Fenêtre en cours : hier / aujourd'hui (heure locale)
+        for d in (-1, 0):
+            ld = (here + _tdl(days=d))
+            if ld.weekday() >= 5:            # samedi/dimanche local → pas de session
+                continue
+            o = ld.replace(hour=oh, minute=0, second=0, microsecond=0)
+            cl = o + _tdl(hours=(ch - oh))
+            o_utc, c_utc = o.astimezone(_tz.utc), cl.astimezone(_tz.utc)
+            if o_utc <= ref_utc < c_utc:
+                return True, o_utc, c_utc
+        # Sinon : prochaine ouverture (7 jours glissants, jours ouvrés)
+        for d in range(0, 8):
+            ld = (here + _tdl(days=d))
+            if ld.weekday() >= 5:
+                continue
+            o = ld.replace(hour=oh, minute=0, second=0, microsecond=0)
+            cl = o + _tdl(hours=(ch - oh))
+            o_utc, c_utc = o.astimezone(_tz.utc), cl.astimezone(_tz.utc)
+            if o_utc > ref_utc:
+                return False, o_utc, c_utc
         return False, None, None
 
     def _fmt(dt_utc):
         if dt_utc is None: return "—"
         return dt_utc.astimezone(GMT1).strftime("%a %d/%m · %H:%M")
 
-    market_closed = _weekend_closed(now_utc)
-    open_count = 0
+    # Pré-calcul : statut de chaque session → l'état du marché en découle
+    _sess_results = {s["name"]: _session_window(s, now_utc) for s in SESSIONS}
+    open_count = sum(1 for v in _sess_results.values() if v[0])
+    market_closed = (open_count == 0)
 
     # Bandeau heure locale + état marché
     _mk_col = _t["loss"] if market_closed else _t["win"]
@@ -3571,16 +3582,12 @@ elif st.session_state.page == "sessions":
         f"font-family:JetBrains Mono,monospace'>{now_utc.astimezone(GMT1).strftime('%A %d/%m %H:%M')}</span>"
         f"<span style='background:{_mk_col}22;color:{_mk_col};border:1px solid {_mk_col}55;"
         f"border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700'>"
-        f"{'Marché FERMÉ (week-end)' if market_closed else 'Marché OUVERT'}</span>"
+        f"{'Marché FERMÉ' if market_closed else 'Marché OUVERT'}</span>"
         f"</div>", unsafe_allow_html=True)
 
     cols = st.columns(len(SESSIONS))
     for _col, sess in zip(cols, SESSIONS):
-        is_open, o_utc, c_utc = _session_window(sess, now_utc)
-        if market_closed:
-            is_open = False
-        if is_open:
-            open_count += 1
+        is_open, o_utc, c_utc = _sess_results[sess["name"]]
         col = sess["color"]
         status_col = _t["win"] if is_open else _t["muted"]
         status_txt = "OUVERTE" if is_open else "Fermée"
@@ -3608,7 +3615,7 @@ elif st.session_state.page == "sessions":
                 f"border-radius:20px;padding:2px 10px;font-size:10px;font-weight:800'>{status_txt}</span>"
                 f"</div>"
                 f"<div style='font-size:10px;color:{_t['muted']};margin-top:4px'>"
-                f"Standard : {sess['utc'][0]:02d}:00–{sess['utc'][1]:02d}:00 UTC</div>"
+                f"Local : {sess['open']:02d}:00–{sess['close']:02d}:00 ({sess['tz'].split('/')[-1].replace('_',' ')})</div>"
                 f"{body}</div>",
                 unsafe_allow_html=True)
 
