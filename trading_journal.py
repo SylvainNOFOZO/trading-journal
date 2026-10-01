@@ -181,6 +181,20 @@ hr {{ border-color:{t['border']} !important; }}
 .mode-banner-all  {{ background:{t['alt']}14;border:1px solid {t['alt']}4d;border-radius:10px;
     padding:8px 16px;font-size:12px;color:{t['alt']};font-weight:700;margin-bottom:12px; }}
 .grad-card {{ background:linear-gradient(145deg,{t['card']},{t['bg2']});border:1px solid {t['border']};border-radius:14px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.18),0 8px 24px rgba(0,0,0,.08); }}
+/* Navigation horizontale en pastilles : libellés entiers, retour à la ligne auto */
+div[role="radiogroup"] {{ gap:8px; flex-wrap:wrap; align-items:center; }}
+div[role="radiogroup"] > label {{
+    background:{t['card']}; border:1px solid {t['border']}; border-radius:10px;
+    padding:6px 15px; margin:0; cursor:pointer; transition:all .15s; white-space:nowrap; }}
+div[role="radiogroup"] > label:hover {{ border-color:{t['accent']}; }}
+div[role="radiogroup"] > label > div:first-child {{ display:none; }}
+div[role="radiogroup"] > label p {{ font-size:13px !important; margin:0 !important;
+    color:{t['text']} !important; }}
+div[role="radiogroup"] > label:has(input:checked) {{
+    background:linear-gradient(135deg,{t['accent']},{t['alt']});
+    border-color:transparent; box-shadow:0 2px 10px {t['accent']}44; }}
+div[role="radiogroup"] > label:has(input:checked) p {{
+    color:{t['btn_text']} !important; font-weight:800; }}
 .grad-accent {{ background:linear-gradient(135deg,{t['accent']},{t['alt']});-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:800; }}
 </style>
 """
@@ -839,19 +853,32 @@ if is_admin():
 if not is_admin() and st.session_state.page in ("add", "import", "users"):
     st.session_state.page = "dashboard"
 
-_nav_cols = st.columns(len(_NAV) + 2)
-for _c, (_k, _lbl, _ic) in zip(_nav_cols, _NAV):
-    with _c:
-        if st.button(_lbl, icon=_ic, use_container_width=True,
-                     type="primary" if st.session_state.page == _k else "secondary",
-                     key=f"nav_{_k}"):
-            st.session_state.page = _k; st.session_state.edit_id = None; st.rerun()
-with _nav_cols[-2]:
-    if st.button("Sync", icon=":material/sync:", use_container_width=True, key="nav_sync"):
-        force_reload(); st.rerun()
-with _nav_cols[-1]:
-    if st.button("Quitter", icon=":material/logout:", use_container_width=True, key="nav_logout"):
-        logout()
+# Navigation horizontale dynamique : chaque libellé s'affiche en entier (pastilles
+# qui s'ajustent à la largeur du texte et passent à la ligne si besoin).
+_nav_keys   = [k for k, _, _ in _NAV]
+_nav_labels = [l for _, l, _ in _NAV]
+_lbl2key    = {l: k for k, l, _ in _NAV}
+if st.session_state.page not in _nav_keys:
+    st.session_state.page = "dashboard"
+_cur_lbl = next((l for k, l, _ in _NAV if k == st.session_state.page), _nav_labels[0])
+
+_navcol, _actcol = st.columns([7, 1.5])
+with _navcol:
+    _choice = st.radio("Navigation", _nav_labels,
+                       index=_nav_labels.index(_cur_lbl),
+                       horizontal=True, label_visibility="collapsed", key="nav_radio")
+    if _choice and _lbl2key.get(_choice) != st.session_state.page:
+        st.session_state.page = _lbl2key[_choice]; st.session_state.edit_id = None; st.rerun()
+with _actcol:
+    _b1, _b2 = st.columns(2)
+    with _b1:
+        if st.button("", icon=":material/sync:", use_container_width=True,
+                     key="nav_sync", help="Synchroniser"):
+            force_reload(); st.rerun()
+    with _b2:
+        if st.button("", icon=":material/logout:", use_container_width=True,
+                     key="nav_logout", help="Déconnexion"):
+            logout()
 
 st.markdown(f"<hr style='margin:6px 0 16px;border-color:{_thd['border']}'>",
             unsafe_allow_html=True)
