@@ -127,7 +127,7 @@ def build_css(t):
 .icon-orange {{ color:{t['orange']}; background:{t['orange']}1f; }}
 .icon-muted  {{ color:{t['muted']}; background:{t['muted']}1a; }}
 .mood-dot {{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }}
-.stApp {{ background-color: {t['bg']}; font-size:14px; }}
+.stApp {{ background: linear-gradient(160deg, {t['bg']} 0%, {t['bg2']} 55%, {t['bg']} 100%); background-attachment: fixed; font-size:14px; }}
 /* Navigation horizontale : masquer la sidebar */
 section[data-testid="stSidebar"] {{ display:none; }}
 button[data-testid="stBaseButton-headerNoPadding"] {{ display:none; }}
@@ -146,10 +146,9 @@ h1,h2,h3,h4,h5,h6,p,label,.stMarkdown {{ color: {t['text']} !important; }}
 div[data-baseweb="input"] input, div[data-baseweb="textarea"] textarea,
 div[data-baseweb="select"] > div {{
     background-color: {t['bg2']} !important; border-color: {t['border']} !important; color: {t['text']} !important; }}
-.stButton > button {{ background-color:{t['accent']};color:{t['btn_text']};font-weight:800;border:none;border-radius:10px; }}
-.stButton > button:hover {{ filter:brightness(0.92); color:{t['btn_text']} !important; }}
-.kpi {{ background:{t['card']};border:1px solid {t['border']};border-radius:14px;padding:18px 20px 14px;
-    position:relative;overflow:hidden;min-height:110px; }}
+.stButton > button {{ background:linear-gradient(135deg,{t['accent']},{t['alt']});color:{t['btn_text']};font-weight:800;border:none;border-radius:10px;box-shadow:0 2px 8px {t['accent']}33; }}
+.stButton > button:hover {{ filter:brightness(1.08); color:{t['btn_text']} !important; box-shadow:0 4px 14px {t['accent']}55; }}
+.kpi {{ background:linear-gradient(145deg,{t['card']},{t['bg2']});border:1px solid {t['border']};border-radius:14px;padding:18px 20px 14px;position:relative;overflow:hidden;min-height:110px;box-shadow:0 1px 3px rgba(0,0,0,.18),0 8px 24px rgba(0,0,0,.10); }}
 .kpi-bar {{ position:absolute;top:0;left:0;right:0;height:3px; }}
 .kpi-icon {{ font-size:18px;margin-bottom:6px; }}
 .kpi-label {{ font-size:10px;color:{t['muted']};letter-spacing:1.5px;text-transform:uppercase;font-weight:600; }}
@@ -157,7 +156,7 @@ div[data-baseweb="select"] > div {{
 .kpi-sub {{ font-size:11px;color:{t['muted']}; }}
 .tj-table {{ width:100%;border-collapse:collapse;font-size:13px; }}
 .tj-table th {{ padding:10px 12px;text-align:left;font-size:10px;color:{t['muted']};letter-spacing:1px;
-    text-transform:uppercase;border-bottom:1px solid {t['border']};background:{t['bg2']};font-weight:600; }}
+    text-transform:uppercase;border-bottom:1px solid {t['border']};background:linear-gradient(180deg,{t['card']},{t['bg2']});font-weight:600; }}
 .tj-table td {{ padding:11px 12px;border-bottom:1px solid {t['border']}80;color:{t['text']}; }}
 .tj-table tr:hover td {{ background:{t['border']}55; }}
 .badge {{ padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.8px;display:inline-block; }}
@@ -181,12 +180,33 @@ hr {{ border-color:{t['border']} !important; }}
     padding:8px 16px;font-size:12px;color:{t['orange']};font-weight:700;margin-bottom:12px; }}
 .mode-banner-all  {{ background:{t['alt']}14;border:1px solid {t['alt']}4d;border-radius:10px;
     padding:8px 16px;font-size:12px;color:{t['alt']};font-weight:700;margin-bottom:12px; }}
+.grad-card {{ background:linear-gradient(145deg,{t['card']},{t['bg2']});border:1px solid {t['border']};border-radius:14px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.18),0 8px 24px rgba(0,0,0,.08); }}
+.grad-accent {{ background:linear-gradient(135deg,{t['accent']},{t['alt']});-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:800; }}
 </style>
 """
-TRADE_MODES  = ["Démo", "Réel Indépendant", "Réel Institutionnel", "Compte Secondaire"]
+# Comptes par défaut (utilisés au tout premier lancement, puis gérés par l'admin)
+DEFAULT_ACCOUNTS = [
+    {"name": "Démo",                "kind": "demo"},
+    {"name": "Réel Indépendant",    "kind": "real"},
+    {"name": "Réel Institutionnel", "kind": "real"},
+    {"name": "Compte Secondaire",   "kind": "real"},
+]
+# Rempli dynamiquement au démarrage depuis la base (voir plus bas)
+TRADE_MODES  = [a["name"] for a in DEFAULT_ACCOUNTS]
 MODE_FILTER_OPTIONS = ["Tous"] + TRADE_MODES
-# Le Compte Secondaire est rattaché au compte Réel Institutionnel (même stratégie de fonds)
-ACCOUNT_LINKS = {"Compte Secondaire": "Réel Institutionnel"}
+ACCOUNT_KIND = {a["name"]: a["kind"] for a in DEFAULT_ACCOUNTS}
+_BADGE_PALETTE = ["#00d4aa","#7c6aff","#ff9f43","#54a0ff","#ff4d6d",
+                  "#00cec9","#fdcb6e","#5f27cd","#fd79a8","#0984e3"]
+
+def account_color(name):
+    if name in TRADE_MODES:
+        return _BADGE_PALETTE[TRADE_MODES.index(name) % len(_BADGE_PALETTE)]
+    return "#8892a4"
+
+def mode_badge(name):
+    col = account_color(name)
+    return (f'<span class="badge" style="color:{col};background:{col}26;'
+            f'border:1px solid {col}4d">{name}</span>')
 # Mapping universel : nom broker → nom normalisé
 # Exness utilise le suffixe "m" (ex: XAUUSDm, BTCUSDm)
 _BASE_PAIRS = {
@@ -385,6 +405,56 @@ if "mode_selection" not in st.session_state: st.session_state.mode_selection = [
 
 
 
+# ── COMPTES (dynamiques, gérés par l'admin) ─────────────────────────────────
+def accounts_load():
+    if not _sb_ready():
+        return st.session_state.get("_local_accounts", list(DEFAULT_ACCOUNTS))
+    try:
+        r = requests.get(f"{SB_EP}?key=eq.accounts&select=value", headers=SB_HDR, timeout=10)
+        if r.status_code == 200 and r.json():
+            val = r.json()[0].get("value", [])
+            if isinstance(val, list) and val:
+                # Normaliser : accepter liste de str ou de dicts
+                out = []
+                for a in val:
+                    if isinstance(a, str):
+                        out.append({"name": a, "kind": "demo" if "demo" in a.lower() or "démo" in a.lower() else "real"})
+                    elif isinstance(a, dict) and a.get("name"):
+                        out.append({"name": a["name"], "kind": a.get("kind", "real")})
+                if out:
+                    return out
+        # Base vide → semer avec les comptes par défaut
+        accounts_save(list(DEFAULT_ACCOUNTS))
+        return list(DEFAULT_ACCOUNTS)
+    except Exception:
+        return list(DEFAULT_ACCOUNTS)
+
+def accounts_save(accs):
+    if not _sb_ready():
+        st.session_state["_local_accounts"] = accs
+        return False
+    try:
+        r = requests.patch(f"{SB_EP}?key=eq.accounts",
+            headers={**SB_HDR, "Prefer": "return=representation"},
+            json={"value": accs, "updated_at": "now()"}, timeout=15)
+        if r.status_code == 200 and isinstance(r.json(), list) and r.json():
+            return True
+        if r.status_code == 204:
+            return True
+        r2 = requests.post(SB_EP,
+            headers={**SB_HDR, "Prefer": "resolution=merge-duplicates,return=representation"},
+            json={"key": "accounts", "value": accs}, timeout=15)
+        return r2.status_code in (200, 201)
+    except Exception:
+        return False
+
+def apply_accounts(accs):
+    """Réassigne les variables globales à partir de la liste de comptes."""
+    global TRADE_MODES, MODE_FILTER_OPTIONS, ACCOUNT_KIND
+    TRADE_MODES = [a["name"] for a in accs]
+    MODE_FILTER_OPTIONS = ["Tous"] + TRADE_MODES
+    ACCOUNT_KIND = {a["name"]: a.get("kind", "real") for a in accs}
+
 # ── CAPITAL DE DÉPART PAR COMPTE ────────────────────────────────────────────
 def capital_load():
     if not _sb_ready():
@@ -500,6 +570,9 @@ def selection_label():
         return scope[0]
     return f"{len(scope)} comptes : " + ", ".join(scope)
 
+if "accounts_meta" not in st.session_state:
+    st.session_state.accounts_meta = accounts_load()
+apply_accounts(st.session_state.accounts_meta)   # réassigne TRADE_MODES à chaque run
 if "account_capital" not in st.session_state:
     st.session_state.account_capital = capital_load()
 if "trade_screenshots" not in st.session_state:
@@ -542,8 +615,7 @@ def kpi(icon, label, value, sub, color):
 
 def badge(text, cls): return f'<span class="badge {cls}">{text}</span>'
 def mode_badge_class(m):
-    return {"Démo":"b-demo","Réel Indépendant":"b-real",
-            "Réel Institutionnel":"b-inst","Compte Secondaire":"b-sec"}.get(m,"b-real")
+    return "badge"  # conservé pour compat ; les badges de compte sont désormais colorés dynamiquement
 
 def ev(key, default):
     ex = next((t for t in st.session_state.trades if t["id"]==st.session_state.edit_id), None)
@@ -785,27 +857,25 @@ st.markdown(f"<hr style='margin:6px 0 16px;border-color:{_thd['border']}'>",
 
 # ── BANNER MODE ────────────────────────────────────────────────────────────────
 def mode_banner():
+    _t = get_theme()
     _sc = _resolve_scope(None)
     _al = allowed_accounts()
+    def _band(col, icon, txt):
+        st.markdown(
+            f"<div style='background:linear-gradient(90deg,{col}22,{col}08);"
+            f"border:1px solid {col}55;border-left:3px solid {col};border-radius:10px;"
+            f"padding:8px 16px;font-size:12px;color:{col};font-weight:700;margin-bottom:12px'>"
+            f"<i class='fa-solid {icon}'></i> {txt}</div>", unsafe_allow_html=True)
     if not _sc or set(_sc) == set(_al):
-        m = "Tous"
+        _band(_t["alt"], "fa-layer-group", "Tous les comptes autorisés")
     elif len(_sc) == 1:
-        m = _sc[0]
+        name = _sc[0]; kind = ACCOUNT_KIND.get(name, "real")
+        icon = "fa-flask" if kind == "demo" else "fa-circle-dot"
+        _band(account_color(name), icon,
+              f"{name} — compte {'démo' if kind=='demo' else 'réel'}")
     else:
-        st.markdown(f'<div class="mode-banner-all"><i class="fa-solid fa-layer-group"></i> '
-                    f'{len(_sc)} comptes sélectionnés : {", ".join(_sc)}</div>', unsafe_allow_html=True)
-        return
-    m = m
-    if m == "Réel Indépendant":
-        st.markdown('<div class="mode-banner-real"><i class="fa-solid fa-circle-dot"></i> Réel Indépendant — Compte personnel</div>', unsafe_allow_html=True)
-    elif m == "Réel Institutionnel":
-        st.markdown('<div class="mode-banner-inst"><i class="fa-solid fa-building-columns"></i> Réel Institutionnel — Fonds commun avec partenaires financiers</div>', unsafe_allow_html=True)
-    elif m == "Compte Secondaire":
-        st.markdown('<div class="mode-banner-sec"><i class="fa-solid fa-layer-group"></i> Compte Secondaire — rattaché au Réel Institutionnel</div>', unsafe_allow_html=True)
-    elif m == "Démo":
-        st.markdown('<div class="mode-banner-demo"><i class="fa-solid fa-flask"></i> Mode DÉMO — Performances sur compte démo</div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="mode-banner-all"><i class="fa-solid fa-layer-group"></i> Tous les trades — tous comptes confondus</div>', unsafe_allow_html=True)
+        _band(_t["alt"], "fa-layer-group",
+              f"{len(_sc)} comptes sélectionnés : {', '.join(_sc)}")
 
 # ── MESSAGE DE MIGRATION (affiché une seule fois) ───────────────────────────────
 _mig_msg = st.session_state.pop("_migration_msg", None)
@@ -1565,12 +1635,12 @@ if st.session_state.page == "dashboard":
             c  = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
             dc = "b-win" if t["direction"]=="LONG" else "b-loss"
             _tm = t.get("trade_mode","Réel Indépendant")
-            mc = mode_badge_class(_tm)
+
             rows_html += f"""<tr>
                 <td style="color:#6b7894;font-family:monospace">{t["date"]}</td>
                 <td>{badge(t["symbol"],"b-sym")}</td>
                 <td>{badge(t["direction"],dc)}</td>
-                <td>{badge(t.get("trade_mode","Réel Indépendant"),mc)}</td>
+                <td>{mode_badge(t.get("trade_mode","Réel Indépendant"))}</td>
                 <td style="font-size:15px;text-align:center">{mood_html(t["mood"])}</td>
                 <td>{badge(t["strategy"],"b-str")}</td>
                 <td style="font-family:monospace;font-weight:800;color:{c}">{fmt(t["pnl"])}</td>
@@ -1876,12 +1946,12 @@ elif st.session_state.page == "journal":
                 rr_v = t["rr"]
                 rr_c = "#00d4aa" if (rr_v or 0)>=2 else "#ff9f43" if (rr_v or 0)>=1 else "#ff4d6d"
                 _tm2 = t.get("trade_mode","Réel Indépendant")
-                mc   = mode_badge_class(_tm2)
+
                 rows_html += f"""<tr>
                     <td style="color:#6b7894;font-family:monospace;white-space:nowrap">{t["date"]}</td>
                     <td>{badge(t["symbol"],"b-sym")}</td>
                     <td>{badge(t["direction"],dc)}</td>
-                    <td>{badge(t.get("trade_mode","Réel Indépendant"),mc)}</td>
+                    <td>{mode_badge(t.get("trade_mode","Réel Indépendant"))}</td>
                     <td style="font-family:monospace">{t.get("entry","—")}</td>
                     <td style="font-family:monospace">{t.get("exit","—")}</td>
                     <td style="font-family:monospace;font-weight:800;color:{c};white-space:nowrap">{fmt(t["pnl"])}</td>
@@ -2003,11 +2073,12 @@ elif st.session_state.page == "import":
     with ic1:
         imp_mode = st.radio("Type de compte", TRADE_MODES, horizontal=True)
     with ic2:
-        _mc_map = {"Démo":"mode-banner-demo","Réel Indépendant":"mode-banner-real",
-                   "Réel Institutionnel":"mode-banner-inst","Compte Secondaire":"mode-banner-sec"}
-        mc = _mc_map.get(imp_mode, "mode-banner-real")
-        st.markdown(f'<div class="{mc}" style="margin-top:8px">Trades étiquetés : {imp_mode}</div>',
-                    unsafe_allow_html=True)
+        _ic = account_color(imp_mode)
+        st.markdown(
+            f'<div style="margin-top:8px;background:linear-gradient(90deg,{_ic}22,{_ic}08);'
+            f'border:1px solid {_ic}55;border-left:3px solid {_ic};border-radius:10px;'
+            f'padding:8px 16px;font-size:12px;color:{_ic};font-weight:700">'
+            f'Trades étiquetés : {imp_mode}</div>', unsafe_allow_html=True)
 
     st.markdown("---")
 
@@ -2452,25 +2523,24 @@ elif st.session_state.page == "import":
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.page == "analyse":
     _ta = get_theme()
-    st.markdown("# Analyse & News économiques")
-    st.caption("Chiffres annoncés en temps réel et lecture professionnelle de leur "
-               "impact sur les actifs majeurs.")
+    st.markdown("# Asset Scorecard & News")
+    st.caption("Lecture fondamentale des publications macro et score de biais par actif. "
+               "Heures affichées en GMT+1.")
 
-    # ── Actifs majeurs suivis et devises qui les pilotent ────────────────────
+    USER_TZ_OFFSET = 1  # GMT+1 (position géographique de l'utilisateur)
+
     ASSETS = {
-        "XAUUSD (Or)":      {"ccy": ["USD"], "icon": "fa-coins", "color": "#f5a524"},
-        "DXY (Dollar US)":  {"ccy": ["USD"], "icon": "fa-dollar-sign", "color": "#2dd4a7"},
-        "EUR/USD":          {"ccy": ["EUR", "USD"], "icon": "fa-euro-sign", "color": "#4f8cff"},
-        "GBP/USD":          {"ccy": ["GBP", "USD"], "icon": "fa-sterling-sign", "color": "#9d7bff"},
-        "USD/JPY":          {"ccy": ["USD", "JPY"], "icon": "fa-yen-sign", "color": "#f0506e"},
-        "BTC/USD":          {"ccy": ["USD"], "icon": "fa-bitcoin", "color": "#f7931a"},
-        "WTI (Pétrole)":    {"ccy": ["USD", "CAD"], "icon": "fa-oil-well", "color": "#8892a4"},
+        "XAUUSD (Or)":     {"ccy": ["USD"], "usd_quote": True},
+        "DXY (Dollar US)": {"ccy": ["USD"], "dxy": True},
+        "EUR/USD":         {"ccy": ["EUR", "USD"], "base": "EUR", "quote": "USD"},
+        "GBP/USD":         {"ccy": ["GBP", "USD"], "base": "GBP", "quote": "USD"},
+        "USD/JPY":         {"ccy": ["USD", "JPY"], "base": "USD", "quote": "JPY"},
+        "BTC/USD":         {"ccy": ["USD"], "usd_quote": True},
+        "WTI (Pétrole)":   {"ccy": ["USD"], "usd_quote": True},
     }
 
     @st.cache_data(ttl=1800, show_spinner=False)
-    def _fetch_ff_calendar(scope="thisweek"):
-        """Calendrier ForexFactory (JSON public). scope: lastweek / thisweek / nextweek.
-        'all' combine les trois pour ~3 semaines d'historique + prévisions."""
+    def _fetch_ff_calendar(scope="all"):
         base = "https://nfs.faireconomy.media/ff_calendar_{}.json"
         scopes = ["lastweek", "thisweek", "nextweek"] if scope == "all" else [scope]
         out, seen = [], set()
@@ -2480,7 +2550,6 @@ elif st.session_state.page == "analyse":
                                  headers={"User-Agent": "Mozilla/5.0 TradingJournal"})
                 if r.status_code == 200:
                     for ev in r.json():
-                        # Dédupliquer les événements chevauchant deux flux
                         key = (str(ev.get("title","")), str(ev.get("date","")),
                                str(ev.get("country", ev.get("currency",""))))
                         if key not in seen:
@@ -2490,351 +2559,240 @@ elif st.session_state.page == "analyse":
         return out
 
     def _to_num(x):
-        """Extrait un nombre d'une chaîne type '3.5%', '250K', '-1.2', '1.3M'."""
-        if x is None:
-            return None
-        s = str(x).strip().replace("%", "").replace(",", "")
+        if x is None: return None
+        s = str(x).strip().replace("%","").replace(",","")
         mult = 1.0
-        if s.upper().endswith("K"): mult, s = 1e3, s[:-1]
-        elif s.upper().endswith("M"): mult, s = 1e6, s[:-1]
-        elif s.upper().endswith("B"): mult, s = 1e9, s[:-1]
+        if s[-1:].upper()=="K": mult,s=1e3,s[:-1]
+        elif s[-1:].upper()=="M": mult,s=1e6,s[:-1]
+        elif s[-1:].upper()=="B": mult,s=1e9,s[:-1]
+        try: return float(s)*mult
+        except: return None
+
+    def _fmt_local(iso):
+        """Convertit l'horodatage ForexFactory (UTC/offset) en GMT+1."""
+        if not iso: return ("", None)
         try:
-            return float(s) * mult
+            s = str(iso).replace("Z","+00:00")
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is not None:
+                from datetime import timezone, timedelta as _td
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            dt = dt + __import__("datetime").timedelta(hours=USER_TZ_OFFSET)
+            return (dt.strftime("%d/%m %H:%M"), dt)
         except Exception:
-            return None
+            return (str(iso)[:16].replace("T"," "), None)
 
-    def _surprise(actual, forecast):
-        """Signe et ampleur de la surprise (actual vs forecast)."""
-        a, f = _to_num(actual), _to_num(forecast)
-        if a is None or f is None:
-            return None, None
-        diff = a - f
-        pct = (diff / abs(f) * 100) if f != 0 else None
-        return diff, pct
-
-    # Événements où un chiffre PLUS ÉLEVÉ est favorable à la devise (hawkish)
-    _POSITIVE_FOR_CCY = [
-        "cpi", "inflation", "ppi", "gdp", "retail", "employment change",
-        "nonfarm", "non-farm", "payroll", "wage", "earnings", "pmi",
-        "ism", "confidence", "sentiment", "rate decision", "interest rate",
-        "durable", "industrial", "trade balance", "current account",
-    ]
-    # Événements INVERSÉS (un chiffre plus élevé est défavorable)
-    _NEGATIVE_FOR_CCY = ["unemployment rate", "jobless", "claims"]
-
-    def _event_polarity(title):
+    # Polarité : +1 si un chiffre plus haut renforce la devise, -1 si l'inverse
+    def _polarity(title):
         t = title.lower()
-        for k in _NEGATIVE_FOR_CCY:
-            if k in t:
-                return -1
-        for k in _POSITIVE_FOR_CCY:
-            if k in t:
-                return 1
+        if any(k in t for k in ["unemployment rate","jobless","claims"]): return -1
+        if any(k in t for k in ["cpi","inflation","ppi","pce","gdp","retail","nonfarm",
+                                 "non-farm","payroll","employment change","adp","jolts",
+                                 "pmi","ism","confidence","sentiment","durable","industrial",
+                                 "rate decision","interest rate","trade balance"]): return 1
         return 0
 
-    def _impact_on_asset(asset, asset_cfg, ccy, polarity, diff, pct):
-        """Génère une phrase d'impact professionnelle pour un actif donné."""
-        if diff is None or polarity == 0:
-            return None
-        # Direction sur la DEVISE : surprise haussière × polarité
-        ccy_dir = 1 if (diff > 0 and polarity > 0) or (diff < 0 and polarity < 0) else -1
-        strong = abs(pct) >= 10 if pct is not None else abs(diff) > 0
-
-        is_usd_quote = asset in ("XAUUSD (Or)", "BTC/USD", "WTI (Pétrole)")
-        usd_involved = "USD" in asset_cfg["ccy"]
-
-        # Pour l'or/BTC/pétrole cotés en USD : USD fort → actif sous pression
-        if is_usd_quote and ccy == "USD":
-            asset_dir = -ccy_dir
-        elif asset in ("EUR/USD", "GBP/USD"):
-            # paire XXX/USD : USD est la devise cotée
-            asset_dir = ccy_dir if ccy != "USD" else -ccy_dir
-        elif asset == "USD/JPY":
-            asset_dir = ccy_dir if ccy == "USD" else -ccy_dir
-        elif asset == "DXY (Dollar US)":
-            asset_dir = ccy_dir if ccy == "USD" else 0
-        else:
-            asset_dir = ccy_dir if usd_involved and ccy == "USD" else 0
-
-        if asset_dir == 0:
-            return None
-        sens = "haussière" if asset_dir > 0 else "baissière"
-        force = "marquée" if strong else "modérée"
-        return (asset, asset_dir, force,
-                f"Pression {sens} {force} sur {asset}")
-
-    # ── Génération d'analyse fondamentale détaillée ──────────────────────────
-    # Catégorie d'indicateur → verbe de lecture + mécanisme de transmission
-    def _indicator_kind(title):
+    def _category(title):
         t = title.lower()
-        if any(k in t for k in ["cpi","inflation","ppi","pce"]):        return "inflation"
-        if any(k in t for k in ["nonfarm","non-farm","payroll","employment change","adp"]): return "emploi"
-        if "unemployment rate" in t:                                    return "chomage"
-        if any(k in t for k in ["jobless","claims"]):                   return "chomage_hebdo"
-        if any(k in t for k in ["gdp","growth"]):                       return "croissance"
-        if any(k in t for k in ["rate decision","interest rate","cash rate","refi"]): return "taux"
-        if any(k in t for k in ["pmi","ism"]):                          return "activite"
-        if any(k in t for k in ["retail","consumer spending"]):         return "consommation"
-        if any(k in t for k in ["confidence","sentiment"]):             return "confiance"
-        if any(k in t for k in ["trade balance","current account"]):    return "commerce"
-        return "generique"
+        if any(k in t for k in ["cpi","ppi","pce","inflation"]): return "Inflation"
+        if any(k in t for k in ["nonfarm","non-farm","payroll","unemployment","jobless",
+                                "claims","adp","jolts","employment"]): return "Emploi"
+        if any(k in t for k in ["gdp","pmi","ism","retail","confidence","sentiment",
+                                "durable","industrial","trade","rate decision",
+                                "interest rate"]): return "Macro"
+        return None
 
-    def _read_figure(kind, ccy, diff, pct, actual, forecast, better):
-        """Phrase de lecture fondamentale du chiffre."""
-        amp = "nettement " if (pct is not None and abs(pct) >= 15) else ""
-        sens = "supérieur" if diff > 0 else "inférieur"
-        base = {
-            "inflation": f"L'inflation ressort {amp}{sens}e aux attentes ({actual} vs {forecast} prévu). "
-                         f"Une inflation plus forte pousse la banque centrale vers une politique plus restrictive (hausse ou maintien des taux), ce qui soutient le {ccy}.",
-            "emploi":    f"Les créations d'emplois sont {amp}{sens}es aux attentes ({actual} vs {forecast}). "
-                         f"Un marché du travail solide renforce la trajectoire des taux et soutient le {ccy}.",
-            "chomage":   f"Le taux de chômage est {amp}{sens} aux attentes ({actual} vs {forecast}). "
-                         f"Un chômage plus élevé qu'attendu affaiblit le {ccy} (logique inversée : c'est une mauvaise nouvelle économique).",
-            "chomage_hebdo": f"Les inscriptions au chômage sont {amp}{sens}es aux attentes ({actual} vs {forecast}). "
-                         f"Davantage d'inscriptions signale un marché du travail qui se dégrade, ce qui pèse sur le {ccy}.",
-            "croissance":f"La croissance ressort {amp}{sens}e aux attentes ({actual} vs {forecast}). "
-                         f"Une activité plus dynamique soutient le {ccy}.",
-            "taux":      f"La décision de taux surprend le marché ({actual} vs {forecast} anticipé). "
-                         f"Un ton plus restrictif que prévu soutient directement le {ccy}.",
-            "activite":  f"L'indice d'activité (PMI/ISM) est {amp}{sens} aux attentes ({actual} vs {forecast}). "
-                         f"Au-dessus de 50 il signale l'expansion ; une surprise haussière soutient le {ccy}.",
-            "consommation": f"Les ventes au détail sont {amp}{sens}es aux attentes ({actual} vs {forecast}). "
-                         f"Une consommation robuste soutient la croissance et le {ccy}.",
-            "confiance": f"L'indice de confiance est {amp}{sens} aux attentes ({actual} vs {forecast}). "
-                         f"Une confiance en hausse est favorable au {ccy}.",
-            "commerce":  f"La balance commerciale ressort {amp}{sens}e aux attentes ({actual} vs {forecast}), "
-                         f"ce qui influence la demande de {ccy}.",
-            "generique": f"Le chiffre ressort {amp}{sens} aux attentes ({actual} vs {forecast}).",
-        }
-        return base.get(kind, base["generique"])
+    def _asset_dir(cfg, ccy, ccy_dir):
+        """Direction de l'actif à partir de la direction de la devise."""
+        if cfg.get("usd_quote"):   # or/btc/wti cotés en USD
+            return -ccy_dir if ccy == "USD" else 0
+        if cfg.get("dxy"):
+            return ccy_dir if ccy == "USD" else 0
+        if cfg.get("quote") == "USD":   # EURUSD, GBPUSD
+            return ccy_dir if ccy == cfg.get("base") else -ccy_dir
+        if cfg.get("base") == "USD":    # USDJPY
+            return ccy_dir if ccy == "USD" else -ccy_dir
+        return 0
 
-    _ASSET_COMMENT = {
-        "XAUUSD (Or)":     ("l'or", "actif refuge sans rendement, il baisse quand le dollar et les taux réels montent"),
-        "DXY (Dollar US)": ("l'indice dollar", "il mesure directement la force du billet vert"),
-        "EUR/USD":         ("l'euro-dollar", "un dollar fort fait mécaniquement baisser la paire"),
-        "GBP/USD":         ("le câble", "un dollar fort fait baisser la paire"),
-        "USD/JPY":         ("le dollar-yen", "un dollar fort fait monter la paire"),
-        "BTC/USD":         ("le bitcoin", "actif risqué, il tend à souffrir d'un dollar fort et de taux élevés"),
-        "WTI (Pétrole)":   ("le pétrole", "coté en dollar, il est sous pression quand le billet vert se renforce"),
-    }
+    # ── Contrôles ────────────────────────────────────────────────────────────
+    cc1, cc2, cc3 = st.columns([2, 1.3, 1.3])
+    with cc1:
+        asset = st.selectbox("Actif", list(ASSETS.keys()), key="sc_asset")
+    with cc2:
+        _scope_map = {"3 semaines": "all", "Semaine passée": "lastweek",
+                      "En cours": "thisweek", "À venir": "nextweek"}
+        scope_lbl = st.selectbox("Période", list(_scope_map.keys()), index=0, key="sc_scope")
+    with cc3:
+        imp_sel = st.multiselect("Impact", ["High","Medium","Low"], default=["High","Medium"],
+            format_func=lambda x:{"High":"Fort","Medium":"Moyen","Low":"Faible"}[x], key="sc_imp")
 
-    # ── Interface ────────────────────────────────────────────────────────────
-    ac1, ac2, ac3 = st.columns([2.2, 1.5, 1.5])
-    with ac1:
-        sel_assets = st.multiselect("Actifs à analyser", list(ASSETS.keys()),
-                                    default=["XAUUSD (Or)", "DXY (Dollar US)",
-                                             "EUR/USD", "BTC/USD"],
-                                    key="an_assets")
-    with ac2:
-        impact_filter = st.multiselect("Importance", ["High", "Medium", "Low"],
-                                       default=["High", "Medium"],
-                                       format_func=lambda x: {"High":"Forte","Medium":"Moyenne","Low":"Faible"}[x],
-                                       key="an_impact")
-    with ac3:
-        _scope_map = {"Semaine passée": "lastweek", "Semaine en cours": "thisweek",
-                      "Semaine à venir": "nextweek", "Les trois semaines": "all"}
-        _scope_lbl = st.selectbox("Période", list(_scope_map.keys()),
-                                  index=3, key="an_scope")
-        _scope = _scope_map[_scope_lbl]
-
-    only_released = st.checkbox(
-        "Afficher uniquement les annonces déjà publiées (avec chiffres réels)",
-        value=False, key="an_released_only")
-
-    events = _fetch_ff_calendar(_scope)
+    cfg = ASSETS[asset]
+    events = _fetch_ff_calendar(_scope_map[scope_lbl])
     if not events:
-        st.error("Impossible de récupérer les annonces économiques pour le moment. "
-                 "Réessayez dans quelques minutes.")
+        st.error("Calendrier économique indisponible pour le moment. Réessayez plus tard.")
         st.stop()
 
-    # Devises pertinentes selon les actifs choisis
-    watched_ccy = set()
-    for a in sel_assets:
-        watched_ccy.update(ASSETS[a]["ccy"])
-
-    df_ev = pd.DataFrame(events)
-    if df_ev.empty:
-        st.warning("Aucune donnée d'annonce disponible.")
+    df = pd.DataFrame(events)
+    ren = {}
+    for col in df.columns:
+        cl = str(col).strip().lower()
+        if cl in ("country","currency"): ren[col]="country"
+        elif cl in ("impact","importance"): ren[col]="impact"
+        elif cl in ("title","event","name"): ren[col]="title"
+        elif cl=="actual": ren[col]="actual"
+        elif cl in ("forecast","estimate"): ren[col]="forecast"
+        elif cl in ("previous","prior"): ren[col]="previous"
+        elif cl in ("date","datetime"): ren[col]="date"
+    df = df.rename(columns=ren)
+    for col in ("country","impact","title","actual","forecast","previous","date"):
+        if col not in df.columns: df[col]=""
+    df = df[df["country"].isin(cfg["ccy"])]
+    if imp_sel: df = df[df["impact"].isin(imp_sel)]
+    if df.empty:
+        st.info("Aucune publication pour cet actif sur la période/les filtres choisis.")
         st.stop()
 
-    # Normaliser les noms de colonnes (le flux peut varier : Country/country, etc.)
-    _rename = {}
-    for c in df_ev.columns:
-        cl = str(c).strip().lower()
-        if cl in ("country", "currency"):        _rename[c] = "country"
-        elif cl in ("impact", "importance"):     _rename[c] = "impact"
-        elif cl in ("title", "event", "name"):   _rename[c] = "title"
-        elif cl == "actual":                     _rename[c] = "actual"
-        elif cl in ("forecast", "estimate"):     _rename[c] = "forecast"
-        elif cl in ("previous", "prior"):        _rename[c] = "previous"
-        elif cl in ("date", "datetime"):         _rename[c] = "date"
-    df_ev = df_ev.rename(columns=_rename)
+    # ── Calcul des scores ────────────────────────────────────────────────────
+    _w = {"High":3,"Medium":2,"Low":1}
+    cat_rows = {"Macro": [], "Inflation": [], "Emploi": []}
+    score_acc = {"Macro":[0.0,0.0], "Inflation":[0.0,0.0], "Emploi":[0.0,0.0]}  # [somme, poids]
+    total_acc = [0.0, 0.0]
 
-    # Garantir la présence de toutes les colonnes exploitées
-    for _col in ("country", "impact", "title", "actual", "forecast", "previous", "date"):
-        if _col not in df_ev.columns:
-            df_ev[_col] = ""
+    for _, ev in df.iterrows():
+        cat = _category(ev["title"])
+        if not cat: continue
+        actual, forecast, previous = ev["actual"], ev["forecast"], ev["previous"]
+        has_actual = str(actual).strip() not in ("","nan","None")
+        pol = _polarity(ev["title"])
+        a, f = _to_num(actual), _to_num(forecast)
+        diff = (a - f) if (a is not None and f is not None) else None
+        ccy = ev["country"]
+        ccy_dir = 0
+        if diff is not None and pol != 0:
+            ccy_dir = 1 if (diff>0 and pol>0) or (diff<0 and pol<0) else -1
+        adir = _asset_dir(cfg, ccy, ccy_dir) if ccy_dir else 0
+        tlabel, tdt = _fmt_local(ev["date"])
+        cat_rows[cat].append({
+            "title": ev["title"], "ccy": ccy, "impact": ev.get("impact",""),
+            "actual": actual if has_actual else "—", "forecast": forecast or "—",
+            "previous": previous or "—", "has_actual": has_actual,
+            "ccy_dir": ccy_dir, "adir": adir, "date": tlabel, "dt": tdt,
+        })
+        if has_actual and adir != 0:
+            w = _w.get(ev.get("impact","Low"), 1)
+            score_acc[cat][0] += adir * w; score_acc[cat][1] += w
+            total_acc[0] += adir * w; total_acc[1] += w
 
-    if df_ev["country"].astype(str).str.strip().eq("").all():
-        st.warning("Format de calendrier inattendu (pas de devise identifiable).")
-        st.stop()
+    def _norm(acc):
+        return (acc[0]/acc[1]*100.0) if acc[1] else 0.0
+    total_score = _norm(total_acc)
 
-    df_ev["_dt"] = pd.to_datetime(df_ev["date"], errors="coerce", utc=True)
-    df_ev = df_ev[df_ev["country"].isin(watched_ccy)]
-    if impact_filter:
-        df_ev = df_ev[df_ev["impact"].isin(impact_filter)]
-    df_ev = df_ev.sort_values("_dt")
+    def _bias_label(s):
+        if s >= 50:  return "Très Haussier", _ta["win"]
+        if s >= 15:  return "Haussier", _ta["win"]
+        if s > -15:  return "Neutre", _ta["muted"]
+        if s > -50:  return "Baissier", _ta["loss"]
+        return "Très Baissier", _ta["loss"]
 
-    # Filtre "déjà publiées" : actual renseigné
-    if only_released:
-        _has = df_ev["actual"].astype(str).str.strip().replace(
-            {"nan":"", "None":""}) != ""
-        df_ev = df_ev[_has]
+    bias_txt, bias_col = _bias_label(total_score)
 
-    if df_ev.empty:
-        st.info("Aucune annonce ne correspond à vos filtres sur cette période.")
-        st.stop()
+    # ── Jauge de biais + tuiles de score ─────────────────────────────────────
+    gcol, kcol = st.columns([1.3, 2])
+    with gcol:
+        fig_g = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=round(total_score, 1),
+            number={"suffix": "", "font": {"size": 30, "color": bias_col}},
+            gauge={
+                "axis": {"range": [-100, 100], "tickcolor": _ta["muted"],
+                         "tickfont": {"color": _ta["muted"], "size": 9}},
+                "bar": {"color": bias_col, "thickness": 0.28},
+                "bgcolor": _ta["card"], "borderwidth": 0,
+                "steps": [
+                    {"range": [-100, -50], "color": _ta["loss"] + "55"},
+                    {"range": [-50, -15],  "color": _ta["loss"] + "22"},
+                    {"range": [-15, 15],   "color": _ta["muted"] + "22"},
+                    {"range": [15, 50],    "color": _ta["win"] + "22"},
+                    {"range": [50, 100],   "color": _ta["win"] + "55"},
+                ],
+            },
+        ))
+        fig_g.update_layout(height=230, margin=dict(l=16, r=16, t=30, b=0),
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            font={"color": _ta["text"]})
+        st.plotly_chart(fig_g, use_container_width=True,
+                        config={"displayModeBar": False})
+        st.markdown(
+            f"<div style='text-align:center;margin-top:-14px'>"
+            f"<span style='font-size:18px;font-weight:800;color:{bias_col}'>{bias_txt}</span>"
+            f"<div style='font-size:11px;color:{_ta['muted']}'>Biais macro · {asset}</div></div>",
+            unsafe_allow_html=True)
+    with kcol:
+        tcols = st.columns(3)
+        for _tc, cat in zip(tcols, ["Macro", "Inflation", "Emploi"]):
+            s = _norm(score_acc[cat]); lbl, col = _bias_label(s)
+            n_rel = sum(1 for r in cat_rows[cat] if r["has_actual"])
+            with _tc:
+                st.markdown(
+                    f"<div class='grad-card' style='text-align:center'>"
+                    f"<div style='font-size:10px;letter-spacing:1px;text-transform:uppercase;"
+                    f"color:{_ta['muted']};font-weight:700'>{cat}</div>"
+                    f"<div style='font-size:22px;font-weight:800;color:{col};"
+                    f"font-family:JetBrains Mono,monospace;margin:4px 0'>{s:+.0f}</div>"
+                    f"<div style='font-size:11px;color:{col};font-weight:700'>{lbl}</div>"
+                    f"<div style='font-size:10px;color:{_ta['muted']};margin-top:2px'>"
+                    f"{n_rel} publié(s)</div></div>",
+                    unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='margin-top:12px;font-size:12px;color:{_ta['muted']};line-height:1.5'>"
+            f"Score = moyenne pondérée (par importance) de l'effet attendu de chaque surprise "
+            f"sur <b style='color:{_ta['text']}'>{asset}</b>. "
+            f"Positif = pression haussière, négatif = baissière.</div>",
+            unsafe_allow_html=True)
 
-    # ── KPIs synthèse ────────────────────────────────────────────────────────
-    _released = df_ev[df_ev["actual"].notna() & (df_ev["actual"].astype(str).str.strip() != "")]
-    n_high = len(df_ev[df_ev["impact"] == "High"])
-    k1, k2, k3, k4 = st.columns(4)
-    def _an_kpi(col, icon, label, value, sub, color):
-        with col:
-            st.markdown(
-                f"<div class='rfh-kpi' style='background:{_ta['card']};"
-                f"border:1px solid {_ta['border']};border-radius:14px;padding:14px 16px;"
-                f"display:flex;gap:12px;align-items:flex-start'>"
-                f"<div style='width:38px;height:38px;border-radius:10px;background:{color}1c;"
-                f"color:{color};display:flex;align-items:center;justify-content:center;"
-                f"font-size:15px'><i class='fa-solid {icon}'></i></div>"
-                f"<div><div style='font-size:10px;color:{_ta['muted']};text-transform:uppercase;"
-                f"letter-spacing:1px;font-weight:600'>{label}</div>"
-                f"<div style='font-size:20px;font-weight:800;color:{_ta['text']};"
-                f"font-family:JetBrains Mono,monospace'>{value}</div>"
-                f"<div style='font-size:11px;color:{_ta['muted']}'>{sub}</div></div></div>",
-                unsafe_allow_html=True)
-    _an_kpi(k1, "fa-calendar-day", "Annonces", str(len(df_ev)), "cette semaine", _ta["accent"])
-    _an_kpi(k2, "fa-bolt", "Impact fort", str(n_high), "événements majeurs", _ta["loss"])
-    _an_kpi(k3, "fa-check-double", "Déjà publiées", str(len(_released)), "chiffres connus", _ta["win"])
-    _an_kpi(k4, "fa-coins", "Devises suivies", ", ".join(sorted(watched_ccy)), "selon vos actifs", _ta["alt"])
     st.markdown(" ")
 
-    # ── Fil des annonces avec chiffres + analyse d'impact ────────────────────
-    _jours_fr = {"Monday":"Lundi","Tuesday":"Mardi","Wednesday":"Mercredi",
-                 "Thursday":"Jeudi","Friday":"Vendredi","Saturday":"Samedi","Sunday":"Dimanche"}
-    _imp_col = {"High": _ta["loss"], "Medium": _ta["orange"], "Low": _ta["alt"]}
-    _imp_fr = {"High":"Fort","Medium":"Moyen","Low":"Faible"}
-    now = pd.Timestamp.now(tz="UTC")
-
-    df_ev["_day"] = df_ev["_dt"].dt.strftime("%A %d/%m")
-    for day_label, grp in df_ev.groupby("_day", sort=False):
-        _dfr = day_label
-        for en, fr in _jours_fr.items():
-            _dfr = _dfr.replace(en, fr)
-        st.markdown(f"##### {_dfr}")
-        for _, ev in grp.iterrows():
-            imp = ev.get("impact", "Low")
-            icol = _imp_col.get(imp, _ta["muted"])
-            t = ev["_dt"]
-            heure = t.strftime("%H:%M") if pd.notna(t) else "--:--"
-            past = pd.notna(t) and t < now
-            actual = ev.get("actual", "")
-            forecast = ev.get("forecast", "")
-            previous = ev.get("previous", "")
-            has_actual = str(actual).strip() not in ("", "nan", "None")
-
-            diff, pct = _surprise(actual, forecast) if has_actual else (None, None)
-            polarity = _event_polarity(ev.get("title", ""))
-
-            # Couleur de la surprise
-            if diff is not None and polarity != 0:
-                surp_good = (diff > 0 and polarity > 0) or (diff < 0 and polarity < 0)
-                surp_col = _ta["win"] if surp_good else _ta["loss"]
-                surp_txt = f"{'▲' if diff>0 else '▼'} {abs(diff):.2f}" + (f" ({pct:+.1f}%)" if pct is not None else "")
+    # ── Tableaux par catégorie ───────────────────────────────────────────────
+    def _render_table(cat, icon):
+        rows = cat_rows[cat]
+        if not rows:
+            return
+        # Trier : publiés récents d'abord, puis à venir
+        rows = sorted(rows, key=lambda r: (r["dt"] is None, r["dt"] or datetime.min), reverse=False)
+        st.markdown(f"##### <i class='fa-solid {icon}'></i> {cat}", unsafe_allow_html=True)
+        html = ("<table class='tj-table'><thead><tr>"
+                "<th>Indicateur</th><th>Dev.</th><th>Publié</th><th>Prévu</th>"
+                "<th>Précédent</th><th>Surprise</th><th>Date (GMT+1)</th></tr></thead><tbody>")
+        for r in rows:
+            if r["has_actual"] and r["adir"] != 0:
+                scol = _ta["win"] if r["adir"] > 0 else _ta["loss"]
+                stxt = ("▲ haussier" if r["adir"] > 0 else "▼ baissier")
+                acol = scol
+            elif r["has_actual"]:
+                scol = _ta["muted"]; stxt = "neutre"; acol = _ta["text"]
             else:
-                surp_col = _ta["muted"]; surp_txt = "—"
+                scol = _ta["muted"]; stxt = "à venir"; acol = _ta["muted"]
+            html += (f"<tr>"
+                     f"<td style='color:{_ta['text']}'>{r['title'][:42]}</td>"
+                     f"<td><span style='color:{account_color(asset)}'></span>{r['ccy']}</td>"
+                     f"<td style='font-family:JetBrains Mono,monospace;color:{acol};font-weight:700'>{r['actual']}</td>"
+                     f"<td style='font-family:JetBrains Mono,monospace;color:{_ta['muted']}'>{r['forecast']}</td>"
+                     f"<td style='font-family:JetBrains Mono,monospace;color:{_ta['muted']}'>{r['previous']}</td>"
+                     f"<td style='color:{scol};font-weight:700;font-size:11px'>{stxt}</td>"
+                     f"<td style='color:{_ta['muted']};font-family:JetBrains Mono,monospace'>{r['date']}</td>"
+                     f"</tr>")
+        html += "</tbody></table>"
+        st.markdown(html, unsafe_allow_html=True)
+        st.markdown(" ")
 
-            # En-tête de l'événement
-            st.markdown(
-                f"<div style='background:{_ta['card']};border:1px solid {_ta['border']};"
-                f"border-left:3px solid {icol};border-radius:10px;padding:11px 16px;"
-                f"margin-bottom:6px;opacity:{'0.6' if past and not has_actual else '1'}'>"
-                f"<div style='display:flex;gap:14px;align-items:center;flex-wrap:wrap'>"
-                f"<span style='color:{_ta['muted']};font-family:JetBrains Mono,monospace;"
-                f"min-width:46px'>{heure}</span>"
-                f"<span style='background:{icol}22;color:{icol};padding:2px 9px;"
-                f"border-radius:8px;font-size:11px;font-weight:700'>{ev.get('country','')}</span>"
-                f"<span style='color:{_ta['text']};font-weight:600;flex:1;min-width:180px'>"
-                f"{ev.get('title','')}</span>"
-                f"<span style='color:{icol};font-size:11px;font-weight:700'>{_imp_fr.get(imp,'?')}</span>"
-                f"</div>"
-                # Ligne des chiffres
-                f"<div style='display:flex;gap:22px;margin-top:8px;padding-left:60px;"
-                f"font-size:12px;flex-wrap:wrap'>"
-                f"<span style='color:{_ta['muted']}'>Publié : "
-                f"<b style='color:{_ta['text']};font-family:JetBrains Mono,monospace'>"
-                f"{actual if has_actual else '—'}</b></span>"
-                f"<span style='color:{_ta['muted']}'>Prévu : "
-                f"<b style='font-family:JetBrains Mono,monospace'>{forecast or '—'}</b></span>"
-                f"<span style='color:{_ta['muted']}'>Précédent : "
-                f"<b style='font-family:JetBrains Mono,monospace'>{previous or '—'}</b></span>"
-                f"<span style='color:{_ta['muted']}'>Surprise : "
-                f"<b style='color:{surp_col};font-family:JetBrains Mono,monospace'>{surp_txt}</b></span>"
-                f"</div></div>", unsafe_allow_html=True)
+    _render_table("Macro", "fa-chart-line")
+    _render_table("Inflation", "fa-fire")
+    _render_table("Emploi", "fa-briefcase")
 
-            # ── ANALYSE FONDAMENTALE DÉTAILLÉE (chiffre publié + surprise) ────
-            if has_actual and diff is not None and polarity != 0:
-                impacts = []
-                for a in sel_assets:
-                    res = _impact_on_asset(a, ASSETS[a], ev.get("country",""),
-                                           polarity, diff, pct)
-                    if res:
-                        impacts.append(res)
-                if impacts:
-                    _ccy = ev.get("country","")
-                    _kind = _indicator_kind(ev.get("title",""))
-                    _better = (diff > 0 and polarity > 0) or (diff < 0 and polarity < 0)
-                    _reading = _read_figure(_kind, _ccy, diff, pct, actual, forecast, _better)
-                    _ccy_word = "renforce" if _better else "affaiblit"
-                    _ccy_col = _ta["win"] if _better else _ta["loss"]
+    st.caption("Source : ForexFactory. Un chiffre supérieur aux attentes renforce "
+               "généralement la devise (sauf chômage / inscriptions, logique inversée). "
+               "Analyse indicative, à recouper avec le contexte de marché.")
 
-                    # Lignes détaillées par actif
-                    _asset_lines = ""
-                    for (aname, adir, force, phrase) in impacts:
-                        acol = _ta["win"] if adir > 0 else _ta["loss"]
-                        arrow = "▲ hausse" if adir > 0 else "▼ baisse"
-                        _word, _why = _ASSET_COMMENT.get(aname, (aname, ""))
-                        _asset_lines += (
-                            f"<div style='display:flex;gap:10px;align-items:baseline;"
-                            f"margin-bottom:5px'>"
-                            f"<span style='color:{acol};font-weight:700;min-width:74px;"
-                            f"font-size:12px'>{arrow}</span>"
-                            f"<span style='color:{_ta['text']};font-weight:600;"
-                            f"min-width:130px;font-size:12px'>{aname}</span>"
-                            f"<span style='color:{_ta['muted']};font-size:12px'>"
-                            f"Biais {'haussier' if adir>0 else 'baissier'} {force} sur "
-                            f"{_word} : {_why}.</span></div>")
-
-                    st.markdown(
-                        f"<div style='margin:2px 0 14px 60px;background:{_ta['bg2']};"
-                        f"border:1px solid {_ta['border']};border-left:3px solid {_ccy_col};"
-                        f"border-radius:10px;padding:12px 16px'>"
-                        f"<div style='font-size:11px;color:{_ta['muted']};"
-                        f"text-transform:uppercase;letter-spacing:.5px;font-weight:600;"
-                        f"margin-bottom:6px'>"
-                        f"<i class='fa-solid fa-lightbulb'></i> Lecture fondamentale</div>"
-                        f"<div style='color:{_ta['text']};font-size:12.5px;line-height:1.55;"
-                        f"margin-bottom:4px'>{_reading}</div>"
-                        f"<div style='color:{_ta['muted']};font-size:12px;margin-bottom:10px'>"
-                        f"Bilan : ce chiffre <b style='color:{_ccy_col}'>{_ccy_word} le {_ccy}</b>.</div>"
-                        f"{_asset_lines}"
-                        f"</div>", unsafe_allow_html=True)
-
-    st.caption("Heures UTC. Analyse d'impact générée à partir de l'écart chiffre "
-               "publié / prévision. Un chiffre supérieur aux attentes renforce "
-               "généralement la devise concernée (sauf chômage / inscriptions, "
-               "logique inversée). À recouper avec le contexte de marché.")
 
 elif st.session_state.page == "calendar":
     st.markdown("# Calendrier de Performance")
@@ -3343,6 +3301,77 @@ elif st.session_state.page == "users":
                "et définissez le capital de départ de chaque compte.")
 
     users = users_load()
+
+    # ── GESTION DES COMPTES DE TRADING ───────────────────────────────────────
+    st.markdown("### Comptes de trading")
+    st.caption("Créez ou supprimez des comptes (ex. retirer Démo, ajouter un réel).")
+    accs = list(st.session_state.get("accounts_meta", []))
+    # Liste + suppression
+    for _i, a in enumerate(accs):
+        nm = a["name"]; kd = a.get("kind", "real")
+        col = account_color(nm)
+        n_tr = sum(1 for t in st.session_state.trades if t.get("trade_mode") == nm)
+        ac1, ac2, ac3 = st.columns([3, 1.4, 1.4])
+        with ac1:
+            st.markdown(
+                f"<div style='padding-top:8px'>"
+                f"<span style='display:inline-block;width:10px;height:10px;border-radius:3px;"
+                f"background:{col};margin-right:8px'></span>"
+                f"<b style='color:{_t['text']}'>{nm}</b> "
+                f"<span style='color:{_t['muted']};font-size:12px'>· {'démo' if kd=='demo' else 'réel'} "
+                f"· {n_tr} trade(s)</span></div>", unsafe_allow_html=True)
+        with ac2:
+            st.markdown(f"<div style='color:{_t['muted']};font-size:12px;padding-top:9px'>"
+                        f"capital {float(st.session_state.get('account_capital',{}).get(nm,0) or 0):,.0f}$</div>",
+                        unsafe_allow_html=True)
+        with ac3:
+            if st.button("Supprimer", key=f"delacc_{_i}", use_container_width=True):
+                st.session_state[f"confirm_delacc_{_i}"] = True
+        if st.session_state.get(f"confirm_delacc_{_i}"):
+            warn = (f" {n_tr} trade(s) resteront enregistrés sous ce nom mais ne seront "
+                    f"plus filtrables." if n_tr else "")
+            st.warning(f"Supprimer le compte « {nm} » ?{warn}")
+            d1, d2, _ = st.columns([1, 1, 4])
+            with d1:
+                if st.button("Oui, supprimer", key=f"cfa_{_i}"):
+                    accs.pop(_i)
+                    st.session_state.accounts_meta = accs
+                    accounts_save(accs); apply_accounts(accs)
+                    caps_now = dict(st.session_state.get("account_capital", {}))
+                    caps_now.pop(nm, None)
+                    st.session_state.account_capital = caps_now; capital_save(caps_now)
+                    st.session_state.pop(f"confirm_delacc_{_i}", None); st.rerun()
+            with d2:
+                if st.button("Annuler", key=f"cfna_{_i}"):
+                    st.session_state.pop(f"confirm_delacc_{_i}", None); st.rerun()
+    # Ajout
+    with st.form("add_account_form"):
+        nc1, nc2, nc3 = st.columns([2.4, 1.4, 1.2])
+        with nc1:
+            na_name = st.text_input("Nom du nouveau compte", placeholder="ex. Réel Prop Firm")
+        with nc2:
+            na_kind = st.selectbox("Type", ["real", "demo"],
+                                   format_func=lambda k: "Réel" if k == "real" else "Démo")
+        with nc3:
+            na_cap = st.number_input("Capital départ", min_value=0.0, step=100.0, value=0.0)
+        if st.form_submit_button("Ajouter le compte", icon=":material/add:", type="primary"):
+            nm = na_name.strip()
+            if not nm:
+                st.error("Nom requis.")
+            elif any(a["name"] == nm for a in accs):
+                st.error("Ce compte existe déjà.")
+            else:
+                accs.append({"name": nm, "kind": na_kind})
+                st.session_state.accounts_meta = accs
+                accounts_save(accs); apply_accounts(accs)
+                if na_cap:
+                    caps_now = dict(st.session_state.get("account_capital", {}))
+                    caps_now[nm] = na_cap
+                    st.session_state.account_capital = caps_now; capital_save(caps_now)
+                st.success(f"Compte « {nm} » créé.")
+                st.rerun()
+
+    st.markdown("---")
 
     # ── CAPITAL DE DÉPART PAR COMPTE ─────────────────────────────────────────
     st.markdown("### Capital de départ par compte")
