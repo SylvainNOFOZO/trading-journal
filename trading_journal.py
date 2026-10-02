@@ -2594,24 +2594,167 @@ elif st.session_state.page == "analyse":
                   "dxy": "Dollar", "metal": "Métal", "commodity": "Énergie",
                   "crypto": "Crypto"}
 
+    _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                         "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+    _CC2CCY = {"US": "USD", "EU": "EUR", "DE": "EUR", "FR": "EUR", "IT": "EUR", "ES": "EUR",
+               "NL": "EUR", "GB": "GBP", "UK": "GBP", "JP": "JPY", "CH": "CHF", "CA": "CAD",
+               "AU": "AUD", "NZ": "NZD", "CN": "CNY"}
+
+    def _tv_fmt(v, scale, unit):
+        if v is None or v == "": return ""
+        try: x = float(v)
+        except Exception: return str(v)
+        s = f"{int(x)}" if x == int(x) else f"{x:.2f}".rstrip("0").rstrip(".")
+        if scale in ("K", "M", "B", "T"): s += scale
+        if unit == "%": s += "%"
+        return s
+
+    def _extract_json_object(s, start):
+        """Depuis l'index d'un '{', renvoie la sous-chaîne JSON équilibrée (quote-aware)."""
+        depth = 0; in_str = False; esc = False
+        for i in range(start, len(s)):
+            c = s[i]
+            if in_str:
+                if esc: esc = False
+                elif c == "\\": esc = True
+                elif c == '"': in_str = False
+            else:
+                if c == '"': in_str = True
+                elif c == "{": depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0: return s[start:i + 1]
+        return None
+
+    def _ff_impact(ev):
+        blob = (str(ev.get("impactTitle", "")) + " " + str(ev.get("impactClass", "")) + " "
+                + str(ev.get("impactName", ""))).lower()
+        if "red" in blob or "high" in blob: return "High"
+        if "ora" in blob or "medium" in blob: return "Medium"
+        if "yel" in blob or "low" in blob: return "Low"
+        return "Low"
+
     @st.cache_data(ttl=1800, show_spinner=False)
-    def _fetch_ff_calendar(scope="all"):
-        base = "https://nfs.faireconomy.media/ff_calendar_{}.json"
-        scopes = ["lastweek", "thisweek", "nextweek"] if scope == "all" else [scope]
-        out, seen = [], set()
-        for sc in scopes:
-            try:
-                r = requests.get(base.format(sc), timeout=12,
-                                 headers={"User-Agent": "Mozilla/5.0 TradingJournal"})
-                if r.status_code == 200:
-                    for ev in r.json():
-                        key = (str(ev.get("title", "")), str(ev.get("date", "")),
-                               str(ev.get("country", ev.get("currency", ""))))
-                        if key not in seen:
-                            seen.add(key); out.append(ev)
-            except Exception:
-                pass
-        return out
+    def _fetch_calendar(scope="all"):
+        """Renvoie (events, source). events normalisés avec 'actual' si la source le fournit.
+        Ordre des sources : TradingView (Actual) -> ForexFactory (Actual) -> faireconomy (prévisions)."""
+        import json as _json
+        from datetime import timedelta as _tdd
+        today = datetime.utcnow()
+        if scope == "lastweek":   dfrom, dto = today - _tdd(days=9), today
+        elif scope == "thisweek": dfrom, dto = today - _tdd(days=3), today + _tdd(days=4)
+        elif scope == "nextweek": dfrom, dto = today + _tdd(days=1), today + _tdd(days=9)
+        else:                     dfrom, dto = today - _tdd(days=16), today + _tdd(days=9)
+
+        # ── Source 1 : TradingView (calendrier avec Actual) ──────────────────
+        try:
+            h = dict(_UA); h["Origin"] = "https://www.tradingview.com"
+            h["Referer"] = "https://www.tradingview.com/"
+            params = {"from": dfrom.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                      "to":   dto.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                      "countries": "US,EU,GB,JP,CH,CA,AU,NZ,CN,DE,FR,IT,ES"}
+            r = requests.get("https://economic-calendar.tradingview.com/events",
+                             params=params, headers=h, timeout=12)
+            if r.status_code == 200:
+                data = r.json()
+                res = data.get("result", data if isinstance(data, list) else [])
+                _imp = {1: "High", 0: "Medium", -1: "Low"}
+                out = []
+                for ev in res:
+                    ccy = _CC2CCY.get(str(ev.get("country", "")).upper())
+                    if not ccy: continue
+                    out.append({
+                        "title": str(ev.get("title") or ev.get("indicator") or ""),
+                        "country": ccy,
+                        "impact": _imp.get(ev.get("importance", 0), "Medium"),
+                        "actual": _tv_fmt(ev.get("actual"), ev.get("scale", ""), ev.get("unit", "")),
+                        "forecast": _tv_fmt(ev.get("forecast"), ev.get("scale", ""), ev.get("unit", "")),
+                        "previous": _tv_fmt(ev.get("previous"), ev.get("scale", ""), ev.get("unit", "")),
+                        "date": str(ev.get("date", "")),
+                    })
+                if out:
+                    return out, "TradingView"
+        except Exception:
+            pass
+
+        # ── Source 2 : ForexFactory (page HTML, contient l'Actual) ───────────
+        try:
+            ffmap = {"lastweek": "last", "thisweek": "this", "nextweek": "next"}
+            weeks = ["last", "this", "next"] if scope == "all" else [ffmap.get(scope, "this")]
+            out, seen = [], set()
+            for wk in weeks:
+                try:
+                    r = requests.get(f"https://www.forexfactory.com/calendar?week={wk}",
+                                     headers=_UA, timeout=12)
+                    if r.status_code != 200: continue
+                    html = r.text; pos = 0
+                    while True:
+                        mk = html.find("calendarComponentStates[", pos)
+                        if mk == -1: break
+                        eq = html.find("=", mk); br = html.find("{", eq)
+                        if eq == -1 or br == -1: break
+                        obj = _extract_json_object(html, br)
+                        pos = (br + len(obj)) if obj else (mk + 25)
+                        if not obj: continue
+                        try: state = _json.loads(obj)
+                        except Exception: continue
+                        for day in (state.get("days") or []):
+                            for ev in (day.get("events") or []):
+                                name = ev.get("name") or ev.get("eventName") or ""
+                                cur = ev.get("currency") or ""
+                                if not name or not cur: continue
+                                dl = ev.get("dateline")
+                                try:
+                                    iso = (datetime.utcfromtimestamp(int(dl))
+                                           .strftime("%Y-%m-%dT%H:%M:%S+00:00")) if dl else ""
+                                except Exception:
+                                    iso = ""
+                                key = (str(name), iso, str(cur))
+                                if key in seen: continue
+                                seen.add(key)
+                                out.append({
+                                    "title": str(name), "country": str(cur),
+                                    "impact": _ff_impact(ev),
+                                    "actual": str(ev.get("actual", "") or ""),
+                                    "forecast": str(ev.get("forecast", "") or ""),
+                                    "previous": str(ev.get("previous", "") or ""),
+                                    "date": iso,
+                                })
+                except Exception:
+                    continue
+            if out:
+                return out, "ForexFactory"
+        except Exception:
+            pass
+
+        # ── Source 3 : faireconomy (prévisions seules, pas d'Actual) ─────────
+        try:
+            base = "https://nfs.faireconomy.media/ff_calendar_{}.json"
+            scopes = ["lastweek", "thisweek", "nextweek"] if scope == "all" else [scope]
+            out, seen = [], set()
+            for sc in scopes:
+                try:
+                    r = requests.get(base.format(sc), timeout=12, headers=_UA)
+                    if r.status_code == 200:
+                        for ev in r.json():
+                            key = (str(ev.get("title", "")), str(ev.get("date", "")),
+                                   str(ev.get("country", ev.get("currency", ""))))
+                            if key in seen: continue
+                            seen.add(key)
+                            out.append({
+                                "title": str(ev.get("title", "")),
+                                "country": str(ev.get("country", ev.get("currency", ""))),
+                                "impact": str(ev.get("impact", "")),
+                                "actual": "",
+                                "forecast": str(ev.get("forecast", ev.get("estimate", "")) or ""),
+                                "previous": str(ev.get("previous", ev.get("prior", "")) or ""),
+                                "date": str(ev.get("date", "")),
+                            })
+                except Exception:
+                    pass
+            return out, "faireconomy (prévisions, sans chiffre publié)"
+        except Exception:
+            return [], "aucune"
 
     def _to_num(x):
         if x is None: return None
@@ -2709,10 +2852,17 @@ elif st.session_state.page == "analyse":
         st.info("Sélectionnez au moins un actif.")
         st.stop()
 
-    events = _fetch_ff_calendar(_scope_map[scope_lbl])
+    events, _src = _fetch_calendar(_scope_map[scope_lbl])
     if not events:
-        st.error("Calendrier économique indisponible pour le moment. Réessayez plus tard.")
+        st.error("Calendrier économique indisponible pour le moment (sources injoignables). "
+                 "Réessayez plus tard.")
         st.stop()
+    _has_actual_src = "sans chiffre publié" not in _src
+    if _has_actual_src:
+        st.caption(f"✅ Source : {_src} — chiffres publiés (Actual) disponibles.")
+    else:
+        st.warning(f"⚠️ Sources avec Actual (TradingView / ForexFactory) injoignables depuis "
+                   f"le serveur. Repli sur {_src} : seules les prévisions sont affichées.")
 
     df = pd.DataFrame(events)
     ren = {}
@@ -2939,7 +3089,7 @@ elif st.session_state.page == "analyse":
         st.caption(f"{len(ordered)} publications au total · {MAXN} affichées (publiées en premier). "
                    f"Affinez via les filtres Période / Impact.")
 
-    st.caption("Source : ForexFactory. L'impact par actif est une estimation directionnelle "
+    st.caption(f"Source des données : {_src}. L'impact par actif est une estimation directionnelle "
                "fondée sur la réaction habituelle : un chiffre supérieur au consensus renforce "
                "généralement la devise (sauf chômage / inscriptions). Pour les indices actions, "
                "une inflation ou un taux plus chauds pèsent (effet hawkish) ; pour les obligations, "
