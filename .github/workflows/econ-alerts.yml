@@ -1,0 +1,35 @@
+name: Alertes annonces économiques
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"      # toutes les 5 minutes (GitHub peut décaler de quelques minutes)
+  workflow_dispatch:            # bouton « Run workflow » pour lancer à la main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: econ-alerts
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Envoyer les alertes dues
+        run: python alerts/send_alerts.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          APP_URL: ${{ secrets.APP_URL }}
