@@ -142,11 +142,22 @@ THEMES = {
         "btn_text":"#ffffff",
     },
 }
-THEME_NAMES = list(THEMES.keys())
+def _is_light(t):
+    h = t["bg"].lstrip("#"); r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 150
+
+# Designs clairs d'abord (fond non noir par défaut), puis les sombres, au choix
+THEME_NAMES = ([n for n, t in THEMES.items() if _is_light(t)]
+               + [n for n, t in THEMES.items() if not _is_light(t)])
+DEFAULT_THEME = "Navy Corporate"   # design par défaut : clair, bleu marine et sarcelle
+LOGIN_THEME   = "Navy Corporate"   # design unique de la page de connexion
+
+def theme_label(n):
+    return ("Clair · " if _is_light(THEMES[n]) else "Sombre · ") + n
 
 def get_theme():
-    name = st.session_state.get("theme_name", THEME_NAMES[0])
-    return THEMES.get(name, THEMES[THEME_NAMES[0]])
+    name = st.session_state.get("theme_name", DEFAULT_THEME)
+    return THEMES.get(name, THEMES[DEFAULT_THEME])
 
 # ── PROFILS GRAPHIQUES : chaque design change aussi le type et la config des graphiques ──
 # equity   : "area" | "line" | "step" | "glow"      (courbe de capital / progression %)
@@ -188,7 +199,7 @@ def get_chart_style_name():
     ov = st.session_state.get("chart_style_override", "Auto")
     if ov in CHART_STYLES:
         return ov
-    return THEME_CHART_STYLE.get(st.session_state.get("theme_name", THEME_NAMES[0]), "Classique")
+    return THEME_CHART_STYLE.get(st.session_state.get("theme_name", DEFAULT_THEME), "Classique")
 
 def get_chart_style():
     return CHART_STYLES[get_chart_style_name()]
@@ -364,6 +375,9 @@ def build_css(t):
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
 .fa, .fas, .far, .fab, .fa-solid, .fa-regular {{ font-family: "Font Awesome 6 Free" !important; }}
+:root {{ --tj-bg:{t['bg']}; --tj-bg2:{t['bg2']}; --tj-card:{t['card']}; --tj-border:{t['border']};
+        --tj-text:{t['text']}; --tj-muted:{t['muted']}; --tj-accent:{t['accent']};
+        --tj-win:{t['win']}; --tj-loss:{t['loss']}; --tj-alt:{t['alt']}; --tj-orange:{t['orange']}; }}
 .icon {{ display:inline-flex; align-items:center; justify-content:center;
         width:32px; height:32px; border-radius:8px; font-size:15px; }}
 .icon-green  {{ color:{t['win']}; background:{t['win']}1f; }}
@@ -393,11 +407,19 @@ div[data-baseweb="select"] > div {{
     background-color: {t['bg2']} !important; border-color: {t['border']} !important; color: {t['text']} !important; }}
 .stButton > button {{ background:linear-gradient(135deg,{t['accent']},{t['alt']});color:{t['btn_text']};font-weight:800;border:none;border-radius:10px;box-shadow:0 2px 8px {t['accent']}33; }}
 .stButton > button:hover {{ filter:brightness(1.08); color:{t['btn_text']} !important; box-shadow:0 4px 14px {t['accent']}55; }}
-.kpi {{ background:linear-gradient(145deg,{t['card']},{t['bg2']});border:1px solid {t['border']};border-radius:14px;padding:18px 20px 14px;position:relative;overflow:hidden;min-height:110px;box-shadow:0 1px 3px rgba(0,0,0,.18),0 8px 24px rgba(0,0,0,.10); }}
+.kpi {{ background:linear-gradient(145deg,{t['card']},{t['bg2']});border:1px solid {t['border']};border-radius:12px;padding:12px 14px 10px;position:relative;overflow:hidden;min-height:84px;box-shadow:0 1px 2px rgba(0,0,0,.08),0 4px 14px rgba(0,0,0,.06); }}
 .kpi-bar {{ position:absolute;top:0;left:0;right:0;height:3px; }}
-.kpi-icon {{ font-size:18px;margin-bottom:6px; }}
-.kpi-label {{ font-size:10px;color:{t['muted']};letter-spacing:1.5px;text-transform:uppercase;font-weight:600; }}
-.kpi-value {{ font-size:24px;font-weight:800;font-family:"JetBrains Mono",monospace;margin:4px 0 2px; }}
+.kpi-icon {{ font-size:14px;margin-bottom:2px;float:right;opacity:.85; }}
+.kpi-label {{ font-size:10px;color:{t['muted']};letter-spacing:1.2px;text-transform:uppercase;font-weight:600; }}
+.kpi-value {{ font-size:21px;font-weight:800;font-family:"JetBrains Mono",monospace;margin:3px 0 1px; }}
+/* Onglets du dashboard */
+.stTabs [data-baseweb="tab-list"] {{ gap:6px; border-bottom:1px solid {t['border']}; }}
+.stTabs [data-baseweb="tab"] {{ height:38px; padding:0 14px; border-radius:9px 9px 0 0;
+    color:{t['muted']} !important; font-weight:600; }}
+.stTabs [aria-selected="true"] {{ color:{t['accent']} !important; background:{t['accent']}12; }}
+.stTabs [data-baseweb="tab-highlight"] {{ background:{t['accent']} !important; }}
+div[data-testid="stExpander"] details {{ background:{t['card']}; border:1px solid {t['border']}; border-radius:10px; }}
+div[data-testid="stExpander"] summary p {{ font-size:12px !important; color:{t['muted']} !important; }}
 .kpi-sub {{ font-size:11px;color:{t['muted']}; }}
 .tj-table {{ width:100%;border-collapse:collapse;font-size:13px; }}
 .tj-table th {{ padding:10px 12px;text-align:left;font-size:10px;color:{t['muted']};letter-spacing:1px;
@@ -655,7 +677,7 @@ if "trades" not in st.session_state:
     st.session_state.trades = load_and_migrate()
 if "page"        not in st.session_state: st.session_state.page        = "dashboard"
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
-if "theme_name"  not in st.session_state: st.session_state.theme_name  = THEME_NAMES[0]
+if "theme_name"  not in st.session_state: st.session_state.theme_name  = DEFAULT_THEME
 if "mode_filter" not in st.session_state: st.session_state.mode_filter = "Tous"
 if "mode_selection" not in st.session_state: st.session_state.mode_selection = []
 
@@ -867,7 +889,7 @@ def get_df(mode_filter=None):
 def kpi(icon, label, value, sub, color):
     st.markdown(f"""<div class="kpi">
         <div class="kpi-bar" style="background:{color}"></div>
-        <div class="kpi-icon" style="font-size:17px;margin-bottom:8px;color:{color};opacity:.9">{icon}</div>
+        <div class="kpi-icon" style="color:{color}">{icon}</div>
         <div class="kpi-label">{label}</div>
         <div class="kpi-value" style="color:{color}">{value}</div>
         <div class="kpi-sub">{sub}</div></div>""", unsafe_allow_html=True)
@@ -985,7 +1007,7 @@ def login_gate():
     """Affiche le formulaire de connexion. Retourne True si connecté."""
     if st.session_state.get("auth_user"):
         return True
-    _t = get_theme()
+    _t = THEMES[LOGIN_THEME]          # design unique pour la page de connexion
     st.markdown(build_css(_t), unsafe_allow_html=True)
     st.markdown(f"""<style>
 .block-container {{ padding-top:3rem; max-width:1100px; }}
@@ -1039,19 +1061,6 @@ div[data-testid="stForm"] button {{ padding:11px 0 !important; font-size:14px !i
             f"<div class='tj-feat'><i class='fa-solid fa-user-shield'></i><div><b>Accès multi-comptes</b><br>"
             f"<span>Permissions par utilisateur, comptes démo, réels et institutionnels.</span></div></div>"
             f"</div>", unsafe_allow_html=True)
-        _sel = st.selectbox("Design de l'interface", THEME_NAMES,
-            index=THEME_NAMES.index(st.session_state.theme_name)
-                  if st.session_state.theme_name in THEME_NAMES else 0,
-            key="login_theme")
-        if _sel != st.session_state.theme_name:
-            st.session_state.theme_name = _sel; st.rerun()
-        # Aperçu de la palette du design choisi
-        st.markdown(
-            "<div style='display:flex;gap:6px;margin-top:2px'>" + "".join(
-                f"<div title='{k}' style='flex:1;height:10px;border-radius:5px;background:{_t[k]};"
-                f"border:1px solid {_t['border']}'></div>"
-                for k in ("bg", "card", "accent", "alt", "orange", "win", "loss")) + "</div>",
-            unsafe_allow_html=True)
     with cright:
         with st.form("login_form"):
             st.markdown(
@@ -1111,8 +1120,8 @@ with _hh2:
         _sel_theme = st.selectbox("Design", THEME_NAMES,
             index=THEME_NAMES.index(st.session_state.theme_name)
                   if st.session_state.theme_name in THEME_NAMES else 0,
-            key="theme_selector", label_visibility="collapsed",
-            help="Design de l'interface : couleurs, cartes et style des graphiques")
+            key="theme_selector", label_visibility="collapsed", format_func=theme_label,
+            help="Design de l'interface : clair ou sombre, couleurs et style des graphiques")
         if _sel_theme != st.session_state.theme_name:
             st.session_state.theme_name = _sel_theme; st.rerun()
     with _hd2:
@@ -1239,13 +1248,7 @@ if _mig_msg:
 # PAGE : DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 if st.session_state.page == "dashboard":
-    st.markdown("# Dashboard")
-    st.caption(datetime.now().strftime("%A %d %B %Y"))
-    mode_banner()
-
-    # ── FILTRES ───────────────────────────────────────────────────────────────
-    st.markdown('<div style="background:#111520;border:1px solid #1e2535;border-radius:14px;padding:16px 20px;margin:12px 0 20px">',
-                unsafe_allow_html=True)
+    _tdb = get_theme()
     df_all_f    = get_df("Tous")
     syms_avail  = sorted(df_all_f["symbol"].unique().tolist()) if not df_all_f.empty else []
     moods_avail = sorted(df_all_f["mood"].unique().tolist())   if not df_all_f.empty else []
@@ -1253,13 +1256,28 @@ if st.session_state.page == "dashboard":
     dates       = sorted(df_all_f["date"].tolist()) if not df_all_f.empty else []
     d_min = date.fromisoformat(dates[0])  if dates else date(2024,1,1)
     d_max = date.fromisoformat(dates[-1]) if dates else date.today()
-    fc1,fc2,fc3,fc4,fc5 = st.columns(5)
-    with fc1: f_sym       = st.selectbox("Actif",       ["Tous"]+syms_avail,  key="d_sym")
-    with fc2: f_mood      = st.selectbox("Émotion",     ["Toutes"]+moods_avail, key="d_mood")
-    with fc3: f_strat     = st.selectbox("Stratégie",   ["Toutes"]+strat_avail, key="d_strat")
-    with fc4: f_date_from = st.date_input("Depuis",     value=d_min, key="d_from")
-    with fc5: f_date_to   = st.date_input("Jusqu'au",   value=d_max, key="d_to")
-    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── En-tête compact : titre + date à gauche, filtres repliables à droite ──
+    _dh1, _dh2 = st.columns([1.6, 2.4])
+    with _dh1:
+        st.markdown(
+            f"<div style='display:flex;align-items:baseline;gap:12px;padding-top:4px'>"
+            f"<span style='font-size:22px;font-weight:800;color:{_tdb['text']}'>Dashboard</span>"
+            f"<span style='font-size:12px;color:{_tdb['muted']}'>"
+            f"{datetime.now().strftime('%d/%m/%Y')} · {selection_label()}</span></div>",
+            unsafe_allow_html=True)
+    with _dh2:
+        _nf = sum([st.session_state.get("d_sym", "Tous") != "Tous",
+                   st.session_state.get("d_mood", "Toutes") != "Toutes",
+                   st.session_state.get("d_strat", "Toutes") != "Toutes"])
+        with st.expander("Filtres" + (f" · {_nf} actif(s)" if _nf else " · actif, émotion, stratégie, période")):
+            fc1,fc2,fc3 = st.columns(3)
+            with fc1: f_sym   = st.selectbox("Actif",     ["Tous"]+syms_avail,    key="d_sym")
+            with fc2: f_mood  = st.selectbox("Émotion",   ["Toutes"]+moods_avail, key="d_mood")
+            with fc3: f_strat = st.selectbox("Stratégie", ["Toutes"]+strat_avail, key="d_strat")
+            fc4,fc5 = st.columns(2)
+            with fc4: f_date_from = st.date_input("Depuis",   value=d_min, key="d_from")
+            with fc5: f_date_to   = st.date_input("Jusqu'au", value=d_max, key="d_to")
 
     df = get_df()
     if not df.empty:
@@ -1288,35 +1306,33 @@ if st.session_state.page == "dashboard":
 
         # ── KPIs ─────────────────────────────────────────────────────────────
         c1,c2,c3,c4,c5,c6 = st.columns(6)
-        with c1: kpi('<i class="fa-solid fa-coins"></i>',          "P&L Net",      fmt(total),       f"{len(df)} trades",             "#00d4aa" if total>=0 else "#ff4d6d")
-        with c2: kpi('<i class="fa-solid fa-bullseye"></i>',       "Win Rate",     f"{wr_val:.1f}%", f"{len(wins)}W · {len(losses)}L","#00d4aa" if wr_val>=50 else "#ff4d6d")
-        with c3: kpi('<i class="fa-solid fa-scale-balanced"></i>', "Profit Factor",f"{pf:.2f}" if pf else "—","Gain/Perte",          "#00d4aa" if (pf or 0)>=1.5 else "#ff9f43")
-        with c4: kpi('<i class="fa-solid fa-arrow-trend-down"></i>',"Max Drawdown",f"${mdd:,.2f}",   "Perte cumulée max",             "#ff4d6d")
-        with c5: kpi('<i class="fa-solid fa-bolt"></i>',           "R:R Moyen",   f"{avg_rr:.2f}R" if avg_rr else "—","Risque/Récomp","#7c6aff")
-        with c6: kpi('<i class="fa-solid fa-arrow-trend-up"></i>', "Gain moyen",   fmt(avg_w),       "Par trade gagnant",             "#00d4aa")
-        st.markdown(" ")
+        _W, _L, _O, _A = _tdb["win"], _tdb["loss"], _tdb["orange"], _tdb["alt"]
+        with c1: kpi('<i class="fa-solid fa-coins"></i>',          "P&L Net",      fmt(total),       f"{len(df)} trades",             _W if total>=0 else _L)
+        with c2: kpi('<i class="fa-solid fa-bullseye"></i>',       "Win Rate",     f"{wr_val:.1f}%", f"{len(wins)}W · {len(losses)}L",_W if wr_val>=50 else _L)
+        with c3: kpi('<i class="fa-solid fa-scale-balanced"></i>', "Profit Factor",f"{pf:.2f}" if pf else "—","Gain/Perte",          _W if (pf or 0)>=1.5 else _O)
+        with c4: kpi('<i class="fa-solid fa-arrow-trend-down"></i>',"Max Drawdown",f"${mdd:,.2f}",   "Perte cumulée max",             _L)
+        with c5: kpi('<i class="fa-solid fa-bolt"></i>',           "R:R Moyen",   f"{avg_rr:.2f}R" if avg_rr else "—","Risque/Récomp",_A)
+        with c6: kpi('<i class="fa-solid fa-arrow-trend-up"></i>', "Gain moyen",   fmt(avg_w),       "Par trade gagnant",             _W)
 
-        # Comparaison par mode de compte
+        # Comparaison par compte : une seule ligne de pastilles (pas une 2e rangée de cartes)
         _sc_dash = _resolve_scope(None)
         if len(_sc_dash) >= 2 and "trade_mode" in df.columns:
-            _mode_cfg = {
-                "Démo":               ("#ff9f43", "fa-flask"),
-                "Réel Indépendant":   ("#00d4aa", "fa-circle-dot"),
-                "Réel Institutionnel":("#7c6aff", "fa-building-columns"),
-            }
             _active_modes = [m for m in TRADE_MODES if not df[df["trade_mode"]==m].empty]
             if len(_active_modes) >= 2:
-                st.markdown("#### Comparaison par mode de compte")
-                _cols = st.columns(len(_active_modes))
-                for _col, _m in zip(_cols, _active_modes):
+                _chips = ""
+                for _m in _active_modes:
                     _df_m = df[df["trade_mode"]==_m]
-                    _color, _icon = _mode_cfg.get(_m, ("#8892a4","fa-circle"))
+                    _pm = _df_m["pnl"].sum()
                     _wr_m = len(_df_m[_df_m["pnl"]>0])/len(_df_m)*100 if len(_df_m) else 0
-                    with _col:
-                        kpi(f'<i class="fa-solid {_icon}"></i>', f"P&L {_m}",
-                            fmt(_df_m["pnl"].sum()),
-                            f"{len(_df_m)} trades · {_wr_m:.0f}% win", _color)
-                st.markdown(" ")
+                    _cc = account_color(_m)
+                    _chips += (f"<span style='display:inline-flex;align-items:center;gap:8px;"
+                               f"background:{_tdb['card']};border:1px solid {_tdb['border']};"
+                               f"border-left:3px solid {_cc};border-radius:9px;padding:4px 12px;"
+                               f"margin:0 8px 6px 0;font-size:12px;color:{_tdb['muted']}'>"
+                               f"<b style='color:{_tdb['text']}'>{_m}</b>"
+                               f"<b style='color:{_W if _pm>=0 else _L};font-family:JetBrains Mono,monospace'>{fmt(_pm)}</b>"
+                               f"{len(_df_m)} trades · {_wr_m:.0f}% win</span>")
+                st.markdown(f"<div style='margin:6px 0 2px'>{_chips}</div>", unsafe_allow_html=True)
 
         # ════════════════════════════════════════════════════════════════════
         # COULEURS & STYLE COMMUNS
@@ -1403,46 +1419,14 @@ if st.session_state.page == "dashboard":
                         showline=False, zeroline=False)
 
         # ════════════════════════════════════════════════════════════════════
-        # ROW 1 : Capital cumulé + Win/Loss
+        # VUE D'ENSEMBLE : l'essentiel visible sans défiler
         # ════════════════════════════════════════════════════════════════════
-        st.markdown("### Performance dans le temps")
-
-        # ── Progression du capital en % (base = capital de départ du compte) ──
         _base_cap = get_capital()
-        _card("Progression du capital (%)",
-              f"Base : {_base_cap:,.0f}$" if _base_cap > 0
-              else "Capital de départ non défini")
-        if _base_cap > 0:
-            _pct = (cumul / _base_cap * 100.0)
-            _pcol = _win if (_pct.iloc[-1] if len(_pct) else 0) >= 0 else _loss
-            def _hx_rgba(h, a):
-                h = h.lstrip("#"); r,g,b = int(h[0:2],16),int(h[2:4],16),int(h[4:6],16)
-                return f"rgba({r},{g},{b},{a})"
-            fig_pct = go.Figure(series_traces(
-                pos_idx, _pct.tolist(), _pcol, _cs, customdata=pos_labels,
-                hovertemplate="<b>#%{x}</b> · %{customdata}<br>"
-                              "Progression : <b>%{y:+.2f}%</b><extra></extra>"))
-            fig_pct.add_hline(y=0, line_color=_grid, line_width=1)
-            fig_pct.update_layout(**_base_layout(height=240))
-            _style_axes(fig_pct)
-            fig_pct.update_yaxes(ticksuffix="%")
-            fig_pct.update_xaxes(**_xaxis_pos(n_pos))
-            st.plotly_chart(fig_pct, use_container_width=True, config=_chart_cfg)
-            _final_pct = _pct.iloc[-1] if len(_pct) else 0
-            st.markdown(
-                f"<div style='color:{_thd['muted']};font-size:12px;margin:-4px 0 10px'>"
-                f"Progression cumulée : <b style='color:{_pcol}'>{_final_pct:+.2f}%</b> "
-                f"sur un capital de départ de {_base_cap:,.0f}$.</div>",
-                unsafe_allow_html=True)
-        else:
-            st.info("Définissez le capital de départ de ce compte dans "
-                    "**Utilisateurs & comptes** (réservé à l'admin) pour afficher la progression en %.")
-        st.markdown(" ")
-
-        r1c1, r1c2 = st.columns([3,2])
-
-        with r1c1:
-            _card("Courbe de capital", "P&L cumulé, trade après trade")
+        _ov_pct = (f" · {((cumul.iloc[-1] if len(cumul) else 0)/_base_cap*100):+.2f}% du capital"
+                   if _base_cap > 0 else "")
+        ov1, ov2, ov3 = st.columns([2.3, 1.15, 1.55])
+        with ov1:
+            _card("Courbe de capital", f"{fmt(cumul.iloc[-1] if len(cumul) else 0)}{_ov_pct}")
             _eq_final = cumul.iloc[-1] if len(cumul) else 0
             _eq_col = _win if _eq_final >= 0 else _loss
             def _hex_rgba(h, a):
@@ -1455,500 +1439,519 @@ if st.session_state.page == "dashboard":
                 hovertemplate=("<b>#%{x}</b> · %{customdata[2]}<br>"
                                "%{customdata[0]} %{customdata[1]}<br>"
                                "Capital : <b>%{y:+,.2f}$</b><extra></extra>")))
-            fig_eq.update_layout(**_base_layout(height=300))
+            fig_eq.update_layout(**_base_layout(height=235))
             _style_axes(fig_eq, yprefix="$")
             fig_eq.update_xaxes(**_xaxis_pos(n_pos))
             st.plotly_chart(fig_eq, use_container_width=True, config=_chart_cfg)
 
-        with r1c2:
+        with ov2:
             _card("Win / Loss")
-            fig_pie = winloss_figure(len(wins), len(losses), wr_val, _theme, _cs, height=260)
+            fig_pie = winloss_figure(len(wins), len(losses), wr_val, _theme, _cs, height=235)
             st.plotly_chart(fig_pie, use_container_width=True, config=_chart_cfg)
 
-        # ════════════════════════════════════════════════════════════════════
-        # ROW 2 : P&L par position + P&L mensuel
-        # ════════════════════════════════════════════════════════════════════
-        r2c1, r2c2 = st.columns([3,2])
-
-        with r2c1:
-            _card("P&L par Position", f"{n_pos} trades — 1 barre = 1 position")
-            fig_tl = go.Figure(go.Bar(
-                x=pos_idx,
-                y=df_s["pnl"].tolist(),
-                marker_color=[_win if p>0 else _loss for p in df_s["pnl"]],
-                marker_opacity=_cs["bar_opacity"],
-                hovertemplate=(
-                    "<b>Position #%{pointNumber+1}</b><br>"
-                    "%{customdata[2]}<br>"
-                    "%{customdata[0]} · %{customdata[1]}<br>"
-                    "P&L : <b>%{y:+,.2f}$</b><extra></extra>"
-                ),
-                customdata=list(zip(
-                    df_s["symbol"].tolist(),
-                    df_s["direction"].tolist(),
-                    pos_labels,
-                )),
-                showlegend=False,
-            ))
-            fig_tl.add_hline(y=0, line_color=_grid, line_width=1)
-            fig_tl.update_layout(**_base_layout(height=280))
-            _style_axes(fig_tl, yprefix="$")
-            fig_tl.update_xaxes(**_xaxis_pos(n_pos))
-            st.plotly_chart(fig_tl, use_container_width=True, config=_chart_cfg)
-
-        with r2c2:
-            _card("P&L Mensuel")
+        with ov3:
+            _card("P&L mensuel")
             fig_mo = category_figure(
                 monthly["label"].tolist(), monthly["pnl"].tolist(),
                 [_win if v>=0 else _loss for v in monthly["pnl"]], _theme, _cs,
                 kind=_cs["monthly"], orientation="v",
                 hovertemplate="<b>%{x}</b><br>%{y:+,.2f}$<extra></extra>")
             fig_mo.add_hline(y=0, line_dash="dot", line_color=_grid, line_width=1)
-            fig_mo.update_layout(**_base_layout(height=230))
+            fig_mo.update_layout(**_base_layout(height=235))
             _style_axes(fig_mo, yprefix="$")
             st.plotly_chart(fig_mo, use_container_width=True, config=_chart_cfg)
 
-        # ════════════════════════════════════════════════════════════════════
-        # ROW 3 : Évolution R:R + P&L vs Volume
-        # ════════════════════════════════════════════════════════════════════
-        st.markdown("### Analyse Risque & Volume")
-        r3c1, r3c2 = st.columns(2)
 
-        with r3c1:
-            _card("Évolution du R:R par trade", "Ratio risque/récompense dans le temps")
-            df_rr = df_s[df_s["rr"].notna()].copy()
-            if not df_rr.empty:
-                rr_colors = [_win if r>=2 else _ora if r>=1 else _loss for r in df_rr["rr"]]
-                fig_rr = go.Figure()
-                # Ligne de tendance lissée
-                # Axe X : datetime si disponible, sinon date
-                if "datetime" in df_rr.columns and df_rr["datetime"].notna().any():
-                    _xrr = pd.to_datetime(df_rr["datetime"], errors="coerce")
-                    x_rr = _xrr.tolist() if _xrr.notna().sum() > 0 else df_rr["date"].tolist()
+        # ════════════════════════════════════════════════════════════════════
+        # DÉTAIL PAR CATÉGORIE : un onglet par thème
+        # ════════════════════════════════════════════════════════════════════
+        (tab_perf, tab_risk, tab_assets, tab_psy, tab_cal, tab_last) = st.tabs([
+            "Performance", "Risque & Volume", "Actifs & Stratégies",
+            "Psychologie", "Calendrier", "Derniers trades"])
+        with tab_perf:
+            pf1, pf2 = st.columns(2)
+            with pf1:
+                # ── Progression du capital en % (base = capital de départ du compte) ──
+                _base_cap = get_capital()
+                _card("Progression du capital (%)",
+                      f"Base : {_base_cap:,.0f}$" if _base_cap > 0
+                      else "Capital de départ non défini")
+                if _base_cap > 0:
+                    _pct = (cumul / _base_cap * 100.0)
+                    _pcol = _win if (_pct.iloc[-1] if len(_pct) else 0) >= 0 else _loss
+                    def _hx_rgba(h, a):
+                        h = h.lstrip("#"); r,g,b = int(h[0:2],16),int(h[2:4],16),int(h[4:6],16)
+                        return f"rgba({r},{g},{b},{a})"
+                    fig_pct = go.Figure(series_traces(
+                        pos_idx, _pct.tolist(), _pcol, _cs, customdata=pos_labels,
+                        hovertemplate="<b>#%{x}</b> · %{customdata}<br>"
+                                      "Progression : <b>%{y:+.2f}%</b><extra></extra>"))
+                    fig_pct.add_hline(y=0, line_color=_grid, line_width=1)
+                    fig_pct.update_layout(**_base_layout(height=260))
+                    _style_axes(fig_pct)
+                    fig_pct.update_yaxes(ticksuffix="%")
+                    fig_pct.update_xaxes(**_xaxis_pos(n_pos))
+                    st.plotly_chart(fig_pct, use_container_width=True, config=_chart_cfg)
+                    _final_pct = _pct.iloc[-1] if len(_pct) else 0
+                    st.markdown(
+                        f"<div style='color:{_thd['muted']};font-size:12px;margin:-4px 0 10px'>"
+                        f"Progression cumulée : <b style='color:{_pcol}'>{_final_pct:+.2f}%</b> "
+                        f"sur un capital de départ de {_base_cap:,.0f}$.</div>",
+                        unsafe_allow_html=True)
                 else:
-                    x_rr = df_rr["date"].tolist()
+                    st.info("Définissez le capital de départ de ce compte dans "
+                            "**Utilisateurs & comptes** (réservé à l'admin) pour afficher la progression en %.")
+                st.markdown(" ")
 
-                if len(df_rr) >= 3:
-                    rr_smooth = pd.Series(df_rr["rr"].values).rolling(
-                        window=min(5,len(df_rr)), min_periods=1).mean()
-                    fig_rr.add_trace(go.Scatter(
-                        x=x_rr, y=rr_smooth.tolist(),
-                        mode="lines", name="Tendance",
-                        line=dict(color=_alt, width=1.5, dash="dash"),
-                        hoverinfo="skip",
-                    ))
-                # Points R:R
-                fig_rr.add_trace(go.Scatter(
-                    x=x_rr, y=df_rr["rr"].tolist(),
-                    mode="markers",
-                    marker=dict(color=rr_colors, size=9,
-                                line=dict(color=_bg, width=1.5)),
-                    hovertemplate="<b>%{x}</b><br>%{customdata[0]} %{customdata[1]}<br>R:R : %{y:.2f}<extra></extra>",
-                    customdata=list(zip(df_rr["symbol"].tolist(), df_rr["direction"].tolist())),
-                    name="R:R",
+            with pf2:
+                _card("P&L par Position", f"{n_pos} trades — 1 barre = 1 position")
+                fig_tl = go.Figure(go.Bar(
+                    x=pos_idx,
+                    y=df_s["pnl"].tolist(),
+                    marker_color=[_win if p>0 else _loss for p in df_s["pnl"]],
+                    marker_opacity=_cs["bar_opacity"],
+                    hovertemplate=(
+                        "<b>Position #%{pointNumber+1}</b><br>"
+                        "%{customdata[2]}<br>"
+                        "%{customdata[0]} · %{customdata[1]}<br>"
+                        "P&L : <b>%{y:+,.2f}$</b><extra></extra>"
+                    ),
+                    customdata=list(zip(
+                        df_s["symbol"].tolist(),
+                        df_s["direction"].tolist(),
+                        pos_labels,
+                    )),
+                    showlegend=False,
                 ))
-                # Repères sobres 1R / 2R (lignes fines, sans bandes de couleur)
-                fig_rr.add_hline(y=1, line_dash="dot", line_color=_text, line_width=1,
-                    annotation_text="1R", annotation_font=dict(color=_text, size=10))
-                fig_rr.add_hline(y=2, line_dash="dot", line_color=_text, line_width=1,
-                    annotation_text="2R", annotation_font=dict(color=_text, size=10))
-                fig_rr.update_layout(**_base_layout(height=260, showlegend=False))
-                _style_axes(fig_rr)
-                fig_rr.update_yaxes(ticksuffix="R")
-                st.plotly_chart(fig_rr, use_container_width=True, config=_chart_cfg)
-                # Légende couleurs
-                st.markdown(
-                    '<div style="display:flex;gap:20px;font-size:11px;color:#6b7894;margin-top:-8px">'
-                    f'<span><span style="color:{_win}">●</span> R:R ≥ 2 (excellent)</span>'
-                    f'<span><span style="color:{_ora}">●</span> 1 ≤ R:R < 2 (correct)</span>'
-                    f'<span><span style="color:{_loss}">●</span> R:R < 1 (insuffisant)</span>'
-                    f'<span style="color:{_alt}">— Tendance</span>'
-                    '</div>', unsafe_allow_html=True)
-            else:
-                st.info("Renseignez SL et TP lors de l'ajout de trades pour calculer le R:R.")
+                fig_tl.add_hline(y=0, line_color=_grid, line_width=1)
+                fig_tl.update_layout(**_base_layout(height=280))
+                _style_axes(fig_tl, yprefix="$")
+                fig_tl.update_xaxes(**_xaxis_pos(n_pos))
+                st.plotly_chart(fig_tl, use_container_width=True, config=_chart_cfg)
 
-        with r3c2:
-            _card("P&L en fonction du Volume", "Gain ou perte selon la taille de position")
-            df_vol = df[df["entry"].notna() & df["entry"].ne(0)].copy()
-            # Utiliser la colonne notes pour extraire le volume si disponible
-            # Sinon utiliser entry comme proxy
-            has_vol = False
-            if "notes" in df_vol.columns:
-                vol_extracted = df_vol["notes"].str.extract(r"vol:([\d.]+)")
-                if vol_extracted[0].notna().sum() > 0:
-                    df_vol["_vol"] = pd.to_numeric(vol_extracted[0], errors="coerce")
-                    df_vol = df_vol[df_vol["_vol"].notna()]
-                    has_vol = len(df_vol) > 0
+        with tab_risk:
+            r3c1, r3c2 = st.columns(2)
 
-            if not has_vol:
-                # Fallback : regrouper par actif et montrer P&L par symbole
-                _card_note = "Données de volume non disponibles — affichage par actif"
-                by_sym_v = df.groupby("symbol").agg(
-                    pnl=("pnl","sum"), trades=("pnl","count")).reset_index().sort_values("pnl")
-                fig_vol = go.Figure(go.Bar(
-                    y=by_sym_v["symbol"].tolist(),
-                    x=by_sym_v["pnl"].tolist(),
+            with r3c1:
+                _card("Évolution du R:R par trade", "Ratio risque/récompense dans le temps")
+                df_rr = df_s[df_s["rr"].notna()].copy()
+                if not df_rr.empty:
+                    rr_colors = [_win if r>=2 else _ora if r>=1 else _loss for r in df_rr["rr"]]
+                    fig_rr = go.Figure()
+                    # Ligne de tendance lissée
+                    # Axe X : datetime si disponible, sinon date
+                    if "datetime" in df_rr.columns and df_rr["datetime"].notna().any():
+                        _xrr = pd.to_datetime(df_rr["datetime"], errors="coerce")
+                        x_rr = _xrr.tolist() if _xrr.notna().sum() > 0 else df_rr["date"].tolist()
+                    else:
+                        x_rr = df_rr["date"].tolist()
+
+                    if len(df_rr) >= 3:
+                        rr_smooth = pd.Series(df_rr["rr"].values).rolling(
+                            window=min(5,len(df_rr)), min_periods=1).mean()
+                        fig_rr.add_trace(go.Scatter(
+                            x=x_rr, y=rr_smooth.tolist(),
+                            mode="lines", name="Tendance",
+                            line=dict(color=_alt, width=1.5, dash="dash"),
+                            hoverinfo="skip",
+                        ))
+                    # Points R:R
+                    fig_rr.add_trace(go.Scatter(
+                        x=x_rr, y=df_rr["rr"].tolist(),
+                        mode="markers",
+                        marker=dict(color=rr_colors, size=9,
+                                    line=dict(color=_bg, width=1.5)),
+                        hovertemplate="<b>%{x}</b><br>%{customdata[0]} %{customdata[1]}<br>R:R : %{y:.2f}<extra></extra>",
+                        customdata=list(zip(df_rr["symbol"].tolist(), df_rr["direction"].tolist())),
+                        name="R:R",
+                    ))
+                    # Repères sobres 1R / 2R (lignes fines, sans bandes de couleur)
+                    fig_rr.add_hline(y=1, line_dash="dot", line_color=_text, line_width=1,
+                        annotation_text="1R", annotation_font=dict(color=_text, size=10))
+                    fig_rr.add_hline(y=2, line_dash="dot", line_color=_text, line_width=1,
+                        annotation_text="2R", annotation_font=dict(color=_text, size=10))
+                    fig_rr.update_layout(**_base_layout(height=260, showlegend=False))
+                    _style_axes(fig_rr)
+                    fig_rr.update_yaxes(ticksuffix="R")
+                    st.plotly_chart(fig_rr, use_container_width=True, config=_chart_cfg)
+                    # Légende couleurs
+                    st.markdown(
+                        '<div style="display:flex;gap:20px;font-size:11px;color:var(--tj-muted);margin-top:-8px">'
+                        f'<span><span style="color:{_win}">●</span> R:R ≥ 2 (excellent)</span>'
+                        f'<span><span style="color:{_ora}">●</span> 1 ≤ R:R < 2 (correct)</span>'
+                        f'<span><span style="color:{_loss}">●</span> R:R < 1 (insuffisant)</span>'
+                        f'<span style="color:{_alt}">— Tendance</span>'
+                        '</div>', unsafe_allow_html=True)
+                else:
+                    st.info("Renseignez SL et TP lors de l'ajout de trades pour calculer le R:R.")
+
+            with r3c2:
+                _card("P&L en fonction du Volume", "Gain ou perte selon la taille de position")
+                df_vol = df[df["entry"].notna() & df["entry"].ne(0)].copy()
+                # Utiliser la colonne notes pour extraire le volume si disponible
+                # Sinon utiliser entry comme proxy
+                has_vol = False
+                if "notes" in df_vol.columns:
+                    vol_extracted = df_vol["notes"].str.extract(r"vol:([\d.]+)")
+                    if vol_extracted[0].notna().sum() > 0:
+                        df_vol["_vol"] = pd.to_numeric(vol_extracted[0], errors="coerce")
+                        df_vol = df_vol[df_vol["_vol"].notna()]
+                        has_vol = len(df_vol) > 0
+
+                if not has_vol:
+                    # Fallback : regrouper par actif et montrer P&L par symbole
+                    _card_note = "Données de volume non disponibles — affichage par actif"
+                    by_sym_v = df.groupby("symbol").agg(
+                        pnl=("pnl","sum"), trades=("pnl","count")).reset_index().sort_values("pnl")
+                    fig_vol = go.Figure(go.Bar(
+                        y=by_sym_v["symbol"].tolist(),
+                        x=by_sym_v["pnl"].tolist(),
+                        orientation="h",
+                        marker=dict(
+                            color=[_win if v>=0 else _loss for v in by_sym_v["pnl"]],
+                            opacity=0.85, line=dict(color=_bg, width=0.5)
+                        ),
+                        text=[f"{fmt(v)}" for v in by_sym_v["pnl"]],
+                        textposition="outside",
+                        textfont=dict(size=11, color=_text),
+                        hovertemplate="<b>%{y}</b><br>P&L : %{x:+,.2f}$<br>%{customdata} trades<extra></extra>",
+                        customdata=by_sym_v["trades"].tolist(),
+                    ))
+                    fig_vol.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
+                    fig_vol.update_layout(**_base_layout(height=260))
+                    _style_axes(fig_vol, xprefix="$")
+                    fig_vol.update_yaxes(categoryorder="total ascending")
+                    st.plotly_chart(fig_vol, use_container_width=True, config=_chart_cfg)
+                    st.caption("Volume non disponible dans les données — affichage P&L par actif. "
+                               "Le volume est extrait des notes lors de l'import MT5.")
+                else:
+                    # Scatter P&L vs Volume
+                    colors_v = [_win if p>0 else _loss for p in df_vol["pnl"]]
+                    sizes_v  = [max(8, min(30, abs(p)/max(1,abs(df_vol["pnl"]).max())*30))
+                                for p in df_vol["pnl"]]
+                    fig_vol = go.Figure(go.Scatter(
+                        x=df_vol["_vol"].tolist(), y=df_vol["pnl"].tolist(),
+                        mode="markers",
+                        marker=dict(color=colors_v, size=sizes_v, opacity=0.8,
+                                    line=dict(color=_bg, width=1.5)),
+                        hovertemplate="<b>%{customdata[0]}</b><br>Volume : %{x}<br>P&L : %{y:+,.2f}$<extra></extra>",
+                        customdata=list(zip(df_vol["symbol"].tolist(), df_vol["direction"].tolist())),
+                    ))
+                    # Ligne de tendance
+                    if len(df_vol) >= 3:
+                        import numpy as np
+                        try:
+                            z = np.polyfit(df_vol["_vol"], df_vol["pnl"], 1)
+                            p_fn = np.poly1d(z)
+                            x_range = [df_vol["_vol"].min(), df_vol["_vol"].max()]
+                            fig_vol.add_trace(go.Scatter(
+                                x=x_range, y=[p_fn(x) for x in x_range],
+                                mode="lines", line=dict(color=_alt, width=2, dash="dash"),
+                                name="Tendance", hoverinfo="skip",
+                            ))
+                        except: pass
+                    fig_vol.add_hline(y=0, line_dash="dot", line_color=_grid, line_width=1)
+                    fig_vol.update_layout(**_base_layout(height=260, showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=-0.15)))
+                    _style_axes(fig_vol, yprefix="$")
+                    fig_vol.update_xaxes(title_text="Volume (lots)")
+                    st.plotly_chart(fig_vol, use_container_width=True, config=_chart_cfg)
+
+        with tab_assets:
+            r4c1, r4c2 = st.columns(2)
+
+            with r4c1:
+                _card("Classement des Actifs", "Rentabilité décroissante")
+                by_sym = df.groupby("symbol").agg(
+                    pnl=("pnl","sum"), trades=("pnl","count"),
+                    wins=("pnl", lambda x: (x>0).sum()),
+                ).reset_index()
+                by_sym["win_rate"] = (by_sym["wins"]/by_sym["trades"]*100).round(1)
+                by_sym = by_sym.sort_values("pnl", ascending=True)
+                fig_sym = category_figure(
+                    by_sym["symbol"].tolist(), by_sym["pnl"].tolist(),
+                    [_win if v>=0 else _loss for v in by_sym["pnl"]], _theme, _cs,
+                    kind=_cs["ranking"], orientation="h",
+                    texts=[f"{fmt(v)}  ·  {wr}% win" for v,wr in zip(by_sym["pnl"],by_sym["win_rate"])],
+                    hovertemplate="<b>%{y}</b><br>P&L : %{x:+,.2f}$<br>%{customdata[0]} trades · %{customdata[1]}% win<extra></extra>",
+                    customdata=list(zip(by_sym["trades"].tolist(), by_sym["win_rate"].tolist())))
+                fig_sym.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
+                fig_sym.update_layout(**_base_layout(height=max(280,len(by_sym)*48)))
+                _style_axes(fig_sym, xprefix="$")
+                st.plotly_chart(fig_sym, use_container_width=True, config=_chart_cfg)
+
+            with r4c2:
+                _card("P&L par Stratégie")
+                by_strat = df.groupby("strategy").agg(
+                    pnl=("pnl","sum"), trades=("pnl","count"),
+                    wins=("pnl", lambda x: (x>0).sum()),
+                ).reset_index()
+                by_strat["win_rate"] = (by_strat["wins"]/by_strat["trades"]*100).round(1)
+                by_strat = by_strat.sort_values("pnl", ascending=True)
+                _strat_pal = [_theme["accent"], _theme["alt"], _theme["orange"], _theme["win"],
+                              _theme["loss"]] + CHART_COLORS
+                fig_st = category_figure(
+                    by_strat["strategy"].tolist(), by_strat["pnl"].tolist(),
+                    [_strat_pal[i % len(_strat_pal)] for i in range(len(by_strat))], _theme, _cs,
+                    kind=_cs["ranking"], orientation="h",
+                    texts=[f"{fmt(v)}  ·  {wr}% win" for v,wr in zip(by_strat["pnl"],by_strat["win_rate"])],
+                    hovertemplate="<b>%{y}</b>: %{x:+,.2f}$<br>%{customdata[0]} trades · %{customdata[1]}% win<extra></extra>",
+                    customdata=list(zip(by_strat["trades"].tolist(), by_strat["win_rate"].tolist())))
+                fig_st.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
+                fig_st.update_layout(**_base_layout(height=max(280,len(by_strat)*48)))
+                _style_axes(fig_st, xprefix="$")
+                st.plotly_chart(fig_st, use_container_width=True, config=_chart_cfg)
+
+        with tab_psy:
+            r5c1, r5c2 = st.columns([3,2])
+
+            with r5c1:
+                _card("Heatmap Rentabilité", "Actif × Émotion")
+                if len(df["symbol"].unique()) >= 1 and len(df["mood"].unique()) >= 1:
+                    pivot = df.pivot_table(values="pnl", index="mood", columns="symbol",
+                                           aggfunc="sum", fill_value=0)
+                    mood_order = [m for m in ["Euphorique","Confiant","Neutre","Anxieux","Peureux","Frustré"]
+                                  if m in pivot.index]
+                    pivot = pivot.reindex(mood_order)
+                    fig_hm = go.Figure(go.Heatmap(
+                        z=pivot.values.tolist(),
+                        x=pivot.columns.tolist(),
+                        y=pivot.index.tolist(),
+                        colorscale=diverging_scale(_theme),
+                        zmid=0,
+                        text=[[f"${v:+,.0f}" for v in row] for row in pivot.values],
+                        texttemplate="%{text}",
+                        textfont=dict(size=12, color=_theme["text"], family=_cs["font"]),
+                        xgap=3 if _cs["corner"] else 1, ygap=3 if _cs["corner"] else 1,
+                        hovertemplate="<b>%{y} · %{x}</b><br>P&L : %{z:+,.2f}$<extra></extra>",
+                        showscale=True,
+                        colorbar=dict(tickprefix="$", tickfont=dict(color=_text, size=11),
+                                      bgcolor=_bg, bordercolor=_grid, thickness=12),
+                    ))
+                    fig_hm.update_layout(**_base_layout(
+                        height=max(280, len(pivot)*60),
+                        margin=dict(l=100, r=60, t=20, b=60)))
+                    fig_hm.update_xaxes(side="bottom", tickangle=-30,
+                                        gridcolor=_grid, linecolor=_grid)
+                    fig_hm.update_yaxes(gridcolor=_grid, linecolor=_grid)
+                    st.plotly_chart(fig_hm, use_container_width=True, config=_chart_cfg)
+                else:
+                    st.info("Pas assez de données pour la heatmap.")
+
+            with r5c2:
+                _card("P&L par Émotion")
+                by_mood = df.groupby("mood").agg(
+                    pnl=("pnl","sum"), trades=("pnl","count"),
+                    wins=("pnl", lambda x: (x>0).sum()),
+                ).reset_index()
+                by_mood["win_rate"] = (by_mood["wins"]/by_mood["trades"]*100).round(1)
+                by_mood["label"]    = by_mood["mood"]
+                by_mood = by_mood.sort_values("pnl", ascending=True)
+                fig_mood = go.Figure(go.Bar(
+                    y=by_mood["label"].tolist(), x=by_mood["pnl"].tolist(),
                     orientation="h",
                     marker=dict(
-                        color=[_win if v>=0 else _loss for v in by_sym_v["pnl"]],
-                        opacity=0.85, line=dict(color=_bg, width=0.5)
+                        color=[_win if v>=0 else _loss for v in by_mood["pnl"]],
+                        opacity=_cs["bar_opacity"], line=dict(color=_bg, width=0.5)
                     ),
-                    text=[f"{fmt(v)}" for v in by_sym_v["pnl"]],
-                    textposition="outside",
-                    textfont=dict(size=11, color=_text),
-                    hovertemplate="<b>%{y}</b><br>P&L : %{x:+,.2f}$<br>%{customdata} trades<extra></extra>",
-                    customdata=by_sym_v["trades"].tolist(),
+                    text=[f"{fmt(v)}  ·  {wr}% win  ·  {n}t"
+                          for v,wr,n in zip(by_mood["pnl"],by_mood["win_rate"],by_mood["trades"])],
+                    textposition="outside", textfont=dict(size=11, color=_text),
+                    hovertemplate="<b>%{y}</b><br>P&L : %{x:+,.2f}$<br>%{customdata[0]} trades · %{customdata[1]}% win<extra></extra>",
+                    customdata=list(zip(by_mood["trades"].tolist(), by_mood["win_rate"].tolist())),
                 ))
-                fig_vol.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
-                fig_vol.update_layout(**_base_layout(height=260))
-                _style_axes(fig_vol, xprefix="$")
-                fig_vol.update_yaxes(categoryorder="total ascending")
-                st.plotly_chart(fig_vol, use_container_width=True, config=_chart_cfg)
-                st.caption("Volume non disponible dans les données — affichage P&L par actif. "
-                           "Le volume est extrait des notes lors de l'import MT5.")
+                fig_mood.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
+                fig_mood.update_layout(**_base_layout(height=max(280,len(by_mood)*60)))
+                _style_axes(fig_mood, xprefix="$")
+                st.plotly_chart(fig_mood, use_container_width=True, config=_chart_cfg)
+
+        with tab_cal:
+
+            df_cal_stats = df.copy()
+            if "datetime" in df_cal_stats.columns:
+                df_cal_stats["_dtp"] = pd.to_datetime(df_cal_stats["datetime"], errors="coerce")
             else:
-                # Scatter P&L vs Volume
-                colors_v = [_win if p>0 else _loss for p in df_vol["pnl"]]
-                sizes_v  = [max(8, min(30, abs(p)/max(1,abs(df_vol["pnl"]).max())*30))
-                            for p in df_vol["pnl"]]
-                fig_vol = go.Figure(go.Scatter(
-                    x=df_vol["_vol"].tolist(), y=df_vol["pnl"].tolist(),
-                    mode="markers",
-                    marker=dict(color=colors_v, size=sizes_v, opacity=0.8,
-                                line=dict(color=_bg, width=1.5)),
-                    hovertemplate="<b>%{customdata[0]}</b><br>Volume : %{x}<br>P&L : %{y:+,.2f}$<extra></extra>",
-                    customdata=list(zip(df_vol["symbol"].tolist(), df_vol["direction"].tolist())),
-                ))
-                # Ligne de tendance
-                if len(df_vol) >= 3:
-                    import numpy as np
-                    try:
-                        z = np.polyfit(df_vol["_vol"], df_vol["pnl"], 1)
-                        p_fn = np.poly1d(z)
-                        x_range = [df_vol["_vol"].min(), df_vol["_vol"].max()]
-                        fig_vol.add_trace(go.Scatter(
-                            x=x_range, y=[p_fn(x) for x in x_range],
-                            mode="lines", line=dict(color=_alt, width=2, dash="dash"),
-                            name="Tendance", hoverinfo="skip",
-                        ))
-                    except: pass
-                fig_vol.add_hline(y=0, line_dash="dot", line_color=_grid, line_width=1)
-                fig_vol.update_layout(**_base_layout(height=260, showlegend=True,
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.15)))
-                _style_axes(fig_vol, yprefix="$")
-                fig_vol.update_xaxes(title_text="Volume (lots)")
-                st.plotly_chart(fig_vol, use_container_width=True, config=_chart_cfg)
+                df_cal_stats["_dtp"] = pd.NaT
 
-        # ════════════════════════════════════════════════════════════════════
-        # ROW 4 : Classement actifs + Stratégies
-        # ════════════════════════════════════════════════════════════════════
-        st.markdown("### Analyse par Actif & Stratégie")
-        r4c1, r4c2 = st.columns(2)
+            _jours_fr = {"Monday":"Lundi","Tuesday":"Mardi","Wednesday":"Mercredi",
+                        "Thursday":"Jeudi","Friday":"Vendredi","Saturday":"Samedi","Sunday":"Dimanche"}
+            _jours_ordre = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
+            df_cal_stats["_weekday"] = pd.to_datetime(df_cal_stats["date"]).dt.day_name().map(_jours_fr)
 
-        with r4c1:
-            _card("Classement des Actifs", "Rentabilité décroissante")
-            by_sym = df.groupby("symbol").agg(
-                pnl=("pnl","sum"), trades=("pnl","count"),
-                wins=("pnl", lambda x: (x>0).sum()),
-            ).reset_index()
-            by_sym["win_rate"] = (by_sym["wins"]/by_sym["trades"]*100).round(1)
-            by_sym = by_sym.sort_values("pnl", ascending=True)
-            fig_sym = category_figure(
-                by_sym["symbol"].tolist(), by_sym["pnl"].tolist(),
-                [_win if v>=0 else _loss for v in by_sym["pnl"]], _theme, _cs,
-                kind=_cs["ranking"], orientation="h",
-                texts=[f"{fmt(v)}  ·  {wr}% win" for v,wr in zip(by_sym["pnl"],by_sym["win_rate"])],
-                hovertemplate="<b>%{y}</b><br>P&L : %{x:+,.2f}$<br>%{customdata[0]} trades · %{customdata[1]}% win<extra></extra>",
-                customdata=list(zip(by_sym["trades"].tolist(), by_sym["win_rate"].tolist())))
-            fig_sym.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
-            fig_sym.update_layout(**_base_layout(height=max(280,len(by_sym)*48)))
-            _style_axes(fig_sym, xprefix="$")
-            st.plotly_chart(fig_sym, use_container_width=True, config=_chart_cfg)
+            # ── FILTRES SPÉCIFIQUES AUX GRAPHIQUES CALENDAIRES ───────────────────
+            kc1, kc2, kc3 = st.columns([1.4, 2.2, 2])
+            with kc1:
+                cal_metric = st.selectbox(
+                    "Métrique", ["P&L net", "Nombre de trades", "Win rate %", "R:R moyen"],
+                    key="cal_metric")
+            with kc2:
+                cal_days = st.multiselect(
+                    "Jours de semaine", _jours_ordre, default=_jours_ordre,
+                    key="cal_days_filter")
+            with kc3:
+                cal_hours = st.slider("Plage horaire", 0, 23, (0, 23), key="cal_hours_filter")
 
-        with r4c2:
-            _card("P&L par Stratégie")
-            by_strat = df.groupby("strategy").agg(
-                pnl=("pnl","sum"), trades=("pnl","count"),
-                wins=("pnl", lambda x: (x>0).sum()),
-            ).reset_index()
-            by_strat["win_rate"] = (by_strat["wins"]/by_strat["trades"]*100).round(1)
-            by_strat = by_strat.sort_values("pnl", ascending=True)
-            _strat_pal = [_theme["accent"], _theme["alt"], _theme["orange"], _theme["win"],
-                          _theme["loss"]] + CHART_COLORS
-            fig_st = category_figure(
-                by_strat["strategy"].tolist(), by_strat["pnl"].tolist(),
-                [_strat_pal[i % len(_strat_pal)] for i in range(len(by_strat))], _theme, _cs,
-                kind=_cs["ranking"], orientation="h",
-                texts=[f"{fmt(v)}  ·  {wr}% win" for v,wr in zip(by_strat["pnl"],by_strat["win_rate"])],
-                hovertemplate="<b>%{y}</b>: %{x:+,.2f}$<br>%{customdata[0]} trades · %{customdata[1]}% win<extra></extra>",
-                customdata=list(zip(by_strat["trades"].tolist(), by_strat["win_rate"].tolist())))
-            fig_st.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
-            fig_st.update_layout(**_base_layout(height=max(280,len(by_strat)*48)))
-            _style_axes(fig_st, xprefix="$")
-            st.plotly_chart(fig_st, use_container_width=True, config=_chart_cfg)
+            # Application des filtres calendaires
+            if cal_days:
+                df_cal_stats = df_cal_stats[df_cal_stats["_weekday"].isin(cal_days)]
+            _h_series = df_cal_stats["_dtp"].dt.hour
+            _hour_mask = _h_series.between(cal_hours[0], cal_hours[1]) | _h_series.isna()
+            df_cal_stats = df_cal_stats[_hour_mask]
 
-        # ════════════════════════════════════════════════════════════════════
-        # ROW 5 : Heatmap + P&L par émotion
-        # ════════════════════════════════════════════════════════════════════
-        st.markdown("### Psychologie de Trading")
-        r5c1, r5c2 = st.columns([3,2])
+            _has_hours = df_cal_stats["_dtp"].notna().any()
+            _days_shown = [d for d in _jours_ordre if d in (cal_days or _jours_ordre)]
 
-        with r5c1:
-            _card("Heatmap Rentabilité", "Actif × Émotion")
-            if len(df["symbol"].unique()) >= 1 and len(df["mood"].unique()) >= 1:
-                pivot = df.pivot_table(values="pnl", index="mood", columns="symbol",
-                                       aggfunc="sum", fill_value=0)
-                mood_order = [m for m in ["Euphorique","Confiant","Neutre","Anxieux","Peureux","Frustré"]
-                              if m in pivot.index]
-                pivot = pivot.reindex(mood_order)
-                fig_hm = go.Figure(go.Heatmap(
-                    z=pivot.values.tolist(),
-                    x=pivot.columns.tolist(),
-                    y=pivot.index.tolist(),
-                    colorscale=diverging_scale(_theme),
-                    zmid=0,
-                    text=[[f"${v:+,.0f}" for v in row] for row in pivot.values],
-                    texttemplate="%{text}",
-                    textfont=dict(size=12, color=_theme["text"], family=_cs["font"]),
-                    xgap=3 if _cs["corner"] else 1, ygap=3 if _cs["corner"] else 1,
-                    hovertemplate="<b>%{y} · %{x}</b><br>P&L : %{z:+,.2f}$<extra></extra>",
-                    showscale=True,
-                    colorbar=dict(tickprefix="$", tickfont=dict(color=_text, size=11),
-                                  bgcolor=_bg, bordercolor=_grid, thickness=12),
-                ))
-                fig_hm.update_layout(**_base_layout(
-                    height=max(280, len(pivot)*60),
-                    margin=dict(l=100, r=60, t=20, b=60)))
-                fig_hm.update_xaxes(side="bottom", tickangle=-30,
-                                    gridcolor=_grid, linecolor=_grid)
-                fig_hm.update_yaxes(gridcolor=_grid, linecolor=_grid)
-                st.plotly_chart(fig_hm, use_container_width=True, config=_chart_cfg)
+            if df_cal_stats.empty:
+                st.info("Aucun trade ne correspond à ces filtres calendaires.")
             else:
-                st.info("Pas assez de données pour la heatmap.")
+                # ── Agrégation selon la métrique choisie ─────────────────────────
+                def _agg_metric(grouped):
+                    """Retourne (Series valeurs, Series nb trades, suffixe, préfixe axe)."""
+                    n = grouped["pnl"].count()
+                    if cal_metric == "P&L net":
+                        return grouped["pnl"].sum(), n, "$", "$"
+                    if cal_metric == "Nombre de trades":
+                        return n.astype(float), n, "", ""
+                    if cal_metric == "Win rate %":
+                        return grouped["pnl"].apply(
+                            lambda s: (s > 0).sum()/len(s)*100 if len(s) else 0), n, "%", ""
+                    # R:R moyen
+                    return grouped["rr"].mean().fillna(0), n, "R", ""
 
-        with r5c2:
-            _card("P&L par Émotion")
-            by_mood = df.groupby("mood").agg(
-                pnl=("pnl","sum"), trades=("pnl","count"),
-                wins=("pnl", lambda x: (x>0).sum()),
-            ).reset_index()
-            by_mood["win_rate"] = (by_mood["wins"]/by_mood["trades"]*100).round(1)
-            by_mood["label"]    = by_mood["mood"]
-            by_mood = by_mood.sort_values("pnl", ascending=True)
-            fig_mood = go.Figure(go.Bar(
-                y=by_mood["label"].tolist(), x=by_mood["pnl"].tolist(),
-                orientation="h",
-                marker=dict(
-                    color=[_win if v>=0 else _loss for v in by_mood["pnl"]],
-                    opacity=_cs["bar_opacity"], line=dict(color=_bg, width=0.5)
-                ),
-                text=[f"{fmt(v)}  ·  {wr}% win  ·  {n}t"
-                      for v,wr,n in zip(by_mood["pnl"],by_mood["win_rate"],by_mood["trades"])],
-                textposition="outside", textfont=dict(size=11, color=_text),
-                hovertemplate="<b>%{y}</b><br>P&L : %{x:+,.2f}$<br>%{customdata[0]} trades · %{customdata[1]}% win<extra></extra>",
-                customdata=list(zip(by_mood["trades"].tolist(), by_mood["win_rate"].tolist())),
-            ))
-            fig_mood.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
-            fig_mood.update_layout(**_base_layout(height=max(280,len(by_mood)*60)))
-            _style_axes(fig_mood, xprefix="$")
-            st.plotly_chart(fig_mood, use_container_width=True, config=_chart_cfg)
+                _neutral = cal_metric in ("Nombre de trades",)
+                def _bar_colors(vals):
+                    if _neutral:
+                        return ["#7c6aff"] * len(vals)
+                    if cal_metric == "Win rate %":
+                        return ["#00d4aa" if v >= 50 else "#ff4d6d" for v in vals]
+                    if cal_metric == "R:R moyen":
+                        return ["#00d4aa" if v >= 1 else "#ff4d6d" for v in vals]
+                    return ["#00d4aa" if v >= 0 else "#ff4d6d" for v in vals]
 
-        # ════════════════════════════════════════════════════════════════════
-        # STATISTIQUES CALENDAIRES — jour de semaine, heure, heatmap
-        # (héritent des filtres actif/émotion/stratégie/dates du dashboard)
-        # ════════════════════════════════════════════════════════════════════
-        st.markdown("### Statistiques calendaires")
+                cs1, cs2 = st.columns(2)
 
-        df_cal_stats = df.copy()
-        if "datetime" in df_cal_stats.columns:
-            df_cal_stats["_dtp"] = pd.to_datetime(df_cal_stats["datetime"], errors="coerce")
-        else:
-            df_cal_stats["_dtp"] = pd.NaT
-
-        _jours_fr = {"Monday":"Lundi","Tuesday":"Mardi","Wednesday":"Mercredi",
-                    "Thursday":"Jeudi","Friday":"Vendredi","Saturday":"Samedi","Sunday":"Dimanche"}
-        _jours_ordre = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
-        df_cal_stats["_weekday"] = pd.to_datetime(df_cal_stats["date"]).dt.day_name().map(_jours_fr)
-
-        # ── FILTRES SPÉCIFIQUES AUX GRAPHIQUES CALENDAIRES ───────────────────
-        st.markdown('<div style="background:#111520;border:1px solid #1e2535;'
-                    'border-radius:14px;padding:14px 18px;margin:8px 0 16px">',
-                    unsafe_allow_html=True)
-        kc1, kc2, kc3 = st.columns([1.4, 2.2, 2])
-        with kc1:
-            cal_metric = st.selectbox(
-                "Métrique", ["P&L net", "Nombre de trades", "Win rate %", "R:R moyen"],
-                key="cal_metric")
-        with kc2:
-            cal_days = st.multiselect(
-                "Jours de semaine", _jours_ordre, default=_jours_ordre,
-                key="cal_days_filter")
-        with kc3:
-            cal_hours = st.slider("Plage horaire", 0, 23, (0, 23), key="cal_hours_filter")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # Application des filtres calendaires
-        if cal_days:
-            df_cal_stats = df_cal_stats[df_cal_stats["_weekday"].isin(cal_days)]
-        _h_series = df_cal_stats["_dtp"].dt.hour
-        _hour_mask = _h_series.between(cal_hours[0], cal_hours[1]) | _h_series.isna()
-        df_cal_stats = df_cal_stats[_hour_mask]
-
-        _has_hours = df_cal_stats["_dtp"].notna().any()
-        _days_shown = [d for d in _jours_ordre if d in (cal_days or _jours_ordre)]
-
-        if df_cal_stats.empty:
-            st.info("Aucun trade ne correspond à ces filtres calendaires.")
-        else:
-            # ── Agrégation selon la métrique choisie ─────────────────────────
-            def _agg_metric(grouped):
-                """Retourne (Series valeurs, Series nb trades, suffixe, préfixe axe)."""
-                n = grouped["pnl"].count()
-                if cal_metric == "P&L net":
-                    return grouped["pnl"].sum(), n, "$", "$"
-                if cal_metric == "Nombre de trades":
-                    return n.astype(float), n, "", ""
-                if cal_metric == "Win rate %":
-                    return grouped["pnl"].apply(
-                        lambda s: (s > 0).sum()/len(s)*100 if len(s) else 0), n, "%", ""
-                # R:R moyen
-                return grouped["rr"].mean().fillna(0), n, "R", ""
-
-            _neutral = cal_metric in ("Nombre de trades",)
-            def _bar_colors(vals):
-                if _neutral:
-                    return ["#7c6aff"] * len(vals)
-                if cal_metric == "Win rate %":
-                    return ["#00d4aa" if v >= 50 else "#ff4d6d" for v in vals]
-                if cal_metric == "R:R moyen":
-                    return ["#00d4aa" if v >= 1 else "#ff4d6d" for v in vals]
-                return ["#00d4aa" if v >= 0 else "#ff4d6d" for v in vals]
-
-            cs1, cs2 = st.columns(2)
-
-            with cs1:
-                _card(f"{cal_metric} par jour de semaine")
-                g_wd = df_cal_stats.groupby("_weekday")
-                vals_wd, n_wd, suffix, yprefix = _agg_metric(g_wd)
-                vals_wd = vals_wd.reindex(_days_shown, fill_value=0)
-                n_wd    = n_wd.reindex(_days_shown, fill_value=0)
-                fig_wd = go.Figure(go.Bar(
-                    x=vals_wd.index.tolist(), y=vals_wd.tolist(),
-                    marker_color=_bar_colors(vals_wd), marker_opacity=_cs["bar_opacity"],
-                    customdata=n_wd.tolist(),
-                    hovertemplate="<b>%{x}</b><br>" + cal_metric +
-                                 " : %{y:,.2f}" + suffix +
-                                 "<br>%{customdata} trades<extra></extra>",
-                ))
-                if not _neutral:
-                    fig_wd.add_hline(y=0, line_color=_grid, line_width=1)
-                fig_wd.update_layout(**_base_layout(height=260))
-                _style_axes(fig_wd, yprefix=yprefix)
-                st.plotly_chart(fig_wd, use_container_width=True, config=_chart_cfg)
-
-            with cs2:
-                _card(f"{cal_metric} par heure de la journée")
-                if _has_hours:
-                    _df_hr = df_cal_stats[df_cal_stats["_dtp"].notna()].copy()
-                    _df_hr["_hour"] = _df_hr["_dtp"].dt.hour.astype(int)
-                    _hrange = list(range(cal_hours[0], cal_hours[1] + 1))
-                    g_hr = _df_hr.groupby("_hour")
-                    vals_hr, n_hr, suffix, yprefix = _agg_metric(g_hr)
-                    vals_hr = vals_hr.reindex(_hrange, fill_value=0)
-                    n_hr    = n_hr.reindex(_hrange, fill_value=0)
-                    fig_hrd = go.Figure(go.Bar(
-                        x=[f"{int(h):02d}h" for h in vals_hr.index],
-                        y=vals_hr.tolist(),
-                        marker_color=_bar_colors(vals_hr), marker_opacity=_cs["bar_opacity"],
-                        customdata=n_hr.tolist(),
+                with cs1:
+                    _card(f"{cal_metric} par jour de semaine")
+                    g_wd = df_cal_stats.groupby("_weekday")
+                    vals_wd, n_wd, suffix, yprefix = _agg_metric(g_wd)
+                    vals_wd = vals_wd.reindex(_days_shown, fill_value=0)
+                    n_wd    = n_wd.reindex(_days_shown, fill_value=0)
+                    fig_wd = go.Figure(go.Bar(
+                        x=vals_wd.index.tolist(), y=vals_wd.tolist(),
+                        marker_color=_bar_colors(vals_wd), marker_opacity=_cs["bar_opacity"],
+                        customdata=n_wd.tolist(),
                         hovertemplate="<b>%{x}</b><br>" + cal_metric +
                                      " : %{y:,.2f}" + suffix +
                                      "<br>%{customdata} trades<extra></extra>",
                     ))
                     if not _neutral:
-                        fig_hrd.add_hline(y=0, line_color=_grid, line_width=1)
-                    fig_hrd.update_layout(**_base_layout(height=260))
-                    _style_axes(fig_hrd, yprefix=yprefix)
-                    st.plotly_chart(fig_hrd, use_container_width=True, config=_chart_cfg)
-                else:
-                    st.info("Aucune heure enregistrée sur la période filtrée.")
+                        fig_wd.add_hline(y=0, line_color=_grid, line_width=1)
+                    fig_wd.update_layout(**_base_layout(height=260))
+                    _style_axes(fig_wd, yprefix=yprefix)
+                    st.plotly_chart(fig_wd, use_container_width=True, config=_chart_cfg)
 
-            # ── Heatmap Jour × Heure ─────────────────────────────────────────
-            if _has_hours:
-                _card(f"Heatmap Jour de semaine × Heure", cal_metric)
-                _df_hm = df_cal_stats[df_cal_stats["_dtp"].notna()].copy()
-                _df_hm["_hour2"] = _df_hm["_dtp"].dt.hour.astype(int)
-                if cal_metric == "P&L net":
-                    _aggf = "sum"; _vcol = "pnl"
-                elif cal_metric == "Nombre de trades":
-                    _aggf = "count"; _vcol = "pnl"
-                elif cal_metric == "Win rate %":
-                    _df_hm["_is_win"] = (_df_hm["pnl"] > 0).astype(float) * 100
-                    _aggf = "mean"; _vcol = "_is_win"
-                else:
-                    _aggf = "mean"; _vcol = "rr"
-                pivot_wh = _df_hm.pivot_table(
-                    index="_weekday", columns="_hour2", values=_vcol,
-                    aggfunc=_aggf, fill_value=0).reindex(_days_shown, fill_value=0)
-                if not pivot_wh.empty and pivot_wh.shape[1] > 0:
-                    _vals = pivot_wh.values.astype(float)
-                    if _neutral:
-                        _cscale = sequential_scale(_theme, _cs)
-                        _zmid, _zmin, _zmax = None, None, None
-                    elif cal_metric == "Win rate %":
-                        _cscale = diverging_scale(_theme)
-                        _zmid, _zmin, _zmax = 50, 0, 100
+                with cs2:
+                    _card(f"{cal_metric} par heure de la journée")
+                    if _has_hours:
+                        _df_hr = df_cal_stats[df_cal_stats["_dtp"].notna()].copy()
+                        _df_hr["_hour"] = _df_hr["_dtp"].dt.hour.astype(int)
+                        _hrange = list(range(cal_hours[0], cal_hours[1] + 1))
+                        g_hr = _df_hr.groupby("_hour")
+                        vals_hr, n_hr, suffix, yprefix = _agg_metric(g_hr)
+                        vals_hr = vals_hr.reindex(_hrange, fill_value=0)
+                        n_hr    = n_hr.reindex(_hrange, fill_value=0)
+                        fig_hrd = go.Figure(go.Bar(
+                            x=[f"{int(h):02d}h" for h in vals_hr.index],
+                            y=vals_hr.tolist(),
+                            marker_color=_bar_colors(vals_hr), marker_opacity=_cs["bar_opacity"],
+                            customdata=n_hr.tolist(),
+                            hovertemplate="<b>%{x}</b><br>" + cal_metric +
+                                         " : %{y:,.2f}" + suffix +
+                                         "<br>%{customdata} trades<extra></extra>",
+                        ))
+                        if not _neutral:
+                            fig_hrd.add_hline(y=0, line_color=_grid, line_width=1)
+                        fig_hrd.update_layout(**_base_layout(height=260))
+                        _style_axes(fig_hrd, yprefix=yprefix)
+                        st.plotly_chart(fig_hrd, use_container_width=True, config=_chart_cfg)
                     else:
-                        _m = max(abs(np.nanmin(_vals)), abs(np.nanmax(_vals)), 1)
-                        _cscale = diverging_scale(_theme)
-                        _zmid, _zmin, _zmax = (1 if cal_metric=="R:R moyen" else 0), -_m if cal_metric!="R:R moyen" else 0, _m
-                    _hm_kwargs = dict(
-                        z=_vals,
-                        x=[f"{int(h):02d}h" for h in pivot_wh.columns],
-                        y=pivot_wh.index.tolist(),
-                        colorscale=_cscale,
-                        xgap=3 if _cs["corner"] else 1, ygap=3 if _cs["corner"] else 1,
-                        hovertemplate="<b>%{y} · %{x}</b><br>" + cal_metric +
-                                     " : %{z:,.2f}" + suffix + "<extra></extra>",
-                        showscale=True,
-                        colorbar=dict(tickfont=dict(color=_text, size=10), thickness=10),
-                    )
-                    if _zmid is not None:
-                        _hm_kwargs.update(zmid=_zmid, zmin=_zmin, zmax=_zmax)
-                    fig_hm = go.Figure(go.Heatmap(**_hm_kwargs))
-                    fig_hm.update_layout(**_base_layout(height=280))
-                    fig_hm.update_xaxes(gridcolor=_grid, linecolor=_grid)
-                    fig_hm.update_yaxes(gridcolor=_grid, linecolor=_grid)
-                    st.plotly_chart(fig_hm, use_container_width=True, config=_chart_cfg)
-                else:
-                    st.info("Pas assez de données horaires pour la heatmap.")
-        st.markdown(" ")
+                        st.info("Aucune heure enregistrée sur la période filtrée.")
 
-        # ════════════════════════════════════════════════════════════════════
-        # ROW 6 : Derniers trades
-        # ════════════════════════════════════════════════════════════════════
-        st.markdown("### Derniers Trades")
-        recent = df.sort_values("date", ascending=False).head(8)
-        rows_html = ""
-        for _, t in recent.iterrows():
-            c  = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
-            dc = "b-win" if t["direction"]=="LONG" else "b-loss"
-            _tm = t.get("trade_mode","Réel Indépendant")
+                # ── Heatmap Jour × Heure ─────────────────────────────────────────
+                if _has_hours:
+                    _card(f"Heatmap Jour de semaine × Heure", cal_metric)
+                    _df_hm = df_cal_stats[df_cal_stats["_dtp"].notna()].copy()
+                    _df_hm["_hour2"] = _df_hm["_dtp"].dt.hour.astype(int)
+                    if cal_metric == "P&L net":
+                        _aggf = "sum"; _vcol = "pnl"
+                    elif cal_metric == "Nombre de trades":
+                        _aggf = "count"; _vcol = "pnl"
+                    elif cal_metric == "Win rate %":
+                        _df_hm["_is_win"] = (_df_hm["pnl"] > 0).astype(float) * 100
+                        _aggf = "mean"; _vcol = "_is_win"
+                    else:
+                        _aggf = "mean"; _vcol = "rr"
+                    pivot_wh = _df_hm.pivot_table(
+                        index="_weekday", columns="_hour2", values=_vcol,
+                        aggfunc=_aggf, fill_value=0).reindex(_days_shown, fill_value=0)
+                    if not pivot_wh.empty and pivot_wh.shape[1] > 0:
+                        _vals = pivot_wh.values.astype(float)
+                        if _neutral:
+                            _cscale = sequential_scale(_theme, _cs)
+                            _zmid, _zmin, _zmax = None, None, None
+                        elif cal_metric == "Win rate %":
+                            _cscale = diverging_scale(_theme)
+                            _zmid, _zmin, _zmax = 50, 0, 100
+                        else:
+                            _m = max(abs(np.nanmin(_vals)), abs(np.nanmax(_vals)), 1)
+                            _cscale = diverging_scale(_theme)
+                            _zmid, _zmin, _zmax = (1 if cal_metric=="R:R moyen" else 0), -_m if cal_metric!="R:R moyen" else 0, _m
+                        _hm_kwargs = dict(
+                            z=_vals,
+                            x=[f"{int(h):02d}h" for h in pivot_wh.columns],
+                            y=pivot_wh.index.tolist(),
+                            colorscale=_cscale,
+                            xgap=3 if _cs["corner"] else 1, ygap=3 if _cs["corner"] else 1,
+                            hovertemplate="<b>%{y} · %{x}</b><br>" + cal_metric +
+                                         " : %{z:,.2f}" + suffix + "<extra></extra>",
+                            showscale=True,
+                            colorbar=dict(tickfont=dict(color=_text, size=10), thickness=10),
+                        )
+                        if _zmid is not None:
+                            _hm_kwargs.update(zmid=_zmid, zmin=_zmin, zmax=_zmax)
+                        fig_hm = go.Figure(go.Heatmap(**_hm_kwargs))
+                        fig_hm.update_layout(**_base_layout(height=280))
+                        fig_hm.update_xaxes(gridcolor=_grid, linecolor=_grid)
+                        fig_hm.update_yaxes(gridcolor=_grid, linecolor=_grid)
+                        st.plotly_chart(fig_hm, use_container_width=True, config=_chart_cfg)
+                    else:
+                        st.info("Pas assez de données horaires pour la heatmap.")
+            st.markdown(" ")
 
-            rows_html += f"""<tr>
-                <td style="color:#6b7894;font-family:monospace">{t["date"]}</td>
-                <td>{badge(t["symbol"],"b-sym")}</td>
-                <td>{badge(t["direction"],dc)}</td>
-                <td>{mode_badge(t.get("trade_mode","Réel Indépendant"))}</td>
-                <td style="font-size:15px;text-align:center">{mood_html(t["mood"])}</td>
-                <td>{badge(t["strategy"],"b-str")}</td>
-                <td style="font-family:monospace;font-weight:800;color:{c}">{fmt(t["pnl"])}</td>
-                <td style="color:#6b7894;font-size:12px">{str(t.get("notes",""))[:40]}</td>
-            </tr>"""
-        st.markdown(f"""<table class="tj-table"><thead><tr>
-            <th>Date</th><th>Actif</th><th>Dir.</th><th>Mode</th>
-            <th>Mood</th><th>Stratégie</th><th>P&L $</th><th>Notes</th>
-        </tr></thead><tbody>{rows_html}</tbody></table>""", unsafe_allow_html=True)
+        with tab_last:
+            recent = df.sort_values("date", ascending=False).head(8)
+            rows_html = ""
+            for _, t in recent.iterrows():
+                c  = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
+                dc = "b-win" if t["direction"]=="LONG" else "b-loss"
+                _tm = t.get("trade_mode","Réel Indépendant")
+
+                rows_html += f"""<tr>
+                    <td style="color:var(--tj-muted);font-family:monospace">{t["date"]}</td>
+                    <td>{badge(t["symbol"],"b-sym")}</td>
+                    <td>{badge(t["direction"],dc)}</td>
+                    <td>{mode_badge(t.get("trade_mode","Réel Indépendant"))}</td>
+                    <td style="font-size:15px;text-align:center">{mood_html(t["mood"])}</td>
+                    <td>{badge(t["strategy"],"b-str")}</td>
+                    <td style="font-family:monospace;font-weight:800;color:{c}">{fmt(t["pnl"])}</td>
+                    <td style="color:var(--tj-muted);font-size:12px">{str(t.get("notes",""))[:40]}</td>
+                </tr>"""
+            st.markdown(f"""<table class="tj-table"><thead><tr>
+                <th>Date</th><th>Actif</th><th>Dir.</th><th>Mode</th>
+                <th>Mood</th><th>Stratégie</th><th>P&L $</th><th>Notes</th>
+            </tr></thead><tbody>{rows_html}</tbody></table>""", unsafe_allow_html=True)
+
+
 
 
 
@@ -1987,15 +1990,15 @@ elif st.session_state.page == "journal":
                     pnl_s = sel_trade.get("pnl", 0)
                     col_s = "#00d4aa" if pnl_s >= 0 else "#ff4d6d"
                     st.markdown(
-                        f'''<div style="background:#0d111d;border:1px solid #1e2535;
+                        f'''<div style="background:var(--tj-bg2);border:1px solid var(--tj-border);
                             border-radius:10px;padding:10px 16px;margin:6px 0;
                             display:flex;gap:20px;align-items:center;flex-wrap:wrap">
-                            <span style="color:#6b7894;font-family:monospace">{sel_trade.get("date","")}</span>
+                            <span style="color:var(--tj-muted);font-family:monospace">{sel_trade.get("date","")}</span>
                             <span style="font-weight:700">{sel_trade.get("symbol","")}</span>
                             <span style="color:#7c6aff">{sel_trade.get("direction","")}</span>
                             <span style="color:{col_s};font-weight:800;font-family:monospace">{fmt(pnl_s)}</span>
-                            <span style="color:#6b7894;font-size:12px">{sel_trade.get("strategy","")}</span>
-                            <span style="color:#6b7894;font-size:12px">{str(sel_trade.get("notes",""))[:50]}</span>
+                            <span style="color:var(--tj-muted);font-size:12px">{sel_trade.get("strategy","")}</span>
+                            <span style="color:var(--tj-muted);font-size:12px">{str(sel_trade.get("notes",""))[:50]}</span>
                         </div>''', unsafe_allow_html=True)
 
                 ce, cd, _ = st.columns([1, 1, 5])
@@ -2135,7 +2138,7 @@ elif st.session_state.page == "journal":
                                 <i class="fa-solid fa-triangle-exclamation"></i>
                                 &nbsp;{n_sel} trade{"s" if n_sel>1 else ""} sélectionné{"s" if n_sel>1 else ""}
                             </span>
-                            <span style="color:#6b7894">
+                            <span style="color:var(--tj-muted)">
                                 P&L sélection : <b style="color:{col_psel}">{fmt(pnl_sel)}</b>
                             </span>
                         </div>''', unsafe_allow_html=True)
@@ -2221,15 +2224,15 @@ elif st.session_state.page == "journal":
             col_f   = "#00d4aa" if total_f >= 0 else "#ff4d6d"
             st.markdown(
                 f'''<div style="display:flex;gap:24px;align-items:center;
-                    padding:8px 14px;background:#0d111d;border-radius:8px;
-                    border:1px solid #1e2535;margin:10px 0;font-size:13px">
-                    <span style="color:#6b7894">
+                    padding:8px 14px;background:var(--tj-bg2);border-radius:8px;
+                    border:1px solid var(--tj-border);margin:10px 0;font-size:13px">
+                    <span style="color:var(--tj-muted)">
                         <b style="color:#e8ecf4">{len(df)}</b> trades
                     </span>
-                    <span style="color:#6b7894">
+                    <span style="color:var(--tj-muted)">
                         P&L : <b style="color:{col_f}">{fmt(total_f)}</b>
                     </span>
-                    <span style="color:#6b7894">
+                    <span style="color:var(--tj-muted)">
                         Win rate : <b style="color:#00d4aa">
                         {len(df[df["pnl"]>0])/len(df)*100:.0f}%</b>
                     </span>
@@ -2247,7 +2250,7 @@ elif st.session_state.page == "journal":
                 _tm2 = t.get("trade_mode","Réel Indépendant")
 
                 rows_html += f"""<tr>
-                    <td style="color:#6b7894;font-family:monospace;white-space:nowrap">{t["date"]}</td>
+                    <td style="color:var(--tj-muted);font-family:monospace;white-space:nowrap">{t["date"]}</td>
                     <td>{badge(t["symbol"],"b-sym")}</td>
                     <td>{badge(t["direction"],dc)}</td>
                     <td>{mode_badge(t.get("trade_mode","Réel Indépendant"))}</td>
@@ -2257,7 +2260,7 @@ elif st.session_state.page == "journal":
                     <td style="font-family:monospace;color:{rr_c}">{rr_v if rr_v else "—"}</td>
                     <td>{badge(t["strategy"],"b-str")}</td>
                     <td style="text-align:center">{mood_html(t["mood"])}</td>
-                    <td style="color:#6b7894;font-size:12px;max-width:160px">{str(t.get("notes",""))[:45]}</td>
+                    <td style="color:var(--tj-muted);font-size:12px;max-width:160px">{str(t.get("notes",""))[:45]}</td>
                 </tr>"""
             st.markdown(
                 f"""<div style="overflow-x:auto"><table class="tj-table">
@@ -2308,11 +2311,11 @@ elif st.session_state.page == "add":
         with r3c1: d_strat = st.selectbox("Stratégie",    strat_list, index=0)
         with r3c2: d_mood  = st.selectbox("État d'esprit",mood_list,  index=0)
 
-        st.markdown("""<div style="background:#0d111d;border:2px solid #00d4aa44;border-radius:12px;
+        st.markdown("""<div style="background:var(--tj-bg2);border:2px solid #00d4aa44;border-radius:12px;
             padding:14px 20px;margin:12px 0 4px">
             <div style="font-size:11px;color:#00d4aa;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;margin-bottom:4px">
                 P&L Réel — tel qu'affiché par votre broker</div>
-            <div style="font-size:12px;color:#6b7894">Saisissez le résultat exact · spread, commission et swap inclus</div>
+            <div style="font-size:12px;color:var(--tj-muted)">Saisissez le résultat exact · spread, commission et swap inclus</div>
         </div>""", unsafe_allow_html=True)
 
         pc1,pc2 = st.columns([1,3])
@@ -3491,8 +3494,8 @@ elif st.session_state.page == "calendar":
             html = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:separate;border-spacing:6px">'
             html += '<thead><tr>'
             for d in ["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"]:
-                html += f'<th style="color:#6b7894;font-size:11px;font-weight:700;padding:6px;text-transform:uppercase;letter-spacing:.5px">{d}</th>'
-            html += '<th style="color:#6b7894;font-size:11px;font-weight:700;padding:6px;text-transform:uppercase;letter-spacing:.5px">Semaine</th>'
+                html += f'<th style="color:var(--tj-muted);font-size:11px;font-weight:700;padding:6px;text-transform:uppercase;letter-spacing:.5px">{d}</th>'
+            html += '<th style="color:var(--tj-muted);font-size:11px;font-weight:700;padding:6px;text-transform:uppercase;letter-spacing:.5px">Semaine</th>'
             html += '</tr></thead><tbody>'
 
             today_iso = date.today().isoformat()
@@ -3502,7 +3505,7 @@ elif st.session_state.page == "calendar":
                 row = "<tr>"
                 for day in week:
                     if day == 0:
-                        row += '<td style="background:#0a0c12;border-radius:10px;height:78px"></td>'
+                        row += '<td style="background:var(--tj-bg);border-radius:10px;height:78px"></td>'
                         continue
                     cell_date = date(year, month, day).isoformat()
                     is_today  = cell_date == today_iso
@@ -3515,14 +3518,14 @@ elif st.session_state.page == "calendar":
                         bg, text_col, _ = _pnl_color(pnl_v, max_abs)
                         row += f'''<td style="background:{bg};border-radius:10px;height:78px;
                             padding:8px;vertical-align:top;border:{border_today}">
-                            <div style="font-size:10px;color:#8892a4">{day}</div>
+                            <div style="font-size:10px;color:var(--tj-muted)">{day}</div>
                             <div style="font-size:13px;font-weight:800;color:{text_col};
                                 font-family:'JetBrains Mono',monospace;margin-top:6px">{fmt(pnl_v)}</div>
-                            <div style="font-size:9px;color:#8892a4;margin-top:3px">
+                            <div style="font-size:9px;color:var(--tj-muted);margin-top:3px">
                                 {trades_v} trade{"s" if trades_v>1 else ""}</div>
                         </td>'''
                     else:
-                        row += f'''<td style="background:#111520;border-radius:10px;height:78px;
+                        row += f'''<td style="background:var(--tj-card);border-radius:10px;height:78px;
                             padding:8px;vertical-align:top;border:{border_today}">
                             <div style="font-size:10px;color:#3d4760">{day}</div>
                         </td>'''
@@ -3532,13 +3535,13 @@ elif st.session_state.page == "calendar":
                     wbg  = "rgba(0,212,170,0.10)" if week_pnl >= 0 else "rgba(255,77,109,0.10)"
                     wpnl_txt = fmt(week_pnl)
                 else:
-                    wcol = "#3d4760"; wbg = "#0d111d"; wpnl_txt = "—"
+                    wcol = "#3d4760"; wbg = "var(--tj-bg2)"; wpnl_txt = "—"
                 row += f'''<td style="background:{wbg};border-radius:10px;height:78px;
                     padding:8px;vertical-align:top;border:1px solid {wcol}33">
-                    <div style="font-size:9px;color:#6b7894;text-transform:uppercase">Total</div>
+                    <div style="font-size:9px;color:var(--tj-muted);text-transform:uppercase">Total</div>
                     <div style="font-size:13px;font-weight:800;color:{wcol};
                         font-family:'JetBrains Mono',monospace;margin-top:6px">{wpnl_txt}</div>
-                    <div style="font-size:9px;color:#8892a4;margin-top:3px">
+                    <div style="font-size:9px;color:var(--tj-muted);margin-top:3px">
                         {week_trades} trade{"s" if week_trades!=1 else ""}</div>
                 </td>'''
                 row += "</tr>"
@@ -3593,7 +3596,7 @@ elif st.session_state.page == "calendar":
                        "Sunday":"Dimanche"}[zoom_date_obj.strftime("%A")]
                 if df_zoom_day.empty:
                     st.markdown(
-                        f"<div style='padding-top:8px;color:#6b7894'>"
+                        f"<div style='padding-top:8px;color:var(--tj-muted)'>"
                         f"{_jn} {zoom_day:02d} {mois_fr[month-1]} {year} — "
                         f"<i>aucun trade</i></div>", unsafe_allow_html=True)
                 else:
@@ -3602,9 +3605,9 @@ elif st.session_state.page == "calendar":
                     zcol = "#00d4aa" if zpnl >= 0 else "#ff4d6d"
                     st.markdown(
                         f"<div style='padding-top:8px'>"
-                        f"<span style='color:#6b7894'>{_jn} {zoom_day:02d} · P&L : </span>"
+                        f"<span style='color:var(--tj-muted)'>{_jn} {zoom_day:02d} · P&L : </span>"
                         f"<b style='color:{zcol};font-family:JetBrains Mono,monospace'>{fmt(zpnl)}</b>"
-                        f"<span style='color:#6b7894'> · {ztrades} position"
+                        f"<span style='color:var(--tj-muted)'> · {ztrades} position"
                         f"{'s' if ztrades>1 else ''}</span></div>",
                         unsafe_allow_html=True)
 
@@ -3701,12 +3704,12 @@ elif st.session_state.page == "calendar":
                             zc = "#00d4aa" if zt["pnl"]>=0 else "#ff4d6d"
                             st.markdown(
                                 f"<div style='display:flex;gap:14px;align-items:center;"
-                                f"background:#111520;border:1px solid #1e2535;border-radius:8px;"
+                                f"background:var(--tj-card);border:1px solid var(--tj-border);border-radius:8px;"
                                 f"padding:7px 14px;margin-bottom:5px;font-size:13px'>"
-                                f"<span style='color:#6b7894;font-family:JetBrains Mono,monospace;"
+                                f"<span style='color:var(--tj-muted);font-family:JetBrains Mono,monospace;"
                                 f"min-width:42px'>{zh}</span>"
                                 f"<span style='color:#e8ecf4;font-weight:600'>{zt['symbol']}</span>"
-                                f"<span style='color:#6b7894'>{zt['direction']}</span>"
+                                f"<span style='color:var(--tj-muted)'>{zt['direction']}</span>"
                                 f"<span style='color:{zc};font-family:JetBrains Mono,monospace;"
                                 f"font-weight:700;margin-left:auto'>{fmt(zt['pnl'])}</span>"
                                 f"</div>", unsafe_allow_html=True)
@@ -3745,11 +3748,11 @@ elif st.session_state.page == "calendar":
                     bg, text_col, _ = _pnl_color(pnl_v, max_abs)
                     pnl_txt = fmt(pnl_v)
                 else:
-                    bg = "#111520"; text_col = "#3d4760"; pnl_txt = "—"; trades_v = 0
+                    bg = "var(--tj-card)"; text_col = "#3d4760"; pnl_txt = "—"; trades_v = 0
                 html += f'''<div title="Semaine {w}, {trades_v} trades" style="background:{bg};
                     border-radius:9px;padding:10px 4px;text-align:center;
                     border:1px solid rgba(255,255,255,0.04)">
-                    <div style="font-size:9px;color:#6b7894">S{w}</div>
+                    <div style="font-size:9px;color:var(--tj-muted)">S{w}</div>
                     <div style="font-size:11px;font-weight:800;color:{text_col};
                         font-family:'JetBrains Mono',monospace;margin-top:4px">{pnl_txt}</div>
                 </div>'''
@@ -3789,15 +3792,15 @@ elif st.session_state.page == "calendar":
                     bg, text_col, border_col = _pnl_color(pnl_v, max_abs)
                     pnl_txt = fmt(pnl_v)
                 else:
-                    bg = "#111520"; text_col = "#3d4760"; border_col = "rgba(255,255,255,0.04)"
+                    bg = "var(--tj-card)"; text_col = "#3d4760"; border_col = "rgba(255,255,255,0.04)"
                     pnl_txt = "—"; trades_v = 0
                 html += f'''<div style="background:{bg};border-radius:14px;padding:18px;
                     border:1px solid {border_col}">
-                    <div style="font-size:12px;color:#8892a4;text-transform:uppercase;
+                    <div style="font-size:12px;color:var(--tj-muted);text-transform:uppercase;
                         letter-spacing:.5px">{mois_fr[m-1]} {year}</div>
                     <div style="font-size:22px;font-weight:800;color:{text_col};
                         font-family:'JetBrains Mono',monospace;margin-top:8px">{pnl_txt}</div>
-                    <div style="font-size:11px;color:#8892a4;margin-top:6px">
+                    <div style="font-size:11px;color:var(--tj-muted);margin-top:6px">
                         {trades_v} trade{"s" if trades_v!=1 else ""}</div>
                 </div>'''
             html += '</div>'
@@ -3832,10 +3835,10 @@ elif st.session_state.page == "calendar":
                 bg, text_col, border_col = _pnl_color(r["pnl"], max_abs)
                 html += f'''<div style="background:{bg};border-radius:14px;padding:20px;
                     border:1px solid {border_col}">
-                    <div style="font-size:13px;color:#8892a4">{int(r["_year"])}</div>
+                    <div style="font-size:13px;color:var(--tj-muted)">{int(r["_year"])}</div>
                     <div style="font-size:24px;font-weight:800;color:{text_col};
                         font-family:'JetBrains Mono',monospace;margin-top:8px">{fmt(r["pnl"])}</div>
-                    <div style="font-size:11px;color:#8892a4;margin-top:6px">
+                    <div style="font-size:11px;color:var(--tj-muted);margin-top:6px">
                         {int(r["trades"])} trade{"s" if r["trades"]!=1 else ""}</div>
                 </div>'''
             html += '</div>'
@@ -3844,15 +3847,15 @@ elif st.session_state.page == "calendar":
         # ── Légende couleur ──────────────────────────────────────────────────
         st.markdown("---")
         st.markdown(
-            '<div style="display:flex;gap:24px;align-items:center;font-size:12px;color:#6b7894">'
+            '<div style="display:flex;gap:24px;align-items:center;font-size:12px;color:var(--tj-muted)">'
             '<span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;'
             'background:rgba(0,212,170,0.65);margin-right:6px;vertical-align:middle"></span>Gain</span>'
             '<span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;'
             'background:rgba(255,77,109,0.65);margin-right:6px;vertical-align:middle"></span>Perte</span>'
             '<span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;'
-            'background:#111520;margin-right:6px;vertical-align:middle;border:1px solid #1e2535"></span>'
+            'background:var(--tj-card);margin-right:6px;vertical-align:middle;border:1px solid var(--tj-border)"></span>'
             'Aucun trade</span>'
-            '<span style="color:#8892a4">L\'intensité de la couleur reflète l\'ampleur du P&L</span>'
+            '<span style="color:var(--tj-muted)">L\'intensité de la couleur reflète l\'ampleur du P&L</span>'
             '</div>', unsafe_allow_html=True
         )
 
