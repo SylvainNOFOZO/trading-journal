@@ -105,12 +105,257 @@ THEMES = {
         "loss":"#e74c3c","alt":"#6c5ce7","orange":"#e67e22","sidebar":"#ffffff",
         "btn_text":"#ffffff",
     },
+    "Or & Noir": {
+        "bg":"#070707","bg2":"#0d0d0d","card":"#151310","border":"#2b2616",
+        "text":"#f6efdd","muted":"#8d8870",
+        "accent":"#d4af37","win":"#5fd38a","loss":"#ff5c6c","alt":"#e8c35a",
+        "orange":"#ffb300","sidebar":"#0a0a0a","btn_text":"#000000",
+    },
+    "Néon Électrique": {
+        "bg":"#06070d","bg2":"#0a0c16","card":"#10131f","border":"#1c2238",
+        "text":"#e9edff","muted":"#6f7aa0","accent":"#0078ff","win":"#22e3a0",
+        "loss":"#ff2d55","alt":"#4d9bff","orange":"#ff8a3d","sidebar":"#080a12",
+        "btn_text":"#ffffff",
+    },
+    "Violet Lavande": {
+        "bg":"#0b0912","bg2":"#0f0c18","card":"#15111f","border":"#271f3a",
+        "text":"#efeaff","muted":"#8278a0","accent":"#8a2be2","win":"#2ed19a",
+        "loss":"#ff5c7a","alt":"#d8b4fe","orange":"#ffb454","sidebar":"#0d0a16",
+        "btn_text":"#ffffff",
+    },
+    "Aubergine Doré": {
+        "bg":"#0c0714","bg2":"#120a1d","card":"#190f28","border":"#2e1f42",
+        "text":"#f3ecff","muted":"#9484ac","accent":"#9b59ff","win":"#46d6a0",
+        "loss":"#ff6b81","alt":"#d4af37","orange":"#ffc24b","sidebar":"#0e0818",
+        "btn_text":"#ffffff",
+    },
+    "Navy Corporate": {
+        "bg":"#eef1f7","bg2":"#e5e9f2","card":"#ffffff","border":"#d9dfea",
+        "text":"#1b2440","muted":"#6b7488","accent":"#2b3a67","win":"#16a085",
+        "loss":"#e74c3c","alt":"#3d5a9a","orange":"#f39c12","sidebar":"#1e2a4a",
+        "btn_text":"#ffffff",
+    },
+    "Violet Clair": {
+        "bg":"#f5f3fd","bg2":"#efeafb","card":"#ffffff","border":"#e6def7",
+        "text":"#211b33","muted":"#6d6786","accent":"#7c5cfc","win":"#10b981",
+        "loss":"#ef4444","alt":"#b794f6","orange":"#f59e0b","sidebar":"#ffffff",
+        "btn_text":"#ffffff",
+    },
 }
 THEME_NAMES = list(THEMES.keys())
 
 def get_theme():
     name = st.session_state.get("theme_name", THEME_NAMES[0])
     return THEMES.get(name, THEMES[THEME_NAMES[0]])
+
+# ── PROFILS GRAPHIQUES : chaque design change aussi le type et la config des graphiques ──
+# equity   : "area" | "line" | "step" | "glow"      (courbe de capital / progression %)
+# winloss  : "donut" | "pie" | "gauge" | "bar"       (répartition gagnants / perdants)
+# monthly  : "bar" | "lollipop" | "area"             (P&L mensuel)
+# ranking  : "hbar" | "lollipop"                     (classements actifs / stratégies)
+CHART_STYLES = {
+    "Classique": dict(equity="area", shape="linear", width=2.2, fill=0.10, markers=False,
+        winloss="donut", hole=0.65, monthly="bar", ranking="hbar", corner=4, bar_opacity=0.85,
+        bargap=0.25, grid="y", griddash="dot", font="Inter, sans-serif", hover="closest",
+        toolbar=False, transparent=False, heat="RdYlGn", legend_top=False),
+    "Néon": dict(equity="glow", shape="spline", width=3.0, fill=0.22, markers=False,
+        winloss="donut", hole=0.80, monthly="area", ranking="lollipop", corner=8, bar_opacity=0.95,
+        bargap=0.35, grid="none", griddash="solid", font="JetBrains Mono, monospace",
+        hover="x unified", toolbar=False, transparent=True, heat="Plasma", legend_top=True),
+    "Luxe": dict(equity="line", shape="spline", width=1.8, fill=0.0, markers=True,
+        winloss="gauge", hole=0.0, monthly="lollipop", ranking="lollipop", corner=0, bar_opacity=0.9,
+        bargap=0.45, grid="y", griddash="solid", font="Georgia, 'Times New Roman', serif",
+        hover="closest", toolbar=False, transparent=True, heat="Cividis", legend_top=False),
+    "Corporate": dict(equity="step", shape="hv", width=2.0, fill=0.06, markers=True,
+        winloss="pie", hole=0.0, monthly="bar", ranking="hbar", corner=0, bar_opacity=1.0,
+        bargap=0.15, grid="xy", griddash="solid", font="Arial, Helvetica, sans-serif",
+        hover="x unified", toolbar=True, transparent=False, heat="Blues", legend_top=True),
+    "Doux": dict(equity="area", shape="spline", width=2.6, fill=0.28, markers=False,
+        winloss="bar", hole=0.55, monthly="area", ranking="hbar", corner=12, bar_opacity=0.8,
+        bargap=0.30, grid="none", griddash="dot", font="Inter, sans-serif", hover="x unified",
+        toolbar=False, transparent=True, heat="Purples", legend_top=True),
+}
+THEME_CHART_STYLE = {
+    "Émeraude Sombre": "Classique", "Ardoise Bleu": "Classique",
+    "Indigo Minuit": "Néon", "Néon Électrique": "Néon",
+    "Ambre Doré": "Luxe", "Or & Noir": "Luxe", "Aubergine Doré": "Luxe",
+    "Ivoire Clair": "Corporate", "Navy Corporate": "Corporate",
+    "Violet Lavande": "Doux", "Violet Clair": "Doux",
+}
+CHART_STYLE_NAMES = list(CHART_STYLES.keys())
+
+def get_chart_style_name():
+    ov = st.session_state.get("chart_style_override", "Auto")
+    if ov in CHART_STYLES:
+        return ov
+    return THEME_CHART_STYLE.get(st.session_state.get("theme_name", THEME_NAMES[0]), "Classique")
+
+def get_chart_style():
+    return CHART_STYLES[get_chart_style_name()]
+
+try:
+    import plotly as _plotly_mod
+    _PLOTLY_V = tuple(int(x) for x in _plotly_mod.__version__.split(".")[:2])
+except Exception:
+    _PLOTLY_V = (0, 0)
+_PL_CORNER = _PLOTLY_V >= (5, 19)     # layout.barcornerradius
+_PL_GRIDDASH = _PLOTLY_V >= (5, 13)   # axis.griddash
+
+def _hexa(h, a):
+    h = str(h).lstrip("#")
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except Exception:
+        return h
+    return f"rgba({r},{g},{b},{a})"
+
+def chart_layout(t, cs, height=260, showlegend=False, **kwargs):
+    """Layout Plotly selon design (couleurs) + profil graphique (police, survol, coins...)."""
+    bg = "rgba(0,0,0,0)" if cs["transparent"] else t["card"]
+    lay = dict(
+        paper_bgcolor=bg, plot_bgcolor=bg,
+        font=dict(color=t["muted"], family=cs["font"], size=12),
+        height=height, margin=dict(l=54, r=18, t=18, b=36),
+        showlegend=showlegend, hovermode=cs["hover"], bargap=cs["bargap"],
+        hoverlabel=dict(bgcolor=t["card"], bordercolor=t["accent"],
+                        font=dict(color=t["text"], family=cs["font"])),
+    )
+    if showlegend and cs["legend_top"]:
+        lay["legend"] = dict(orientation="h", yanchor="bottom", y=1.02, x=0,
+                             font=dict(color=t["muted"]))
+    if _PL_CORNER and cs["corner"]:
+        lay["barcornerradius"] = cs["corner"]
+    lay.update(kwargs)
+    return lay
+
+def chart_axes(fig, t, cs, xprefix="", yprefix="", xtickangle=0, free_y=False):
+    gx = cs["grid"] in ("x", "xy"); gy = cs["grid"] in ("y", "xy")
+    xa = dict(showgrid=gx, gridcolor=t["border"], linecolor=t["border"], tickcolor=t["border"],
+              tickprefix=xprefix, tickangle=xtickangle, zeroline=False,
+              showline=(cs["grid"] == "xy"), tickfont=dict(size=11))
+    ya = dict(showgrid=gy, gridcolor=t["border"], linecolor=t["border"], tickcolor=t["border"],
+              tickprefix=yprefix, showline=(cs["grid"] == "xy"), zeroline=True,
+              zerolinecolor=t["border"], zerolinewidth=1, tickfont=dict(size=11),
+              fixedrange=not free_y)
+    if _PL_GRIDDASH:
+        xa["griddash"] = cs["griddash"]; ya["griddash"] = cs["griddash"]
+    fig.update_xaxes(**xa); fig.update_yaxes(**ya)
+
+def diverging_scale(t):
+    """Échelle perte -> neutre -> gain, adaptée au design (clair ou sombre)."""
+    return [[0.0, _hexa(t["loss"], 0.9)], [0.5, t["card"]], [1.0, _hexa(t["win"], 0.9)]]
+
+def sequential_scale(t, cs):
+    """Échelle séquentielle propre au profil (comptes, intensités)."""
+    if cs["heat"] in ("RdYlGn",):
+        return [[0.0, t["card"]], [1.0, _hexa(t["accent"], 0.95)]]
+    return cs["heat"]
+
+def chart_config(cs):
+    return {"displayModeBar": bool(cs["toolbar"]), "displaylogo": False, "responsive": True,
+            "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"]}
+
+def series_traces(x, y, color, cs, customdata=None, hovertemplate=None, name=None):
+    """Traces d'une série temporelle (capital, %) selon le profil : area/line/step/glow."""
+    shape = "hv" if cs["equity"] == "step" else cs["shape"]
+    fill = "tozeroy" if cs["fill"] > 0 else None
+    mode = "lines+markers" if cs["markers"] else "lines"
+    traces = []
+    if cs["equity"] == "glow":   # halo lumineux derrière la courbe
+        traces.append(go.Scatter(x=x, y=y, mode="lines", hoverinfo="skip", showlegend=False,
+            line=dict(color=_hexa(color, 0.25), width=cs["width"] * 4, shape=shape,
+                      **({"smoothing": 0.6} if shape == "spline" else {}))))
+    traces.append(go.Scatter(
+        x=x, y=y, mode=mode, name=name or "",
+        line=dict(color=color, width=cs["width"], shape=shape,
+                  **({"smoothing": 0.6} if shape == "spline" else {})),
+        marker=dict(size=5, color=color) if cs["markers"] else None,
+        fill=fill, fillcolor=_hexa(color, cs["fill"]) if fill else None,
+        customdata=customdata, hovertemplate=hovertemplate, showlegend=False))
+    return traces
+
+def winloss_figure(n_win, n_loss, wr_val, t, cs, height=260):
+    """Graphique gagnants/perdants : donut | pie | gauge | bar selon le profil."""
+    kind = cs["winloss"]
+    if kind == "gauge":
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number", value=round(wr_val, 1),
+            number=dict(suffix="%", font=dict(size=34, color=t["win"], family=cs["font"])),
+            gauge=dict(axis=dict(range=[0, 100], tickcolor=t["muted"],
+                                 tickfont=dict(color=t["muted"], size=10)),
+                       bar=dict(color=t["accent"], thickness=0.3),
+                       bgcolor="rgba(0,0,0,0)", borderwidth=0,
+                       steps=[dict(range=[0, 50], color=_hexa(t["loss"], 0.18)),
+                              dict(range=[50, 100], color=_hexa(t["win"], 0.18))],
+                       threshold=dict(line=dict(color=t["text"], width=2), value=50))))
+        fig.add_annotation(text=f"{n_win} gagnants · {n_loss} perdants", x=0.5, y=-0.08,
+                           showarrow=False, font=dict(color=t["muted"], size=12))
+        fig.update_layout(**chart_layout(t, cs, height=height, margin=dict(l=24, r=24, t=30, b=30)))
+        return fig
+    if kind == "bar":
+        fig = go.Figure()
+        for lbl, v, col in (("Gagnants", n_win, t["win"]), ("Perdants", n_loss, t["loss"])):
+            fig.add_trace(go.Bar(y=["Trades"], x=[v], name=lbl, orientation="h",
+                marker=dict(color=col, opacity=cs["bar_opacity"]), text=[f"{lbl} · {v}"],
+                textposition="inside", insidetextanchor="middle",
+                textfont=dict(color="#ffffff", size=12),
+                hovertemplate=f"<b>{lbl}</b>: %{{x}} trades<extra></extra>"))
+        fig.update_layout(**chart_layout(t, cs, height=height, barmode="stack",
+                                         margin=dict(l=10, r=10, t=60, b=20)))
+        fig.update_xaxes(visible=False); fig.update_yaxes(visible=False)
+        fig.add_annotation(text=f"<b>{wr_val:.0f}%</b> win rate", x=0.5, y=1.18, xref="paper",
+            yref="paper", showarrow=False, font=dict(size=26, color=t["win"], family=cs["font"]))
+        return fig
+    hole = cs["hole"] if kind == "donut" else 0.0
+    fig = go.Figure(go.Pie(
+        values=[n_win, n_loss], labels=["Gagnants", "Perdants"], hole=hole, sort=False,
+        pull=[0.04, 0] if kind == "pie" else None,
+        marker=dict(colors=[t["win"], t["loss"]], line=dict(color=t["card"], width=3)),
+        hovertemplate="<b>%{label}</b>: %{value} trades (%{percent})<extra></extra>",
+        textinfo="percent" if kind == "pie" else "none",
+        textfont=dict(color="#ffffff", size=13, family=cs["font"])))
+    if kind == "donut":
+        fig.add_annotation(text=f"<b>{wr_val:.0f}%</b>", x=0.5, y=0.58, showarrow=False,
+            font=dict(size=28, color=t["win"], family=cs["font"]))
+        fig.add_annotation(text="Win Rate", x=0.5, y=0.38, showarrow=False,
+            font=dict(size=12, color=t["muted"]))
+    fig.update_layout(**chart_layout(t, cs, height=height, showlegend=True,
+                      legend=dict(orientation="h", yanchor="bottom", y=-0.08,
+                                  font=dict(color=t["muted"]))))
+    return fig
+
+def category_figure(cats, vals, colors, t, cs, kind, orientation="v", texts=None,
+                    customdata=None, hovertemplate=None):
+    """Barres ou sucettes (lollipop) ou aire, verticales ou horizontales."""
+    h = orientation == "h"
+    fig = go.Figure()
+    if kind == "lollipop":
+        for c, v, col in zip(cats, vals, colors):
+            fig.add_trace(go.Scatter(
+                x=[0, v] if h else [c, c], y=[c, c] if h else [0, v], mode="lines",
+                line=dict(color=_hexa(col, 0.55), width=2), hoverinfo="skip", showlegend=False))
+        fig.add_trace(go.Scatter(
+            x=vals if h else cats, y=cats if h else vals, mode="markers+text" if texts else "markers",
+            marker=dict(color=colors, size=13, line=dict(color=t["card"], width=2)),
+            text=texts, textposition="middle right" if h else "top center",
+            textfont=dict(size=11, color=t["muted"]),
+            customdata=customdata, hovertemplate=hovertemplate, showlegend=False))
+    elif kind == "area" and not h:
+        col = t["win"] if sum(vals) >= 0 else t["loss"]
+        fig.add_trace(go.Scatter(x=cats, y=vals, mode="lines+markers",
+            line=dict(color=t["accent"], width=cs["width"], shape="linear"),
+            marker=dict(color=colors, size=9, line=dict(color=t["card"], width=2)),
+            fill="tozeroy", fillcolor=_hexa(t["accent"], max(cs["fill"], 0.12)),
+            customdata=customdata, hovertemplate=hovertemplate, showlegend=False))
+    else:
+        fig.add_trace(go.Bar(
+            x=vals if h else cats, y=cats if h else vals, orientation=orientation,
+            marker=dict(color=colors, opacity=cs["bar_opacity"],
+                        line=dict(color=t["card"], width=0.5)),
+            text=texts, textposition="outside" if texts else None,
+            textfont=dict(size=11, color=t["muted"]),
+            customdata=customdata, hovertemplate=hovertemplate, showlegend=False))
+    return fig
 
 def build_css(t):
     """Génère le CSS complet en fonction du thème actif."""
@@ -742,18 +987,81 @@ def login_gate():
         return True
     _t = get_theme()
     st.markdown(build_css(_t), unsafe_allow_html=True)
+    st.markdown(f"""<style>
+.block-container {{ padding-top:3rem; max-width:1100px; }}
+.stApp {{ background:
+    radial-gradient(1100px 520px at 12% -10%, {_t['accent']}2e, transparent 60%),
+    radial-gradient(900px 480px at 108% 8%, {_t['alt']}26, transparent 55%),
+    radial-gradient(700px 400px at 50% 115%, {_t['orange']}14, transparent 60%),
+    linear-gradient(160deg, {_t['bg']} 0%, {_t['bg2']} 60%, {_t['bg']} 100%) !important;
+    background-attachment:fixed; }}
+div[data-testid="stForm"] {{
+    background:linear-gradient(160deg, {_t['card']}f2, {_t['bg2']}f2);
+    border:1px solid {_t['border']}; border-radius:20px; padding:28px 30px 22px;
+    position:relative; overflow:hidden; backdrop-filter:blur(8px);
+    box-shadow:0 24px 70px rgba(0,0,0,.35), 0 0 0 1px {_t['accent']}14; }}
+div[data-testid="stForm"]::before {{ content:''; position:absolute; top:0; left:0; right:0;
+    height:4px; background:linear-gradient(90deg,{_t['accent']},{_t['alt']},{_t['orange']}); }}
+div[data-testid="stForm"] input {{ padding:12px 14px !important; border-radius:10px !important;
+    font-size:14px !important; }}
+div[data-testid="stForm"] button {{ padding:11px 0 !important; font-size:14px !important;
+    letter-spacing:.4px; margin-top:6px; }}
+.tj-feat {{ display:flex; gap:10px; align-items:flex-start; margin-bottom:16px; }}
+.tj-feat i {{ width:34px; height:34px; border-radius:10px; display:inline-flex; align-items:center;
+    justify-content:center; background:{_t['accent']}1f; color:{_t['accent']}; flex-shrink:0; }}
+.tj-feat b {{ color:{_t['text']}; font-size:13px; }}
+.tj-feat span {{ color:{_t['muted']}; font-size:12px; }}
+</style>""", unsafe_allow_html=True)
+
+    # En-tête de marque
     st.markdown(
-        f"<div style='text-align:center;padding:36px 0 8px'>"
-        f"<div style='font-size:26px;font-weight:800;color:{_t['text']}'>Trading Journal Pro</div>"
-        f"<div style='color:{_t['muted']};font-size:13px;margin-top:4px'>"
-        f"Accès réservé — connectez-vous avec vos identifiants</div></div>",
+        f"<div style='text-align:center;padding:4px 0 26px'>"
+        f"<div style='display:inline-flex;align-items:center;justify-content:center;width:68px;"
+        f"height:68px;border-radius:20px;background:linear-gradient(135deg,{_t['accent']},{_t['alt']});"
+        f"box-shadow:0 14px 34px {_t['accent']}55;margin-bottom:14px'>"
+        f"<i class='fa-solid fa-chart-line' style='font-size:28px;color:{_t['btn_text']}'></i></div>"
+        f"<div style='font-size:32px;font-weight:800;letter-spacing:-.6px;color:{_t['text']}'>"
+        f"Trading Journal <span class='grad-accent'>Pro</span></div>"
+        f"<div style='color:{_t['muted']};font-size:13px;margin-top:6px'>"
+        f"Performance, analytics et biais macro dans un seul poste de pilotage</div></div>",
         unsafe_allow_html=True)
-    _, cmid, _ = st.columns([1, 1.3, 1])
-    with cmid:
+
+    cleft, cright = st.columns([1.05, 1], gap="large")
+    with cleft:
+        st.markdown(
+            f"<div style='padding:18px 6px 0 6px'>"
+            f"<div class='tj-feat'><i class='fa-solid fa-gauge-high'></i><div><b>Dashboard temps réel</b><br>"
+            f"<span>P&amp;L, win rate, drawdown et courbe de capital par compte.</span></div></div>"
+            f"<div class='tj-feat'><i class='fa-solid fa-calendar-days'></i><div><b>Calendrier &amp; heatmaps</b><br>"
+            f"<span>Résultats par jour, semaine, mois et heure de prise de position.</span></div></div>"
+            f"<div class='tj-feat'><i class='fa-solid fa-newspaper'></i><div><b>Scorecard &amp; news</b><br>"
+            f"<span>Consensus vs publié et impact estimé sur vos actifs (GMT+1).</span></div></div>"
+            f"<div class='tj-feat'><i class='fa-solid fa-user-shield'></i><div><b>Accès multi-comptes</b><br>"
+            f"<span>Permissions par utilisateur, comptes démo, réels et institutionnels.</span></div></div>"
+            f"</div>", unsafe_allow_html=True)
+        _sel = st.selectbox("Design de l'interface", THEME_NAMES,
+            index=THEME_NAMES.index(st.session_state.theme_name)
+                  if st.session_state.theme_name in THEME_NAMES else 0,
+            key="login_theme")
+        if _sel != st.session_state.theme_name:
+            st.session_state.theme_name = _sel; st.rerun()
+        # Aperçu de la palette du design choisi
+        st.markdown(
+            "<div style='display:flex;gap:6px;margin-top:2px'>" + "".join(
+                f"<div title='{k}' style='flex:1;height:10px;border-radius:5px;background:{_t[k]};"
+                f"border:1px solid {_t['border']}'></div>"
+                for k in ("bg", "card", "accent", "alt", "orange", "win", "loss")) + "</div>",
+            unsafe_allow_html=True)
+    with cright:
         with st.form("login_form"):
-            st.markdown("#### Connexion")
-            u = st.text_input("Utilisateur")
-            p = st.text_input("Mot de passe", type="password")
+            st.markdown(
+                f"<div style='font-size:17px;font-weight:800;color:{_t['text']}'>"
+                f"<i class='fa-solid fa-lock' style='color:{_t['accent']};margin-right:8px'></i>"
+                f"Connexion sécurisée</div>"
+                f"<div style='font-size:12px;color:{_t['muted']};margin:2px 0 10px'>"
+                f"Identifiez-vous pour accéder à votre journal</div>", unsafe_allow_html=True)
+            u = st.text_input("Utilisateur", placeholder="Nom d'utilisateur")
+            p = st.text_input("Mot de passe", type="password", placeholder="••••••••")
             if st.form_submit_button("Se connecter", use_container_width=True, type="primary"):
                 ok, user, msg = authenticate(u.strip(), p)
                 if ok:
@@ -765,8 +1073,11 @@ def login_gate():
                     st.rerun()
                 else:
                     st.error(msg)
-        st.caption("Accès sur invitation uniquement — l'administrateur crée les comptes "
-                   "et attribue les mots de passe.")
+        st.markdown(
+            f"<div style='text-align:center;margin-top:12px;font-size:11px;color:{_t['muted']}'>"
+            f"<i class='fa-solid fa-shield-halved' style='margin-right:5px'></i>"
+            f"Mots de passe chiffrés (PBKDF2-SHA256) · Accès sur invitation de l'administrateur</div>",
+            unsafe_allow_html=True)
     return False
 
 # Porte d'authentification : rien ne s'affiche tant qu'on n'est pas connecté
@@ -795,12 +1106,26 @@ with _hh1:
         f"({_role_lbl})</span></div>",
         unsafe_allow_html=True)
 with _hh2:
-    _sel_theme = st.selectbox("Thème", THEME_NAMES,
-        index=THEME_NAMES.index(st.session_state.theme_name)
-              if st.session_state.theme_name in THEME_NAMES else 0,
-        key="theme_selector", label_visibility="collapsed")
-    if _sel_theme != st.session_state.theme_name:
-        st.session_state.theme_name = _sel_theme; st.rerun()
+    _hd1, _hd2 = st.columns(2)
+    with _hd1:
+        _sel_theme = st.selectbox("Design", THEME_NAMES,
+            index=THEME_NAMES.index(st.session_state.theme_name)
+                  if st.session_state.theme_name in THEME_NAMES else 0,
+            key="theme_selector", label_visibility="collapsed",
+            help="Design de l'interface : couleurs, cartes et style des graphiques")
+        if _sel_theme != st.session_state.theme_name:
+            st.session_state.theme_name = _sel_theme; st.rerun()
+    with _hd2:
+        _cs_opts = ["Auto"] + CHART_STYLE_NAMES
+        _cur_cs = st.session_state.get("chart_style_override", "Auto")
+        _sel_cs = st.selectbox("Graphiques", _cs_opts,
+            index=_cs_opts.index(_cur_cs) if _cur_cs in _cs_opts else 0,
+            format_func=lambda x: (f"Graphiques : auto ({THEME_CHART_STYLE.get(st.session_state.theme_name, 'Classique')})"
+                                   if x == "Auto" else f"Graphiques : {x}"),
+            key="chart_style_selector", label_visibility="collapsed",
+            help="Type et configuration des graphiques. Auto = suit le design choisi.")
+        if _sel_cs != _cur_cs:
+            st.session_state.chart_style_override = _sel_cs; st.rerun()
 with _hh3:
     _allowed = allowed_accounts()
     if "mode_selection" not in st.session_state:
@@ -1006,29 +1331,16 @@ if st.session_state.page == "dashboard":
         _ora  = _theme["orange"]
 
         _gridline = _theme["border"]
+        _cs = get_chart_style()          # profil graphique lié au design
+        if _cs["transparent"]:
+            _bg = "rgba(0,0,0,0)"
 
         def _base_layout(height=260, showlegend=False, **kwargs):
-            return dict(
-                paper_bgcolor=_bg, plot_bgcolor=_bg,
-                font=dict(color=_text, family="Inter, sans-serif", size=12),
-                height=height,
-                margin=dict(l=54, r=18, t=18, b=36),
-                showlegend=showlegend,
-                hovermode="closest",
-                bargap=0.25,
-                **kwargs
-            )
+            return chart_layout(_theme, _cs, height=height, showlegend=showlegend, **kwargs)
 
         def _style_axes(fig, xprefix="", yprefix="", xtickangle=0, free_y=False):
-            # Grille horizontale discrète uniquement, pas de bordures d'axe agressives
-            fig.update_xaxes(showgrid=False, linecolor=_gridline, tickcolor=_gridline,
-                             tickprefix=xprefix, tickangle=xtickangle,
-                             showline=False, zeroline=False,
-                             tickfont=dict(size=11))
-            fig.update_yaxes(gridcolor=_gridline, linecolor=_gridline, tickcolor=_gridline,
-                             tickprefix=yprefix, showline=False, zeroline=True,
-                             zerolinecolor=_gridline, zerolinewidth=1,
-                             tickfont=dict(size=11), fixedrange=not free_y)
+            chart_axes(fig, _theme, _cs, xprefix=xprefix, yprefix=yprefix,
+                       xtickangle=xtickangle, free_y=free_y)
 
         def _card(title, subtitle=""):
             accent = _theme["accent"]
@@ -1084,11 +1396,7 @@ if st.session_state.page == "dashboard":
         _tick_text = [pos_labels[i] for i in _tick_vals]
 
         # Config commune : barre d'outils masquée par défaut (apparait au survol)
-        _chart_cfg = {
-            "displayModeBar": False,
-            "displaylogo": False,
-            "responsive": True,
-        }
+        _chart_cfg = chart_config(_cs)
 
         def _xaxis_pos(n):
             return dict(showticklabels=False, showgrid=False,
@@ -1110,15 +1418,10 @@ if st.session_state.page == "dashboard":
             def _hx_rgba(h, a):
                 h = h.lstrip("#"); r,g,b = int(h[0:2],16),int(h[2:4],16),int(h[4:6],16)
                 return f"rgba({r},{g},{b},{a})"
-            fig_pct = go.Figure(go.Scatter(
-                x=pos_idx, y=_pct.tolist(), mode="lines",
-                line=dict(color=_pcol, width=2.2),
-                fill="tozeroy", fillcolor=_hx_rgba(_pcol, 0.10),
-                customdata=pos_labels,
+            fig_pct = go.Figure(series_traces(
+                pos_idx, _pct.tolist(), _pcol, _cs, customdata=pos_labels,
                 hovertemplate="<b>#%{x}</b> · %{customdata}<br>"
-                              "Progression : <b>%{y:+.2f}%</b><extra></extra>",
-                showlegend=False,
-            ))
+                              "Progression : <b>%{y:+.2f}%</b><extra></extra>"))
             fig_pct.add_hline(y=0, line_color=_grid, line_width=1)
             fig_pct.update_layout(**_base_layout(height=240))
             _style_axes(fig_pct)
@@ -1145,17 +1448,13 @@ if st.session_state.page == "dashboard":
             def _hex_rgba(h, a):
                 h = h.lstrip("#"); r,g,b = int(h[0:2],16),int(h[2:4],16),int(h[4:6],16)
                 return f"rgba({r},{g},{b},{a})"
-            fig_eq = go.Figure(go.Scatter(
-                x=pos_idx, y=cumul.tolist(), mode="lines",
-                line=dict(color=_eq_col, width=2.2, shape="linear"),
-                fill="tozeroy", fillcolor=_hex_rgba(_eq_col, 0.10),
+            fig_eq = go.Figure(series_traces(
+                pos_idx, cumul.tolist(), _eq_col, _cs,
                 customdata=list(zip(df_s["symbol"].tolist(),
                                     df_s["direction"].tolist(), pos_labels)),
                 hovertemplate=("<b>#%{x}</b> · %{customdata[2]}<br>"
                                "%{customdata[0]} %{customdata[1]}<br>"
-                               "Capital : <b>%{y:+,.2f}$</b><extra></extra>"),
-                showlegend=False,
-            ))
+                               "Capital : <b>%{y:+,.2f}$</b><extra></extra>")))
             fig_eq.update_layout(**_base_layout(height=300))
             _style_axes(fig_eq, yprefix="$")
             fig_eq.update_xaxes(**_xaxis_pos(n_pos))
@@ -1163,20 +1462,7 @@ if st.session_state.page == "dashboard":
 
         with r1c2:
             _card("Win / Loss")
-            fig_pie = go.Figure(go.Pie(
-                values=[len(wins), len(losses)],
-                labels=["Gagnants","Perdants"], hole=0.65,
-                marker=dict(colors=[_win, _loss], line=dict(color=_bg, width=3)),
-                hovertemplate="<b>%{label}</b>: %{value} trades (%{percent})<extra></extra>",
-                textinfo="none",
-            ))
-            fig_pie.add_annotation(text=f"<b>{wr_val:.0f}%</b>", x=0.5, y=0.58,
-                font=dict(size=28,color=_win,family="JetBrains Mono"), showarrow=False)
-            fig_pie.add_annotation(text="Win Rate", x=0.5, y=0.38,
-                font=dict(size=12,color=_text), showarrow=False)
-            fig_pie.update_layout(**_base_layout(height=260, showlegend=True),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.08,
-                            font=dict(color=_text)))
+            fig_pie = winloss_figure(len(wins), len(losses), wr_val, _theme, _cs, height=260)
             st.plotly_chart(fig_pie, use_container_width=True, config=_chart_cfg)
 
         # ════════════════════════════════════════════════════════════════════
@@ -1190,7 +1476,7 @@ if st.session_state.page == "dashboard":
                 x=pos_idx,
                 y=df_s["pnl"].tolist(),
                 marker_color=[_win if p>0 else _loss for p in df_s["pnl"]],
-                marker_opacity=0.8,
+                marker_opacity=_cs["bar_opacity"],
                 hovertemplate=(
                     "<b>Position #%{pointNumber+1}</b><br>"
                     "%{customdata[2]}<br>"
@@ -1212,15 +1498,11 @@ if st.session_state.page == "dashboard":
 
         with r2c2:
             _card("P&L Mensuel")
-            fig_mo = go.Figure(go.Bar(
-                x=monthly["label"].tolist(), y=monthly["pnl"].tolist(),
-                marker=dict(
-                    color=[_win if v>=0 else _loss for v in monthly["pnl"]],
-                    opacity=0.85,
-                    line=dict(color=_bg, width=0.5)
-                ),
-                hovertemplate="<b>%{x}</b><br>%{y:+,.2f}$<extra></extra>",
-            ))
+            fig_mo = category_figure(
+                monthly["label"].tolist(), monthly["pnl"].tolist(),
+                [_win if v>=0 else _loss for v in monthly["pnl"]], _theme, _cs,
+                kind=_cs["monthly"], orientation="v",
+                hovertemplate="<b>%{x}</b><br>%{y:+,.2f}$<extra></extra>")
             fig_mo.add_hline(y=0, line_dash="dot", line_color=_grid, line_width=1)
             fig_mo.update_layout(**_base_layout(height=230))
             _style_axes(fig_mo, yprefix="$")
@@ -1351,8 +1633,8 @@ if st.session_state.page == "dashboard":
                         ))
                     except: pass
                 fig_vol.add_hline(y=0, line_dash="dot", line_color=_grid, line_width=1)
-                fig_vol.update_layout(**_base_layout(height=260, showlegend=True),
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.15))
+                fig_vol.update_layout(**_base_layout(height=260, showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.15)))
                 _style_axes(fig_vol, yprefix="$")
                 fig_vol.update_xaxes(title_text="Volume (lots)")
                 st.plotly_chart(fig_vol, use_container_width=True, config=_chart_cfg)
@@ -1371,18 +1653,13 @@ if st.session_state.page == "dashboard":
             ).reset_index()
             by_sym["win_rate"] = (by_sym["wins"]/by_sym["trades"]*100).round(1)
             by_sym = by_sym.sort_values("pnl", ascending=True)
-            fig_sym = go.Figure(go.Bar(
-                y=by_sym["symbol"].tolist(), x=by_sym["pnl"].tolist(),
-                orientation="h",
-                marker=dict(
-                    color=[_win if v>=0 else _loss for v in by_sym["pnl"]],
-                    opacity=0.85, line=dict(color=_bg, width=0.5),
-                ),
-                text=[f"{fmt(v)}  ·  {wr}% win" for v,wr in zip(by_sym["pnl"],by_sym["win_rate"])],
-                textposition="outside", textfont=dict(size=11, color=_text),
+            fig_sym = category_figure(
+                by_sym["symbol"].tolist(), by_sym["pnl"].tolist(),
+                [_win if v>=0 else _loss for v in by_sym["pnl"]], _theme, _cs,
+                kind=_cs["ranking"], orientation="h",
+                texts=[f"{fmt(v)}  ·  {wr}% win" for v,wr in zip(by_sym["pnl"],by_sym["win_rate"])],
                 hovertemplate="<b>%{y}</b><br>P&L : %{x:+,.2f}$<br>%{customdata[0]} trades · %{customdata[1]}% win<extra></extra>",
-                customdata=list(zip(by_sym["trades"].tolist(), by_sym["win_rate"].tolist())),
-            ))
+                customdata=list(zip(by_sym["trades"].tolist(), by_sym["win_rate"].tolist())))
             fig_sym.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
             fig_sym.update_layout(**_base_layout(height=max(280,len(by_sym)*48)))
             _style_axes(fig_sym, xprefix="$")
@@ -1396,16 +1673,15 @@ if st.session_state.page == "dashboard":
             ).reset_index()
             by_strat["win_rate"] = (by_strat["wins"]/by_strat["trades"]*100).round(1)
             by_strat = by_strat.sort_values("pnl", ascending=True)
-            fig_st = go.Figure(go.Bar(
-                y=by_strat["strategy"].tolist(), x=by_strat["pnl"].tolist(),
-                orientation="h",
-                marker=dict(color=CHART_COLORS[:len(by_strat)], opacity=0.85,
-                            line=dict(color=_bg, width=0.5)),
-                text=[f"{fmt(v)}  ·  {wr}% win" for v,wr in zip(by_strat["pnl"],by_strat["win_rate"])],
-                textposition="outside", textfont=dict(size=11, color=_text),
+            _strat_pal = [_theme["accent"], _theme["alt"], _theme["orange"], _theme["win"],
+                          _theme["loss"]] + CHART_COLORS
+            fig_st = category_figure(
+                by_strat["strategy"].tolist(), by_strat["pnl"].tolist(),
+                [_strat_pal[i % len(_strat_pal)] for i in range(len(by_strat))], _theme, _cs,
+                kind=_cs["ranking"], orientation="h",
+                texts=[f"{fmt(v)}  ·  {wr}% win" for v,wr in zip(by_strat["pnl"],by_strat["win_rate"])],
                 hovertemplate="<b>%{y}</b>: %{x:+,.2f}$<br>%{customdata[0]} trades · %{customdata[1]}% win<extra></extra>",
-                customdata=list(zip(by_strat["trades"].tolist(), by_strat["win_rate"].tolist())),
-            ))
+                customdata=list(zip(by_strat["trades"].tolist(), by_strat["win_rate"].tolist())))
             fig_st.add_vline(x=0, line_dash="dot", line_color=_grid, line_width=1)
             fig_st.update_layout(**_base_layout(height=max(280,len(by_strat)*48)))
             _style_axes(fig_st, xprefix="$")
@@ -1429,26 +1705,20 @@ if st.session_state.page == "dashboard":
                     z=pivot.values.tolist(),
                     x=pivot.columns.tolist(),
                     y=pivot.index.tolist(),
-                    colorscale=[
-                        [0.0,"#ff4d6d"],[0.4,"#2d1520"],[0.5,"#1e2535"],
-                        [0.6,"#152d25"],[1.0,"#00d4aa"],
-                    ],
+                    colorscale=diverging_scale(_theme),
                     zmid=0,
                     text=[[f"${v:+,.0f}" for v in row] for row in pivot.values],
                     texttemplate="%{text}",
-                    textfont=dict(size=12, color="white"),
+                    textfont=dict(size=12, color=_theme["text"], family=_cs["font"]),
+                    xgap=3 if _cs["corner"] else 1, ygap=3 if _cs["corner"] else 1,
                     hovertemplate="<b>%{y} · %{x}</b><br>P&L : %{z:+,.2f}$<extra></extra>",
                     showscale=True,
                     colorbar=dict(tickprefix="$", tickfont=dict(color=_text, size=11),
                                   bgcolor=_bg, bordercolor=_grid, thickness=12),
                 ))
-                fig_hm.update_layout(
-                    paper_bgcolor=_bg, plot_bgcolor=_bg,
-                    font=dict(color=_text, family="DM Sans, sans-serif"),
+                fig_hm.update_layout(**_base_layout(
                     height=max(280, len(pivot)*60),
-                    margin=dict(l=100, r=60, t=20, b=60),
-                    showlegend=False,
-                )
+                    margin=dict(l=100, r=60, t=20, b=60)))
                 fig_hm.update_xaxes(side="bottom", tickangle=-30,
                                     gridcolor=_grid, linecolor=_grid)
                 fig_hm.update_yaxes(gridcolor=_grid, linecolor=_grid)
@@ -1470,7 +1740,7 @@ if st.session_state.page == "dashboard":
                 orientation="h",
                 marker=dict(
                     color=[_win if v>=0 else _loss for v in by_mood["pnl"]],
-                    opacity=0.85, line=dict(color=_bg, width=0.5)
+                    opacity=_cs["bar_opacity"], line=dict(color=_bg, width=0.5)
                 ),
                 text=[f"{fmt(v)}  ·  {wr}% win  ·  {n}t"
                       for v,wr,n in zip(by_mood["pnl"],by_mood["win_rate"],by_mood["trades"])],
@@ -1564,7 +1834,7 @@ if st.session_state.page == "dashboard":
                 n_wd    = n_wd.reindex(_days_shown, fill_value=0)
                 fig_wd = go.Figure(go.Bar(
                     x=vals_wd.index.tolist(), y=vals_wd.tolist(),
-                    marker_color=_bar_colors(vals_wd), marker_opacity=0.85,
+                    marker_color=_bar_colors(vals_wd), marker_opacity=_cs["bar_opacity"],
                     customdata=n_wd.tolist(),
                     hovertemplate="<b>%{x}</b><br>" + cal_metric +
                                  " : %{y:,.2f}" + suffix +
@@ -1589,7 +1859,7 @@ if st.session_state.page == "dashboard":
                     fig_hrd = go.Figure(go.Bar(
                         x=[f"{int(h):02d}h" for h in vals_hr.index],
                         y=vals_hr.tolist(),
-                        marker_color=_bar_colors(vals_hr), marker_opacity=0.85,
+                        marker_color=_bar_colors(vals_hr), marker_opacity=_cs["bar_opacity"],
                         customdata=n_hr.tolist(),
                         hovertemplate="<b>%{x}</b><br>" + cal_metric +
                                      " : %{y:,.2f}" + suffix +
@@ -1623,20 +1893,21 @@ if st.session_state.page == "dashboard":
                 if not pivot_wh.empty and pivot_wh.shape[1] > 0:
                     _vals = pivot_wh.values.astype(float)
                     if _neutral:
-                        _cscale = [[0,"#111520"],[1,"rgba(124,106,255,0.9)"]]
+                        _cscale = sequential_scale(_theme, _cs)
                         _zmid, _zmin, _zmax = None, None, None
                     elif cal_metric == "Win rate %":
-                        _cscale = [[0,"rgba(255,77,109,0.85)"],[0.5,"#111520"],[1,"rgba(0,212,170,0.85)"]]
+                        _cscale = diverging_scale(_theme)
                         _zmid, _zmin, _zmax = 50, 0, 100
                     else:
                         _m = max(abs(np.nanmin(_vals)), abs(np.nanmax(_vals)), 1)
-                        _cscale = [[0,"rgba(255,77,109,0.85)"],[0.5,"#111520"],[1,"rgba(0,212,170,0.85)"]]
+                        _cscale = diverging_scale(_theme)
                         _zmid, _zmin, _zmax = (1 if cal_metric=="R:R moyen" else 0), -_m if cal_metric!="R:R moyen" else 0, _m
                     _hm_kwargs = dict(
                         z=_vals,
                         x=[f"{int(h):02d}h" for h in pivot_wh.columns],
                         y=pivot_wh.index.tolist(),
                         colorscale=_cscale,
+                        xgap=3 if _cs["corner"] else 1, ygap=3 if _cs["corner"] else 1,
                         hovertemplate="<b>%{y} · %{x}</b><br>" + cal_metric +
                                      " : %{z:,.2f}" + suffix + "<extra></extra>",
                         showscale=True,
@@ -3384,51 +3655,44 @@ elif st.session_state.page == "calendar":
                             pnl=("pnl","sum"), trades=("pnl","count")
                         ).reindex(_hrange_list, fill_value=0)
 
-                        fig_hr = go.Figure(go.Bar(
-                            x=[f"{int(h):02d}h" for h in hour_agg.index],
-                            y=hour_agg["pnl"].tolist(),
-                            marker_color=["#00d4aa" if v>=0 else "#ff4d6d" for v in hour_agg["pnl"]],
-                            marker_opacity=0.85,
-                            customdata=hour_agg["trades"].tolist(),
+                        _zt = get_theme(); _zcs = get_chart_style()
+                        fig_hr = category_figure(
+                            [f"{int(h):02d}h" for h in hour_agg.index], hour_agg["pnl"].tolist(),
+                            [_zt["win"] if v>=0 else _zt["loss"] for v in hour_agg["pnl"]],
+                            _zt, _zcs, kind=("lollipop" if _zcs["monthly"]=="lollipop" else "bar"),
+                            orientation="v", customdata=hour_agg["trades"].tolist(),
                             hovertemplate="<b>%{x}</b><br>P&L : %{y:+,.2f}$<br>"
-                                         "%{customdata} position(s)<extra></extra>",
-                        ))
-                        fig_hr.add_hline(y=0, line_color="#1a2035", line_width=1)
-                        fig_hr.update_layout(
-                            paper_bgcolor="#111520", plot_bgcolor="#111520",
-                            font=dict(color="#8892a4", size=11), height=260,
-                            margin=dict(l=50,r=20,t=10,b=30), showlegend=False)
-                        fig_hr.update_xaxes(gridcolor="#1a2035", linecolor="#1a2035")
-                        fig_hr.update_yaxes(gridcolor="#1a2035", linecolor="#1a2035", tickprefix="$")
-                        st.plotly_chart(fig_hr, use_container_width=True,
-                                        config={"scrollZoom": True, "displayModeBar": True,
-                                               "modeBarButtonsToRemove": ["lasso2d","select2d"]})
+                                          "%{customdata} position(s)<extra></extra>")
+                        fig_hr.add_hline(y=0, line_color=_zt["border"], line_width=1)
+                        fig_hr.update_layout(**chart_layout(_zt, _zcs, height=260,
+                                             margin=dict(l=50,r=20,t=10,b=30)))
+                        chart_axes(fig_hr, _zt, _zcs, yprefix="$", free_y=True)
+                        _zcfg = chart_config(_zcs); _zcfg.update(scrollZoom=True, displayModeBar=True)
+                        st.plotly_chart(fig_hr, use_container_width=True, config=_zcfg)
 
                         # Courbe de P&L cumulé intra-journalier
                         _dz_sorted = _dz_f.sort_values("_dtz")
                         _cum = _dz_sorted["pnl"].cumsum()
-                        fig_cum = go.Figure(go.Scatter(
-                            x=_dz_sorted["_dtz"].dt.strftime("%H:%M").tolist(),
-                            y=_cum.tolist(), mode="lines+markers",
-                            line=dict(color="#7c6aff", width=2.5, shape="hv"),
-                            marker=dict(size=7,
-                                        color=["#00d4aa" if p>0 else "#ff4d6d"
-                                               for p in _dz_sorted["pnl"]]),
+                        _cum_cs = dict(_zcs); _cum_cs["markers"] = True
+                        if _cum_cs["equity"] != "glow":
+                            _cum_cs["equity"] = "step"
+                        fig_cum = go.Figure(series_traces(
+                            _dz_sorted["_dtz"].dt.strftime("%H:%M").tolist(), _cum.tolist(),
+                            _zt["alt"], _cum_cs,
                             customdata=list(zip(_dz_sorted["symbol"], _dz_sorted["pnl"])),
                             hovertemplate="<b>%{x}</b><br>%{customdata[0]}<br>"
-                                         "Trade : %{customdata[1]:+,.2f}$<br>"
-                                         "Cumulé : %{y:+,.2f}$<extra></extra>",
-                        ))
-                        fig_cum.add_hline(y=0, line_color="#1a2035", line_width=1)
-                        fig_cum.update_layout(
-                            paper_bgcolor="#111520", plot_bgcolor="#111520",
-                            font=dict(color="#8892a4", size=11), height=220,
-                            margin=dict(l=50,r=20,t=24,b=30), showlegend=False,
+                                          "Trade : %{customdata[1]:+,.2f}$<br>"
+                                          "Cumulé : %{y:+,.2f}$<extra></extra>"))
+                        fig_cum.data[-1].marker.color = [_zt["win"] if p>0 else _zt["loss"]
+                                                         for p in _dz_sorted["pnl"]]
+                        fig_cum.data[-1].marker.size = 7
+                        fig_cum.add_hline(y=0, line_color=_zt["border"], line_width=1)
+                        fig_cum.update_layout(**chart_layout(_zt, _zcs, height=220,
+                            margin=dict(l=50,r=20,t=24,b=30),
                             title=dict(text="P&L cumulé au fil de la journée",
-                                      font=dict(size=12, color="#8892a4"), x=0.01))
-                        fig_cum.update_xaxes(gridcolor="#1a2035", linecolor="#1a2035")
-                        fig_cum.update_yaxes(gridcolor="#1a2035", linecolor="#1a2035", tickprefix="$")
-                        st.plotly_chart(fig_cum, use_container_width=True)
+                                       font=dict(size=12, color=_zt["muted"]), x=0.01)))
+                        chart_axes(fig_cum, _zt, _zcs, yprefix="$")
+                        st.plotly_chart(fig_cum, use_container_width=True, config=chart_config(_zcs))
 
                         # Liste détaillée des positions
                         st.markdown("##### Positions prises ce jour")
