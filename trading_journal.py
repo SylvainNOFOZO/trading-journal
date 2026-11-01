@@ -5,6 +5,11 @@ import plotly.graph_objects as go
 from datetime import date, datetime
 import json, os, base64, requests, io, hashlib, secrets as _secrets
 import calendar as _calmod
+import html as _html
+try:
+    import econ_kb as _kb          # fiches des indicateurs (fichier econ_kb.py à la racine du dépôt)
+except Exception:
+    _kb = None
 
 st.set_page_config(page_title="Trading Journal Pro", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
 
@@ -768,6 +773,79 @@ def capital_save(cap):
     except Exception:
         return False
 
+# ── Stockage clé/valeur générique (même table journal_data) ───────────────────
+def kv_load(key, default=None):
+    if not _sb_ready():
+        return st.session_state.get(f"_local_kv_{key}", default)
+    try:
+        r = requests.get(f"{SB_EP}?key=eq.{key}&select=value", headers=SB_HDR, timeout=10)
+        if r.status_code == 200 and r.json():
+            v = r.json()[0].get("value")
+            return default if v is None else v
+    except Exception:
+        pass
+    return default
+
+def kv_save(key, value):
+    if not _sb_ready():
+        st.session_state[f"_local_kv_{key}"] = value
+        return False
+    try:
+        r = requests.patch(f"{SB_EP}?key=eq.{key}",
+            headers={**SB_HDR, "Prefer": "return=representation"},
+            json={"value": value, "updated_at": "now()"}, timeout=15)
+        if r.status_code == 200 and isinstance(r.json(), list) and r.json():
+            return True
+        r2 = requests.post(SB_EP,
+            headers={**SB_HDR, "Prefer": "resolution=merge-duplicates,return=representation"},
+            json={"key": key, "value": value}, timeout=15)
+        return r2.status_code in (200, 201)
+    except Exception:
+        return False
+
+# ── Alertes d'annonces économiques (préférences par utilisateur) ──────────────
+ALERT_CCYS = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "CNY"]
+ALERT_DEFAULTS = {"email": "", "enabled": False, "lead_min": 30, "impacts": ["High"],
+                  "ccys": ["USD", "EUR"], "chrono_h": 4}
+
+def alert_prefs_get(user):
+    allp = kv_load("alert_prefs", {}) or {}
+    p = dict(ALERT_DEFAULTS); p.update(allp.get(user, {}) if isinstance(allp, dict) else {})
+    return p
+
+def alert_prefs_set(user, prefs):
+    allp = kv_load("alert_prefs", {}) or {}
+    if not isinstance(allp, dict):
+        allp = {}
+    allp[user] = prefs
+    return kv_save("alert_prefs", allp)
+
+def smtp_ready():
+    return all(st.secrets.get(k, "") for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASS"))
+
+def send_email(to, subject, html):
+    """Envoi SMTP (ex. Gmail : smtp.gmail.com:465 + mot de passe d'application)."""
+    import smtplib, ssl
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    host = st.secrets.get("SMTP_HOST", ""); port = int(st.secrets.get("SMTP_PORT", 465))
+    user = st.secrets.get("SMTP_USER", ""); pwd = st.secrets.get("SMTP_PASS", "")
+    sender = st.secrets.get("SMTP_FROM", user)
+    msg = MIMEMultipart("alternative"); msg["Subject"] = subject
+    msg["From"] = sender; msg["To"] = to
+    msg.attach(MIMEText(html, "html", "utf-8"))
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=20) as s:
+                s.login(user, pwd); s.sendmail(sender, [to], msg.as_string())
+        else:
+            with smtplib.SMTP(host, port, timeout=20) as s:
+                s.starttls(context=ssl.create_default_context())
+                s.login(user, pwd); s.sendmail(sender, [to], msg.as_string())
+        return True, "E-mail envoyé."
+    except Exception as e:
+        return False, f"Échec de l'envoi : {type(e).__name__}: {e}"
+
 def _resolve_scope(sel):
     """Normalise sel (str 'Tous'/compte, liste de comptes, ou None) en liste
     de comptes effectivement affichés, toujours restreinte aux droits."""
@@ -1089,6 +1167,293 @@ div[data-testid="stForm"] button {{ padding:11px 0 !important; font-size:14px !i
             unsafe_allow_html=True)
     return False
 
+# ════════════════════════════════════════════════════════════════════════════
+# CALENDRIER ÉCONOMIQUE (module) : utilisé par News & Analyse ET le chronomètre global
+# ════════════════════════════════════════════════════════════════════════════
+USER_TZ_OFFSET = 1  # GMT+1 (position géographique de l'utilisateur)
+
+_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+_CC2CCY = {"US": "USD", "EU": "EUR", "DE": "EUR", "FR": "EUR", "IT": "EUR", "ES": "EUR",
+           "NL": "EUR", "GB": "GBP", "UK": "GBP", "JP": "JPY", "CH": "CHF", "CA": "CAD",
+           "AU": "AUD", "NZ": "NZD", "CN": "CNY"}
+
+def _tv_fmt(v, scale, unit):
+    if v is None or v == "": return ""
+    try: x = float(v)
+    except Exception: return str(v)
+    s = f"{int(x)}" if x == int(x) else f"{x:.2f}".rstrip("0").rstrip(".")
+    if scale in ("K", "M", "B", "T"): s += scale
+    if unit == "%": s += "%"
+    return s
+
+def _extract_json_object(s, start):
+    """Depuis l'index d'un '{', renvoie la sous-chaîne JSON équilibrée (quote-aware)."""
+    depth = 0; in_str = False; esc = False
+    for i in range(start, len(s)):
+        c = s[i]
+        if in_str:
+            if esc: esc = False
+            elif c == "\\": esc = True
+            elif c == '"': in_str = False
+        else:
+            if c == '"': in_str = True
+            elif c == "{": depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0: return s[start:i + 1]
+    return None
+
+def _ff_impact(ev):
+    blob = (str(ev.get("impactTitle", "")) + " " + str(ev.get("impactClass", "")) + " "
+            + str(ev.get("impactName", ""))).lower()
+    if "red" in blob or "high" in blob: return "High"
+    if "ora" in blob or "medium" in blob: return "Medium"
+    if "yel" in blob or "low" in blob: return "Low"
+    return "Low"
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_calendar(scope="all"):
+    """Renvoie (events, source). events normalisés avec 'actual' si la source le fournit.
+    Ordre des sources : TradingView (Actual) -> ForexFactory (Actual) -> faireconomy (prévisions)."""
+    import json as _json
+    from datetime import timedelta as _tdd
+    today = datetime.utcnow()
+    if scope == "lastweek":   dfrom, dto = today - _tdd(days=9), today
+    elif scope == "thisweek": dfrom, dto = today - _tdd(days=3), today + _tdd(days=4)
+    elif scope == "nextweek": dfrom, dto = today + _tdd(days=1), today + _tdd(days=9)
+    else:                     dfrom, dto = today - _tdd(days=16), today + _tdd(days=9)
+
+    # ── Source 1 : TradingView (calendrier avec Actual) ──────────────────
+    try:
+        h = dict(_UA); h["Origin"] = "https://www.tradingview.com"
+        h["Referer"] = "https://www.tradingview.com/"
+        params = {"from": dfrom.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                  "to":   dto.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                  "countries": "US,EU,GB,JP,CH,CA,AU,NZ,CN,DE,FR,IT,ES"}
+        r = requests.get("https://economic-calendar.tradingview.com/events",
+                         params=params, headers=h, timeout=12)
+        if r.status_code == 200:
+            data = r.json()
+            res = data.get("result", data if isinstance(data, list) else [])
+            _imp = {1: "High", 0: "Medium", -1: "Low"}
+            out = []
+            for ev in res:
+                ccy = _CC2CCY.get(str(ev.get("country", "")).upper())
+                if not ccy: continue
+                out.append({
+                    "title": str(ev.get("title") or ev.get("indicator") or ""),
+                    "country": ccy,
+                    "impact": _imp.get(ev.get("importance", 0), "Medium"),
+                    "actual": _tv_fmt(ev.get("actual"), ev.get("scale", ""), ev.get("unit", "")),
+                    "forecast": _tv_fmt(ev.get("forecast"), ev.get("scale", ""), ev.get("unit", "")),
+                    "previous": _tv_fmt(ev.get("previous"), ev.get("scale", ""), ev.get("unit", "")),
+                    "date": str(ev.get("date", "")),
+                })
+            if out:
+                return out, "TradingView"
+    except Exception:
+        pass
+
+    # ── Source 2 : ForexFactory (page HTML, contient l'Actual) ───────────
+    try:
+        ffmap = {"lastweek": "last", "thisweek": "this", "nextweek": "next"}
+        weeks = ["last", "this", "next"] if scope == "all" else [ffmap.get(scope, "this")]
+        out, seen = [], set()
+        for wk in weeks:
+            try:
+                r = requests.get(f"https://www.forexfactory.com/calendar?week={wk}",
+                                 headers=_UA, timeout=12)
+                if r.status_code != 200: continue
+                html = r.text; pos = 0
+                while True:
+                    mk = html.find("calendarComponentStates[", pos)
+                    if mk == -1: break
+                    eq = html.find("=", mk); br = html.find("{", eq)
+                    if eq == -1 or br == -1: break
+                    obj = _extract_json_object(html, br)
+                    pos = (br + len(obj)) if obj else (mk + 25)
+                    if not obj: continue
+                    try: state = _json.loads(obj)
+                    except Exception: continue
+                    for day in (state.get("days") or []):
+                        for ev in (day.get("events") or []):
+                            name = ev.get("name") or ev.get("eventName") or ""
+                            cur = ev.get("currency") or ""
+                            if not name or not cur: continue
+                            dl = ev.get("dateline")
+                            try:
+                                iso = (datetime.utcfromtimestamp(int(dl))
+                                       .strftime("%Y-%m-%dT%H:%M:%S+00:00")) if dl else ""
+                            except Exception:
+                                iso = ""
+                            key = (str(name), iso, str(cur))
+                            if key in seen: continue
+                            seen.add(key)
+                            out.append({
+                                "title": str(name), "country": str(cur),
+                                "impact": _ff_impact(ev),
+                                "actual": str(ev.get("actual", "") or ""),
+                                "forecast": str(ev.get("forecast", "") or ""),
+                                "previous": str(ev.get("previous", "") or ""),
+                                "date": iso,
+                            })
+            except Exception:
+                continue
+        if out:
+            return out, "ForexFactory"
+    except Exception:
+        pass
+
+    # ── Source 3 : faireconomy (prévisions seules, pas d'Actual) ─────────
+    try:
+        base = "https://nfs.faireconomy.media/ff_calendar_{}.json"
+        scopes = ["lastweek", "thisweek", "nextweek"] if scope == "all" else [scope]
+        out, seen = [], set()
+        for sc in scopes:
+            try:
+                r = requests.get(base.format(sc), timeout=12, headers=_UA)
+                if r.status_code == 200:
+                    for ev in r.json():
+                        key = (str(ev.get("title", "")), str(ev.get("date", "")),
+                               str(ev.get("country", ev.get("currency", ""))))
+                        if key in seen: continue
+                        seen.add(key)
+                        out.append({
+                            "title": str(ev.get("title", "")),
+                            "country": str(ev.get("country", ev.get("currency", ""))),
+                            "impact": str(ev.get("impact", "")),
+                            "actual": "",
+                            "forecast": str(ev.get("forecast", ev.get("estimate", "")) or ""),
+                            "previous": str(ev.get("previous", ev.get("prior", "")) or ""),
+                            "date": str(ev.get("date", "")),
+                        })
+            except Exception:
+                pass
+        return out, "faireconomy (prévisions, sans chiffre publié)"
+    except Exception:
+        return [], "aucune"
+
+def _to_num(x):
+    if x is None: return None
+    s = str(x).strip().replace("%", "").replace(",", "")
+    if s in ("", "nan", "None"): return None
+    mult = 1.0
+    if s[-1:].upper() == "K": mult, s = 1e3, s[:-1]
+    elif s[-1:].upper() == "M": mult, s = 1e6, s[:-1]
+    elif s[-1:].upper() == "B": mult, s = 1e9, s[:-1]
+    elif s[-1:].upper() == "T": mult, s = 1e12, s[:-1]
+    try: return float(s) * mult
+    except: return None
+
+def _fmt_local(iso):
+    """Convertit l'horodatage ForexFactory (UTC/offset) en GMT+1."""
+    if not iso: return ("", None)
+    try:
+        s = str(iso).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is not None:
+            from datetime import timezone
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        dt = dt + __import__("datetime").timedelta(hours=USER_TZ_OFFSET)
+        _jf = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"][dt.weekday()]
+        return (f"{_jf} " + dt.strftime("%d/%m · %H:%M"), dt)
+    except Exception:
+        return (str(iso)[:16].replace("T", " "), None)
+
+
+
+def _parse_utc(iso):
+    """Horodatage ISO (avec ou sans offset) -> datetime UTC naïf, ou None."""
+    if not iso:
+        return None
+    try:
+        from datetime import timezone as _tzu
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(_tzu.utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
+
+def upcoming_major_events(ccys, impacts, horizon_h=168, past_min=15):
+    """Annonces à venir regroupées par horaire : [{t (ms UTC), titles, ccys, local}]."""
+    try:
+        evs, _src = _fetch_calendar("all")
+    except Exception:
+        return []
+    from datetime import timezone as _tzu
+    now = datetime.utcnow(); groups = {}
+    for ev in evs or []:
+        c = str(ev.get("country", "")); imp = str(ev.get("impact", ""))
+        if (ccys and c not in ccys) or (impacts and imp not in impacts):
+            continue
+        dt = _parse_utc(ev.get("date"))
+        if dt is None:
+            continue
+        dsec = (dt - now).total_seconds()
+        if dsec < -past_min * 60 or dsec > horizon_h * 3600:
+            continue
+        g = groups.setdefault(dt, {"t": int(dt.replace(tzinfo=_tzu.utc).timestamp() * 1000),
+                                   "titles": [], "ccys": [], "local": _fmt_local(ev.get("date"))[0]})
+        if ev.get("title") not in g["titles"]:
+            g["titles"].append(str(ev.get("title", "")))
+        if c not in g["ccys"]:
+            g["ccys"].append(c)
+    return [groups[k] for k in sorted(groups)]
+
+def render_countdown(groups, window_h, t):
+    """Chronomètre en direct (JavaScript, sans rechargement de page)."""
+    import streamlit.components.v1 as _components
+    if not groups:
+        return
+    data = json.dumps(groups[:15], ensure_ascii=True).replace("</", "<\\/")
+    html_c = """
+<div id="tjc"></div>
+<style>
+ body{margin:0;background:transparent;font-family:Inter,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+ #tjc{box-sizing:border-box;height:40px;display:flex;align-items:center;gap:12px;padding:0 14px;border-radius:10px;
+      background:__CARD__;border:1px solid __BORDER__;border-left:4px solid var(--c);color:__TEXT__;font-size:13px;
+      white-space:nowrap;overflow:hidden}
+ #tjc.idle{border-left-color:__BORDER__;color:__MUTED__;font-size:12px}
+ .dot{width:9px;height:9px;border-radius:50%;background:var(--c);flex-shrink:0}
+ .pulse .dot{animation:p 1s infinite} .pulse{box-shadow:0 0 0 1px var(--c)}
+ @keyframes p{0%{box-shadow:0 0 0 0 var(--c)}70%{box-shadow:0 0 0 9px transparent}100%{box-shadow:0 0 0 0 transparent}}
+ .lab{font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:800;color:var(--c)}
+ .tm{font-family:"JetBrains Mono",Consolas,monospace;font-size:18px;font-weight:800;color:var(--c);min-width:92px}
+ .ccy{font-weight:800;border:1px solid __BORDER__;border-radius:6px;padding:1px 7px;font-size:12px}
+ .ti{font-weight:700;overflow:hidden;text-overflow:ellipsis} .lc{margin-left:auto;color:__MUTED__;font-size:12px}
+</style>
+<script>
+const G=__DATA__, WIN=__WIN__, C={acc:"__ACCENT__",ora:"__ORANGE__",loss:"__LOSS__"};
+const p=n=>String(n).padStart(2,"0");
+function clock(ms){const s=Math.floor(Math.max(0,ms)/1000);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return(h>0?p(h)+":":"")+p(m)+":"+p(x);}
+function human(ms){const m=Math.round(ms/60000);if(m<60)return m+" min";const h=Math.floor(m/60);if(h<24)return h+" h "+p(m%60);return Math.floor(h/24)+" j "+(h%24)+" h";}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function tick(){
+  const now=Date.now(), el=document.getElementById("tjc");
+  const g=G.find(x=>x.t>now-10*60*1000);
+  if(!g){el.className="idle";el.style.setProperty("--c","__MUTED__");
+         el.innerHTML="Aucune annonce majeure à venir sur la période suivie";return;}
+  const rem=g.t-now, ti=esc(g.titles[0])+(g.titles.length>1?" +"+(g.titles.length-1):""), cc=esc(g.ccys.join(" · "));
+  if(rem>WIN){el.className="idle";el.style.setProperty("--c","__MUTED__");
+    el.innerHTML='<span class="dot"></span>Prochaine annonce majeure : <span class="ccy">'+cc+'</span><span class="ti">'+ti+'</span><span class="lc">'+esc(g.local)+' (GMT+1) · dans '+human(rem)+'</span>';return;}
+  let c=C.acc, lab="Annonce dans", tm=clock(rem), pulse=false;
+  if(rem<=0){c=C.loss;lab="En cours";tm="+"+clock(-rem);pulse=true;}
+  else if(rem<=5*60000){c=C.loss;pulse=true;} else if(rem<=30*60000){c=C.ora;}
+  el.className=pulse?"pulse":""; el.style.setProperty("--c",c);
+  el.innerHTML='<span class="dot"></span><span class="lab">'+lab+'</span><span class="tm">'+tm+'</span><span class="ccy">'+cc+'</span><span class="ti">'+ti+'</span><span class="lc">'+esc(g.local)+' (GMT+1)</span>';
+}
+tick(); setInterval(tick,1000);
+</script>"""
+    for k, v in {"__DATA__": data, "__WIN__": str(int(window_h * 3600 * 1000)),
+                 "__CARD__": t["card"], "__BORDER__": t["border"], "__TEXT__": t["text"],
+                 "__MUTED__": t["muted"], "__ACCENT__": t["accent"], "__ORANGE__": t["orange"],
+                 "__LOSS__": t["loss"]}.items():
+        html_c = html_c.replace(k, v)
+    _components.html(html_c, height=44)
+
+
 # Porte d'authentification : rien ne s'affiche tant qu'on n'est pas connecté
 if not login_gate():
     st.stop()
@@ -1216,6 +1581,17 @@ with _actcol:
 
 st.markdown(f"<hr style='margin:6px 0 16px;border-color:{_thd['border']}'>",
             unsafe_allow_html=True)
+
+# ── CHRONOMÈTRE GLOBAL : prochaine annonce majeure, visible quelle que soit la page ──
+if "_alert_prefs" not in st.session_state:
+    st.session_state["_alert_prefs"] = alert_prefs_get(st.session_state.get("auth_user", ""))
+_ap = st.session_state["_alert_prefs"]
+try:
+    _cd_groups = upcoming_major_events(set(_ap.get("ccys") or ALERT_DEFAULTS["ccys"]),
+                                       set(_ap.get("impacts") or ["High"]), horizon_h=168)
+    render_countdown(_cd_groups, float(_ap.get("chrono_h", 4)), _thd)
+except Exception:
+    pass   # le chronomètre ne doit jamais bloquer l'app
 
 # ── BANNER MODE ────────────────────────────────────────────────────────────────
 def mode_banner():
@@ -2829,6 +3205,68 @@ elif st.session_state.page == "analyse":
     st.caption("Ce que le marché prévoyait (consensus) vs ce qui est publié, et l'impact "
                "estimé de chaque chiffre sur vos actifs. Heures en GMT+1.")
 
+    # ── Alertes e-mail & chronomètre ──────────────────────────────────────────
+    _me = st.session_state.get("auth_user", "")
+    _ap = st.session_state.get("_alert_prefs") or alert_prefs_get(_me)
+    _al_on = bool(_ap.get("enabled") and _ap.get("email"))
+    with st.expander("Alertes e-mail et chronomètre · " +
+                     (f"activées ({_ap.get('lead_min')} min avant, {_ap.get('email')})" if _al_on
+                      else "désactivées")):
+        with st.form("alert_form"):
+            a1, a2 = st.columns([2, 1])
+            with a1:
+                al_email = st.text_input("Adresse e-mail pour les alertes", value=_ap.get("email", ""),
+                                         placeholder="vous@exemple.com")
+            with a2:
+                al_on = st.toggle("Alertes e-mail activées", value=bool(_ap.get("enabled")))
+            a3, a4, a5 = st.columns([1, 1.3, 2])
+            with a3:
+                _leads = [15, 30, 60, 120]
+                al_lead = st.selectbox("Prévenir", _leads,
+                    index=_leads.index(_ap.get("lead_min", 30)) if _ap.get("lead_min", 30) in _leads else 1,
+                    format_func=lambda m: f"{m} min avant" if m < 60 else f"{m//60} h avant")
+            with a4:
+                al_imp = st.multiselect("Importance", ["High", "Medium", "Low"],
+                    default=[i for i in _ap.get("impacts", ["High"]) if i in ("High", "Medium", "Low")] or ["High"],
+                    format_func=lambda x: {"High": "Fort", "Medium": "Moyen", "Low": "Faible"}[x])
+            with a5:
+                al_ccy = st.multiselect("Devises suivies", ALERT_CCYS,
+                    default=[c for c in _ap.get("ccys", ["USD", "EUR"]) if c in ALERT_CCYS] or ["USD"])
+            al_chrono = st.slider("Afficher le chronomètre en grand à partir de (heures avant l'annonce)",
+                                  1, 24, int(_ap.get("chrono_h", 4)))
+            b1, b2 = st.columns(2)
+            with b1:
+                al_save = st.form_submit_button("Enregistrer", use_container_width=True, type="primary")
+            with b2:
+                al_test = st.form_submit_button("Envoyer un e-mail de test", use_container_width=True)
+        import re as _re_mail
+        _mail_ok = bool(_re_mail.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", (al_email or "").strip()))
+        if al_save:
+            if al_on and not _mail_ok:
+                st.error("Adresse e-mail invalide.")
+            else:
+                _newp = {"email": (al_email or "").strip(), "enabled": bool(al_on), "lead_min": int(al_lead),
+                         "impacts": al_imp or ["High"], "ccys": al_ccy or ["USD"], "chrono_h": int(al_chrono)}
+                if alert_prefs_set(_me, _newp):
+                    st.session_state["_alert_prefs"] = _newp
+                    st.success("Préférences enregistrées. Le chronomètre et les alertes les utilisent désormais.")
+                    st.rerun()
+                else:
+                    st.session_state["_alert_prefs"] = _newp
+                    st.warning("Enregistré pour cette session seulement (base de données injoignable).")
+        if al_test:
+            if not _mail_ok:
+                st.error("Saisissez d'abord une adresse e-mail valide.")
+            elif not smtp_ready():
+                st.info("Envoi impossible : ajoutez SMTP_HOST, SMTP_PORT, SMTP_USER et SMTP_PASS dans les "
+                        "secrets de l'app (voir le guide de mise en place des alertes).")
+            else:
+                _ok, _msg = send_email(al_email.strip(), "Trading Journal · e-mail de test",
+                    "<p>Les alertes d'annonces économiques sont correctement configurées.</p>")
+                (st.success if _ok else st.error)(_msg)
+        st.caption("Le chronomètre s'affiche en haut de toutes les pages. Les e-mails sont envoyés par une "
+                   "tâche planifiée (GitHub Actions, toutes les 5 min) : l'app n'a pas besoin d'être ouverte.")
+
     USER_TZ_OFFSET = 1  # GMT+1 (position géographique de l'utilisateur)
 
     # ── Univers d'actifs (FX, indices, taux/obligations, matières, crypto) ────
@@ -2868,198 +3306,11 @@ elif st.session_state.page == "analyse":
                   "dxy": "Dollar", "metal": "Métal", "commodity": "Énergie",
                   "crypto": "Crypto"}
 
-    _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                         "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
-    _CC2CCY = {"US": "USD", "EU": "EUR", "DE": "EUR", "FR": "EUR", "IT": "EUR", "ES": "EUR",
-               "NL": "EUR", "GB": "GBP", "UK": "GBP", "JP": "JPY", "CH": "CHF", "CA": "CAD",
-               "AU": "AUD", "NZ": "NZD", "CN": "CNY"}
-
-    def _tv_fmt(v, scale, unit):
-        if v is None or v == "": return ""
-        try: x = float(v)
-        except Exception: return str(v)
-        s = f"{int(x)}" if x == int(x) else f"{x:.2f}".rstrip("0").rstrip(".")
-        if scale in ("K", "M", "B", "T"): s += scale
-        if unit == "%": s += "%"
-        return s
-
-    def _extract_json_object(s, start):
-        """Depuis l'index d'un '{', renvoie la sous-chaîne JSON équilibrée (quote-aware)."""
-        depth = 0; in_str = False; esc = False
-        for i in range(start, len(s)):
-            c = s[i]
-            if in_str:
-                if esc: esc = False
-                elif c == "\\": esc = True
-                elif c == '"': in_str = False
-            else:
-                if c == '"': in_str = True
-                elif c == "{": depth += 1
-                elif c == "}":
-                    depth -= 1
-                    if depth == 0: return s[start:i + 1]
-        return None
-
-    def _ff_impact(ev):
-        blob = (str(ev.get("impactTitle", "")) + " " + str(ev.get("impactClass", "")) + " "
-                + str(ev.get("impactName", ""))).lower()
-        if "red" in blob or "high" in blob: return "High"
-        if "ora" in blob or "medium" in blob: return "Medium"
-        if "yel" in blob or "low" in blob: return "Low"
-        return "Low"
-
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def _fetch_calendar(scope="all"):
-        """Renvoie (events, source). events normalisés avec 'actual' si la source le fournit.
-        Ordre des sources : TradingView (Actual) -> ForexFactory (Actual) -> faireconomy (prévisions)."""
-        import json as _json
-        from datetime import timedelta as _tdd
-        today = datetime.utcnow()
-        if scope == "lastweek":   dfrom, dto = today - _tdd(days=9), today
-        elif scope == "thisweek": dfrom, dto = today - _tdd(days=3), today + _tdd(days=4)
-        elif scope == "nextweek": dfrom, dto = today + _tdd(days=1), today + _tdd(days=9)
-        else:                     dfrom, dto = today - _tdd(days=16), today + _tdd(days=9)
-
-        # ── Source 1 : TradingView (calendrier avec Actual) ──────────────────
-        try:
-            h = dict(_UA); h["Origin"] = "https://www.tradingview.com"
-            h["Referer"] = "https://www.tradingview.com/"
-            params = {"from": dfrom.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-                      "to":   dto.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-                      "countries": "US,EU,GB,JP,CH,CA,AU,NZ,CN,DE,FR,IT,ES"}
-            r = requests.get("https://economic-calendar.tradingview.com/events",
-                             params=params, headers=h, timeout=12)
-            if r.status_code == 200:
-                data = r.json()
-                res = data.get("result", data if isinstance(data, list) else [])
-                _imp = {1: "High", 0: "Medium", -1: "Low"}
-                out = []
-                for ev in res:
-                    ccy = _CC2CCY.get(str(ev.get("country", "")).upper())
-                    if not ccy: continue
-                    out.append({
-                        "title": str(ev.get("title") or ev.get("indicator") or ""),
-                        "country": ccy,
-                        "impact": _imp.get(ev.get("importance", 0), "Medium"),
-                        "actual": _tv_fmt(ev.get("actual"), ev.get("scale", ""), ev.get("unit", "")),
-                        "forecast": _tv_fmt(ev.get("forecast"), ev.get("scale", ""), ev.get("unit", "")),
-                        "previous": _tv_fmt(ev.get("previous"), ev.get("scale", ""), ev.get("unit", "")),
-                        "date": str(ev.get("date", "")),
-                    })
-                if out:
-                    return out, "TradingView"
-        except Exception:
-            pass
-
-        # ── Source 2 : ForexFactory (page HTML, contient l'Actual) ───────────
-        try:
-            ffmap = {"lastweek": "last", "thisweek": "this", "nextweek": "next"}
-            weeks = ["last", "this", "next"] if scope == "all" else [ffmap.get(scope, "this")]
-            out, seen = [], set()
-            for wk in weeks:
-                try:
-                    r = requests.get(f"https://www.forexfactory.com/calendar?week={wk}",
-                                     headers=_UA, timeout=12)
-                    if r.status_code != 200: continue
-                    html = r.text; pos = 0
-                    while True:
-                        mk = html.find("calendarComponentStates[", pos)
-                        if mk == -1: break
-                        eq = html.find("=", mk); br = html.find("{", eq)
-                        if eq == -1 or br == -1: break
-                        obj = _extract_json_object(html, br)
-                        pos = (br + len(obj)) if obj else (mk + 25)
-                        if not obj: continue
-                        try: state = _json.loads(obj)
-                        except Exception: continue
-                        for day in (state.get("days") or []):
-                            for ev in (day.get("events") or []):
-                                name = ev.get("name") or ev.get("eventName") or ""
-                                cur = ev.get("currency") or ""
-                                if not name or not cur: continue
-                                dl = ev.get("dateline")
-                                try:
-                                    iso = (datetime.utcfromtimestamp(int(dl))
-                                           .strftime("%Y-%m-%dT%H:%M:%S+00:00")) if dl else ""
-                                except Exception:
-                                    iso = ""
-                                key = (str(name), iso, str(cur))
-                                if key in seen: continue
-                                seen.add(key)
-                                out.append({
-                                    "title": str(name), "country": str(cur),
-                                    "impact": _ff_impact(ev),
-                                    "actual": str(ev.get("actual", "") or ""),
-                                    "forecast": str(ev.get("forecast", "") or ""),
-                                    "previous": str(ev.get("previous", "") or ""),
-                                    "date": iso,
-                                })
-                except Exception:
-                    continue
-            if out:
-                return out, "ForexFactory"
-        except Exception:
-            pass
-
-        # ── Source 3 : faireconomy (prévisions seules, pas d'Actual) ─────────
-        try:
-            base = "https://nfs.faireconomy.media/ff_calendar_{}.json"
-            scopes = ["lastweek", "thisweek", "nextweek"] if scope == "all" else [scope]
-            out, seen = [], set()
-            for sc in scopes:
-                try:
-                    r = requests.get(base.format(sc), timeout=12, headers=_UA)
-                    if r.status_code == 200:
-                        for ev in r.json():
-                            key = (str(ev.get("title", "")), str(ev.get("date", "")),
-                                   str(ev.get("country", ev.get("currency", ""))))
-                            if key in seen: continue
-                            seen.add(key)
-                            out.append({
-                                "title": str(ev.get("title", "")),
-                                "country": str(ev.get("country", ev.get("currency", ""))),
-                                "impact": str(ev.get("impact", "")),
-                                "actual": "",
-                                "forecast": str(ev.get("forecast", ev.get("estimate", "")) or ""),
-                                "previous": str(ev.get("previous", ev.get("prior", "")) or ""),
-                                "date": str(ev.get("date", "")),
-                            })
-                except Exception:
-                    pass
-            return out, "faireconomy (prévisions, sans chiffre publié)"
-        except Exception:
-            return [], "aucune"
-
-    def _to_num(x):
-        if x is None: return None
-        s = str(x).strip().replace("%", "").replace(",", "")
-        if s in ("", "nan", "None"): return None
-        mult = 1.0
-        if s[-1:].upper() == "K": mult, s = 1e3, s[:-1]
-        elif s[-1:].upper() == "M": mult, s = 1e6, s[:-1]
-        elif s[-1:].upper() == "B": mult, s = 1e9, s[:-1]
-        elif s[-1:].upper() == "T": mult, s = 1e12, s[:-1]
-        try: return float(s) * mult
-        except: return None
-
-    def _fmt_local(iso):
-        """Convertit l'horodatage ForexFactory (UTC/offset) en GMT+1."""
-        if not iso: return ("", None)
-        try:
-            s = str(iso).replace("Z", "+00:00")
-            dt = datetime.fromisoformat(s)
-            if dt.tzinfo is not None:
-                from datetime import timezone
-                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-            dt = dt + __import__("datetime").timedelta(hours=USER_TZ_OFFSET)
-            return (dt.strftime("%a %d/%m · %H:%M"), dt)
-        except Exception:
-            return (str(iso)[:16].replace("T", " "), None)
-
     # Polarité "économique" : +1 si un chiffre PLUS HAUT = économie plus forte/chaude
     def _growth_polarity(title):
         t = title.lower()
-        if any(k in t for k in ["unemployment rate", "jobless", "claims", "continuing"]):
+        if any(k in t for k in ["unemployment rate", "unemployment change", "jobless", "claims",
+                                 "claimant", "continuing"]):
             return -1
         if any(k in t for k in ["cpi", "inflation", "ppi", "pce", "gdp", "retail", "nonfarm",
                                  "non-farm", "payroll", "employment change", "adp", "jolts",
@@ -3193,7 +3444,15 @@ elif st.session_state.page == "analyse":
                 w = _w.get(str(ev.get("impact", "Low")), 1)
                 asset_score[aset][0] += adir * w
                 asset_score[aset][1] += w
+        # scénarios : effet estimé si le chiffre sort au-dessus / en dessous du consensus
+        scen = {}
+        if pol != 0 and cat:
+            for aset in sel_assets:
+                cfg = ASSETS[aset]
+                if country in cfg["ccy"]:
+                    scen[aset] = (_impact(cfg, country, cat, pol), _impact(cfg, country, cat, -pol))
         feed.append({
+            "scen": scen,
             "title": title, "country": country, "impact": str(ev.get("impact", "")),
             "actual": str(actual).strip() if has_actual else None,
             "forecast": str(forecast).strip() if str(forecast).strip() not in ("", "nan", "None") else None,
@@ -3279,6 +3538,66 @@ elif st.session_state.page == "analyse":
                 f"<div style='font-size:{vfont};font-weight:800;color:{color};"
                 f"font-family:JetBrains Mono,monospace;line-height:1.3'>{val if val is not None else '—'}</div></div>")
 
+    def _dir_chip(aset, d):
+        if d > 0:   cc, ic = _ta["win"], "▲"
+        elif d < 0: cc, ic = _ta["loss"], "▼"
+        else:       cc, ic = _ta["muted"], "•"
+        return (f"<span style='display:inline-block;font-size:11px;font-weight:700;color:{cc};"
+                f"background:{cc}1A;border:1px solid {cc}40;border-radius:6px;padding:1px 7px;"
+                f"margin:2px 4px 2px 0'>{ic} {_html.escape(aset.split(' (')[0])}</span>")
+
+    _DIRLBL = {1: "Hausse", -1: "Baisse", 0: "Neutre"}
+
+    def _kb_details(e):
+        """Fiche dépliable : description de l'indicateur, lecture du marché, scénarios, liens."""
+        esc = lambda x: _html.escape(str(x), quote=False)
+        d = _kb.describe(e["title"], e["country"]) if _kb else None
+        lab = (f"font-size:10px;letter-spacing:.6px;text-transform:uppercase;font-weight:800;"
+               f"color:{_ta['muted']};margin:10px 0 3px")
+        txt = f"font-size:12.5px;line-height:1.55;color:{_ta['text']}"
+        if d is None:
+            body = (f"<div style='{txt}'>Fiche détaillée indisponible (fichier <code>econ_kb.py</code> "
+                    f"absent du dépôt). L'impact dépend de l'écart entre le chiffre publié et le consensus.</div>")
+        else:
+            body = (f"<div style='{lab}'>Ce que c'est</div><div style='{txt}'>{esc(d['what'])}</div>"
+                    f"<div style='display:flex;gap:18px;flex-wrap:wrap;font-size:11.5px;color:{_ta['muted']};margin-top:4px'>"
+                    f"<span><b style='color:{_ta['text']}'>Publié par</b> : {esc(d['pub'])}</span>"
+                    f"<span><b style='color:{_ta['text']}'>Fréquence</b> : {esc(d['freq'])}</span></div>"
+                    f"<div style='{lab}'>Pourquoi le marché le suit</div><div style='{txt}'>{esc(d['why'])}</div>"
+                    f"<div style='{lab}'>Lecture habituelle</div>"
+                    f"<div style='{txt}'><b style='color:{_ta['win']}'>Au-dessus du consensus</b> : {esc(d['up'])}<br>"
+                    f"<b style='color:{_ta['loss']}'>En dessous du consensus</b> : {esc(d['down'])}</div>")
+            if e["has_actual"] and e["delta"] is not None and e["forecast"]:
+                above = e["delta"] > 0; same = e["delta"] == 0
+                verdict = ("conforme au consensus, réaction en général limitée." if same else
+                           (("au-dessus" if above else "en dessous") + " du consensus. Lecture habituelle : "
+                            + (d["up"] if above else d["down"]).split(" : ", 1)[-1]))
+                vcol = _ta["muted"] if same else (_ta["win"] if e["es"] > 0 else _ta["loss"] if e["es"] < 0 else _ta["accent"])
+                body += (f"<div style='margin-top:8px;padding:8px 10px;border-radius:8px;background:{vcol}14;"
+                         f"border:1px solid {vcol}40;{txt}'><b style='color:{vcol}'>Résultat publié</b> : "
+                         f"{esc(e['actual'])} pour {esc(e['forecast'])} attendu, {esc(verdict)}</div>")
+        if e.get("scen"):
+            rows = "".join(
+                f"<tr><td style='padding:3px 10px 3px 0;color:{_ta['text']};font-size:12px'>{esc(a.split(' (')[0])}</td>"
+                f"<td style='padding:3px 10px'>{_dir_chip(_DIRLBL[u], u)}</td>"
+                f"<td style='padding:3px 10px'>{_dir_chip(_DIRLBL[dn], dn)}</td></tr>"
+                for a, (u, dn) in e["scen"].items())
+            body += (f"<div style='{lab}'>Scénarios pour vos actifs</div>"
+                     f"<table style='border-collapse:collapse'><tr>"
+                     f"<th style='text-align:left;font-size:10px;color:{_ta['muted']};padding:0 10px 2px 0'>Actif</th>"
+                     f"<th style='font-size:10px;color:{_ta['win']};padding:0 10px 2px'>Si au-dessus</th>"
+                     f"<th style='font-size:10px;color:{_ta['loss']};padding:0 10px 2px'>Si en dessous</th></tr>{rows}</table>")
+        if d is not None and d["links"]:
+            body += (f"<div style='{lab}'>Lire pour aller plus loin</div><div>" + "".join(
+                f"<a href='{u}' target='_blank' rel='noopener noreferrer' style='display:inline-block;"
+                f"font-size:12px;font-weight:700;color:{_ta['accent']};text-decoration:none;"
+                f"border:1px solid {_ta['accent']}55;border-radius:7px;padding:3px 10px;margin:2px 6px 2px 0'>"
+                f"Lire : {esc(l)} ↗</a>" for l, u in d["links"]) + "</div>")
+        return (f"<details style='margin-top:8px;border-top:1px dashed {_ta['border']};padding-top:6px'>"
+                f"<summary style='cursor:pointer;font-size:12px;font-weight:700;color:{_ta['accent']};"
+                f"list-style-position:inside'>Comprendre cette annonce et son impact</summary>"
+                f"<div style='padding:4px 2px 2px'>{body}</div></details>")
+
     for e in shown:
         # couleur de bord selon la surprise
         if e["has_actual"] and e["es"] != 0:
@@ -3356,6 +3675,7 @@ elif st.session_state.page == "analyse":
             f"<div style='display:flex;flex-wrap:wrap;align-items:center;gap:0'>"
             f"<span style='font-size:10px;color:{_ta['muted']};text-transform:uppercase;"
             f"letter-spacing:.5px;font-weight:700;margin-right:8px'>Impact estimé</span>{chips}</div>"
+            f"{_kb_details(e)}"
             f"</div>",
             unsafe_allow_html=True)
 
