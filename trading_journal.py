@@ -410,8 +410,31 @@ h1,h2,h3,h4,h5,h6,p,label,.stMarkdown {{ color: {t['text']} !important; }}
 div[data-baseweb="input"] input, div[data-baseweb="textarea"] textarea,
 div[data-baseweb="select"] > div {{
     background-color: {t['bg2']} !important; border-color: {t['border']} !important; color: {t['text']} !important; }}
+/* Champs Streamlit 1.66 (react-aria) : fond, texte, contour et focus aux couleurs du design */
+[data-testid="stTextInputRootElement"], [data-testid="stTextAreaRootElement"],
+[data-testid="stNumberInputContainer"], .stApp [data-rac][role="group"] {{
+    background-color: {t['bg2']} !important; border:1px solid {t['border']} !important; border-radius:10px !important; }}
+[data-testid="stTextInputRootElement"]:focus-within, [data-testid="stTextAreaRootElement"]:focus-within,
+[data-testid="stNumberInputContainer"]:focus-within, .stApp [data-rac][role="group"]:focus-within {{
+    border-color: {t['accent']} !important; box-shadow:0 0 0 2px {t['accent']}26 !important; }}
+.stApp input, .stApp textarea {{ color: {t['text']} !important; caret-color: {t['accent']}; }}
+.stApp input::placeholder, .stApp textarea::placeholder {{ color: {t['muted']} !important; opacity:.8; }}
+.stApp [data-rac][role="group"] svg, [data-testid="stNumberInputContainer"] button {{ color: {t['muted']} !important; fill: {t['muted']}; }}
+[role="listbox"] {{ background:{t['card']} !important; border:1px solid {t['border']} !important; border-radius:10px !important; }}
+[role="listbox"] [role="option"] {{ color:{t['text']} !important; }}
+[role="listbox"] [role="option"][data-focused="true"], [role="listbox"] [role="option"]:hover {{ background:{t['accent']}1f !important; }}
+[role="listbox"] [role="option"][aria-selected="true"] {{ color:{t['accent']} !important; font-weight:700; }}
 .stButton > button {{ background:linear-gradient(135deg,{t['accent']},{t['alt']});color:{t['btn_text']};font-weight:800;border:none;border-radius:10px;box-shadow:0 2px 8px {t['accent']}33; }}
 .stButton > button:hover {{ filter:brightness(1.08); color:{t['btn_text']} !important; box-shadow:0 4px 14px {t['accent']}55; }}
+/* Boutons de formulaire (Se connecter, Enregistrer...) : même style que les boutons du design */
+[data-testid="stFormSubmitButton"] > button {{ background:linear-gradient(135deg,{t['accent']},{t['alt']}) !important;
+    color:{t['btn_text']} !important; font-weight:800; border:none !important; border-radius:10px;
+    box-shadow:0 2px 8px {t['accent']}33; }}
+[data-testid="stFormSubmitButton"] > button:hover {{ filter:brightness(1.08); box-shadow:0 4px 14px {t['accent']}55; }}
+[data-testid="stFormSubmitButton"] > button * {{ color:{t['btn_text']} !important; }}
+[data-testid="stFormSubmitButton"] > button[kind="secondaryFormSubmit"] {{ background:{t['bg2']} !important;
+    color:{t['text']} !important; border:1px solid {t['border']} !important; box-shadow:none; }}
+[data-testid="stFormSubmitButton"] > button[kind="secondaryFormSubmit"] * {{ color:{t['text']} !important; }}
 .kpi {{ background:linear-gradient(145deg,{t['card']},{t['bg2']});border:1px solid {t['border']};border-radius:12px;padding:12px 14px 10px;position:relative;overflow:hidden;min-height:84px;box-shadow:0 1px 2px rgba(0,0,0,.08),0 4px 14px rgba(0,0,0,.06); }}
 .kpi-bar {{ position:absolute;top:0;left:0;right:0;height:3px; }}
 .kpi-icon {{ font-size:14px;margin-bottom:2px;float:right;opacity:.85; }}
@@ -453,20 +476,14 @@ hr {{ border-color:{t['border']} !important; }}
 .mode-banner-all  {{ background:{t['alt']}14;border:1px solid {t['alt']}4d;border-radius:10px;
     padding:8px 16px;font-size:12px;color:{t['alt']};font-weight:700;margin-bottom:12px; }}
 .grad-card {{ background:linear-gradient(145deg,{t['card']},{t['bg2']});border:1px solid {t['border']};border-radius:14px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.18),0 8px 24px rgba(0,0,0,.08); }}
-/* Navigation horizontale en pastilles : libellés entiers, retour à la ligne auto */
-div[role="radiogroup"] {{ gap:8px; flex-wrap:wrap; align-items:center; }}
-div[role="radiogroup"] > label {{
-    background:{t['card']}; border:1px solid {t['border']}; border-radius:10px;
-    padding:6px 15px; margin:0; cursor:pointer; transition:all .15s; white-space:nowrap; }}
-div[role="radiogroup"] > label:hover {{ border-color:{t['accent']}; }}
-div[role="radiogroup"] > label > div:first-child {{ display:none; }}
-div[role="radiogroup"] > label p {{ font-size:13px !important; margin:0 !important;
-    color:{t['text']} !important; }}
-div[role="radiogroup"] > label:has(input:checked) {{
-    background:linear-gradient(135deg,{t['accent']},{t['alt']});
-    border-color:transparent; box-shadow:0 2px 10px {t['accent']}44; }}
-div[role="radiogroup"] > label:has(input:checked) p {{
-    color:{t['btn_text']} !important; font-weight:800; }}
+/* Couleurs du design sur les composants Streamlit (sinon rouge par défaut) */
+header[data-testid="stHeader"] {{ background:transparent !important; }}
+span[data-tag] {{ background:linear-gradient(135deg,{t['accent']},{t['alt']}) !important; color:{t['btn_text']} !important;
+    border-radius:8px !important; }}
+span[data-tag] * {{ color:{t['btn_text']} !important; }}
+label[data-testid="stRadioOption"] > div > div:first-child {{ border-color:{t['border']} !important; }}
+label[data-testid="stRadioOption"][data-selected="true"] > div > div:first-child {{
+    background:{t['accent']} !important; border-color:{t['accent']} !important; }}
 .grad-accent {{ background:linear-gradient(135deg,{t['accent']},{t['alt']});-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:800; }}
 </style>
 """
@@ -805,8 +822,7 @@ def kv_save(key, value):
 
 # ── Alertes d'annonces économiques (préférences par utilisateur) ──────────────
 ALERT_CCYS = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "CNY"]
-ALERT_DEFAULTS = {"email": "", "enabled": False, "lead_min": 30, "impacts": ["High"],
-                  "ccys": ["USD", "EUR"], "chrono_h": 4}
+ALERT_DEFAULTS = {"impacts": ["High"], "ccys": ["USD", "EUR"], "chrono_h": 4}
 
 def alert_prefs_get(user):
     allp = kv_load("alert_prefs", {}) or {}
@@ -820,31 +836,6 @@ def alert_prefs_set(user, prefs):
     allp[user] = prefs
     return kv_save("alert_prefs", allp)
 
-def smtp_ready():
-    return all(st.secrets.get(k, "") for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASS"))
-
-def send_email(to, subject, html):
-    """Envoi SMTP (ex. Gmail : smtp.gmail.com:465 + mot de passe d'application)."""
-    import smtplib, ssl
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-    host = st.secrets.get("SMTP_HOST", ""); port = int(st.secrets.get("SMTP_PORT", 465))
-    user = st.secrets.get("SMTP_USER", ""); pwd = st.secrets.get("SMTP_PASS", "")
-    sender = st.secrets.get("SMTP_FROM", user)
-    msg = MIMEMultipart("alternative"); msg["Subject"] = subject
-    msg["From"] = sender; msg["To"] = to
-    msg.attach(MIMEText(html, "html", "utf-8"))
-    try:
-        if port == 465:
-            with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=20) as s:
-                s.login(user, pwd); s.sendmail(sender, [to], msg.as_string())
-        else:
-            with smtplib.SMTP(host, port, timeout=20) as s:
-                s.starttls(context=ssl.create_default_context())
-                s.login(user, pwd); s.sendmail(sender, [to], msg.as_string())
-        return True, "E-mail envoyé."
-    except Exception as e:
-        return False, f"Échec de l'envoi : {type(e).__name__}: {e}"
 
 def _resolve_scope(sel):
     """Normalise sel (str 'Tous'/compte, liste de comptes, ou None) en liste
@@ -1081,6 +1072,11 @@ def logout():
         st.session_state.pop(k, None)
     st.rerun()
 
+def _logo_svg(c, sz):
+    return (f"<svg width='{sz}' height='{sz}' viewBox='0 0 24 24' fill='none' stroke='{c}' stroke-width='2.4' "
+            f"stroke-linecap='round' stroke-linejoin='round'><polyline points='3 17 9 11 13 15 21 7'/>"
+            f"<polyline points='15 7 21 7 21 13'/></svg>")
+
 def login_gate():
     """Affiche le formulaire de connexion. Retourne True si connecté."""
     if st.session_state.get("auth_user"):
@@ -1119,7 +1115,7 @@ div[data-testid="stForm"] button {{ padding:11px 0 !important; font-size:14px !i
         f"<div style='display:inline-flex;align-items:center;justify-content:center;width:68px;"
         f"height:68px;border-radius:20px;background:linear-gradient(135deg,{_t['accent']},{_t['alt']});"
         f"box-shadow:0 14px 34px {_t['accent']}55;margin-bottom:14px'>"
-        f"<i class='fa-solid fa-chart-line' style='font-size:28px;color:{_t['btn_text']}'></i></div>"
+        + _logo_svg(_t['btn_text'], 30) + "</div>"
         f"<div style='font-size:32px;font-weight:800;letter-spacing:-.6px;color:{_t['text']}'>"
         f"Trading Journal <span class='grad-accent'>Pro</span></div>"
         f"<div style='color:{_t['muted']};font-size:13px;margin-top:6px'>"
@@ -1463,75 +1459,17 @@ if not login_gate():
 # ── INJECTION CSS (avant le header pour que le thème s'applique) ─────────────────
 st.markdown(build_css(get_theme()), unsafe_allow_html=True)
 
-# ── HEADER HORIZONTAL COMPACT ───────────────────────────────────────────────────
+# ── EN-TÊTE MASQUABLE (panneau animé + navigation en onglets thémés) ─────────────
 _thd = get_theme()
 df_side = get_df()
 total   = df_side["pnl"].sum() if not df_side.empty else 0
 wr      = (len(df_side[df_side["pnl"]>0])/len(df_side)*100) if not df_side.empty else 0
 col_pnl = _thd["win"] if total >= 0 else _thd["loss"]
+if "hdr_open" not in st.session_state:
+    st.session_state.hdr_open = True
 
-_hh1, _hh2, _hh3 = st.columns([2.3, 2, 2.4])
-with _hh1:
-    _role_lbl = "Admin" if is_admin() else "Utilisateur"
-    st.markdown(
-        f"<div style='padding-top:2px'>"
-        f"<span style='font-size:16px;font-weight:800;color:{_thd['text']}'>Trading Journal</span> "
-        f"<span style='font-size:11px;color:{_thd['muted']}'>Pro · {st.session_state.get('auth_user','')} "
-        f"({_role_lbl})</span></div>",
-        unsafe_allow_html=True)
-with _hh2:
-    _hd1, _hd2 = st.columns(2)
-    with _hd1:
-        _sel_theme = st.selectbox("Design", THEME_NAMES,
-            index=THEME_NAMES.index(st.session_state.theme_name)
-                  if st.session_state.theme_name in THEME_NAMES else 0,
-            key="theme_selector", label_visibility="collapsed", format_func=theme_label,
-            help="Design de l'interface : clair ou sombre, couleurs et style des graphiques")
-        if _sel_theme != st.session_state.theme_name:
-            st.session_state.theme_name = _sel_theme; st.rerun()
-    with _hd2:
-        _cs_opts = ["Auto"] + CHART_STYLE_NAMES
-        _cur_cs = st.session_state.get("chart_style_override", "Auto")
-        _sel_cs = st.selectbox("Graphiques", _cs_opts,
-            index=_cs_opts.index(_cur_cs) if _cur_cs in _cs_opts else 0,
-            format_func=lambda x: (f"Graphiques : auto ({THEME_CHART_STYLE.get(st.session_state.theme_name, 'Classique')})"
-                                   if x == "Auto" else f"Graphiques : {x}"),
-            key="chart_style_selector", label_visibility="collapsed",
-            help="Type et configuration des graphiques. Auto = suit le design choisi.")
-        if _sel_cs != _cur_cs:
-            st.session_state.chart_style_override = _sel_cs; st.rerun()
-with _hh3:
-    _allowed = allowed_accounts()
-    if "mode_selection" not in st.session_state:
-        st.session_state.mode_selection = []
-    # Nettoyer la sélection des comptes non autorisés
-    _cur_sel = [m for m in st.session_state.mode_selection if m in _allowed]
-    if len(_allowed) <= 1:
-        # Un seul compte : pas de choix à faire
-        st.session_state.mode_selection = list(_allowed)
-        st.markdown(f"<div style='padding-top:8px;font-size:12px;color:{_thd['muted']}'>"
-                    f"Compte : <b style='color:{_thd['text']}'>{(_allowed[0] if _allowed else '—')}</b></div>",
-                    unsafe_allow_html=True)
-    else:
-        _new_sel = st.multiselect("Afficher", _allowed, default=_cur_sel,
-            placeholder="Tous les comptes", label_visibility="collapsed",
-            key="mode_multiselect")
-        if _new_sel != _cur_sel:
-            st.session_state.mode_selection = _new_sel; st.rerun()
-
-# Bandeau capital compact
-st.markdown(
-    f"<div style='display:flex;gap:20px;align-items:baseline;padding:2px 0 8px'>"
-    f"<span style='font-size:11px;color:{_thd['muted']};text-transform:uppercase;"
-    f"letter-spacing:1px'>Capital · {selection_label()}</span>"
-    f"<span style='font-size:18px;font-weight:800;color:{col_pnl};"
-    f"font-family:JetBrains Mono,monospace'>{fmt(total)}</span>"
-    f"<span style='font-size:11px;color:{_thd['muted']}'>{len(df_side)} trades · {wr:.0f}% win</span>"
-    f"</div>", unsafe_allow_html=True)
-
-# ── NAVIGATION HORIZONTALE ──────────────────────────────────────────────────────
 _NAV = [
-    ("dashboard", "Dashboard",  ":material/dashboard:"),
+    ("dashboard", "Dashboard",  ":material/space_dashboard:"),
     ("journal",   "Journal",    ":material/table_rows:"),
 ]
 if is_admin():
@@ -1551,36 +1489,166 @@ if is_admin():
 # Garde-fou : une page réservée admin demandée par un non-admin retombe sur dashboard
 if not is_admin() and st.session_state.page in ("add", "import", "users"):
     st.session_state.page = "dashboard"
-
-# Navigation horizontale dynamique : chaque libellé s'affiche en entier (pastilles
-# qui s'ajustent à la largeur du texte et passent à la ligne si besoin).
-_nav_keys   = [k for k, _, _ in _NAV]
-_nav_labels = [l for _, l, _ in _NAV]
-_lbl2key    = {l: k for k, l, _ in _NAV}
-if st.session_state.page not in _nav_keys:
+if st.session_state.page not in [k for k, _, _ in _NAV]:
     st.session_state.page = "dashboard"
-_cur_lbl = next((l for k, l, _ in _NAV if k == st.session_state.page), _nav_labels[0])
 
-_navcol, _actcol = st.columns([7, 1.5])
-with _navcol:
-    _choice = st.radio("Navigation", _nav_labels,
-                       index=_nav_labels.index(_cur_lbl),
-                       horizontal=True, label_visibility="collapsed", key="nav_radio")
-    if _choice and _lbl2key.get(_choice) != st.session_state.page:
-        st.session_state.page = _lbl2key[_choice]; st.session_state.edit_id = None; st.rerun()
-with _actcol:
-    _b1, _b2 = st.columns(2)
-    with _b1:
-        if st.button("", icon=":material/sync:", use_container_width=True,
-                     key="nav_sync", help="Synchroniser"):
-            force_reload(); st.rerun()
-    with _b2:
-        if st.button("", icon=":material/logout:", use_container_width=True,
-                     key="nav_logout", help="Déconnexion"):
-            logout()
+# Comptes autorisés : nettoyage de la sélection, que le panneau soit ouvert ou non
+_allowed = allowed_accounts()
+if "mode_selection" not in st.session_state:
+    st.session_state.mode_selection = []
+st.session_state.mode_selection = [m for m in st.session_state.mode_selection if m in _allowed]
+if len(_allowed) <= 1:
+    st.session_state.mode_selection = list(_allowed)
 
-st.markdown(f"<hr style='margin:6px 0 16px;border-color:{_thd['border']}'>",
+def _nav_go(k):
+    st.session_state.page = k
+    st.session_state.edit_id = None
+
+def _hdr_toggle():
+    st.session_state.hdr_open = not st.session_state.hdr_open
+
+def _render_nav(prefix):
+    for k, lbl, ic in _NAV:
+        st.button(lbl, key=f"{prefix}_{k}", icon=ic, on_click=_nav_go, args=(k,),
+                  type=("primary" if k == st.session_state.page else "secondary"))
+
+_t = _thd
+_nav_btn = '[class*="st-key-tjnav_"] button, [class*="st-key-tjmnav_"] button'
+_stagger = "".join(f".st-key-tj_nav > div:nth-child({i}){{animation-delay:{0.06 + i*0.035:.3f}s}}"
+                   for i in range(1, 13))
+st.markdown(f"""<style>
+@keyframes tjDrop {{ 0% {{opacity:0; transform:translateY(-18px) scale(.985); filter:blur(3px)}}
+                     100% {{opacity:1; transform:none; filter:none}} }}
+@keyframes tjRise {{ 0% {{opacity:0; transform:translateY(10px)}} 100% {{opacity:1; transform:none}} }}
+@keyframes tjSweep {{ 0% {{background-position:200% 0}} 100% {{background-position:0 0}} }}
+@keyframes tjPop {{ 0% {{opacity:0; transform:scale(.6)}} 100% {{opacity:1; transform:none}} }}
+.st-key-tj_hdr {{
+  position:relative; overflow:hidden; border-radius:18px; padding:14px 18px 12px;
+  background:linear-gradient(145deg,{_t['card']},{_t['bg2']}); border:1px solid {_t['border']};
+  box-shadow:0 1px 2px rgba(0,0,0,.06), 0 14px 34px rgba(0,0,0,.10);
+  animation:tjDrop .55s cubic-bezier(.22,1,.36,1) both; }}
+.st-key-tj_hdr::before {{ content:""; position:absolute; top:0; left:0; right:0; height:3px;
+  background:linear-gradient(90deg,{_t['accent']},{_t['alt']},{_t['orange']},{_t['accent']});
+  background-size:200% 100%; animation:tjSweep 1.4s ease-out both; }}
+.st-key-tj_hdr_min {{
+  border-radius:14px; padding:6px 8px; background:{_t['card']}; border:1px solid {_t['border']};
+  box-shadow:0 6px 18px rgba(0,0,0,.07); animation:tjRise .35s cubic-bezier(.22,1,.36,1) both; }}
+/* Piste d'onglets segmentée */
+.st-key-tj_nav {{ background:{_t['bg2']}; border:1px solid {_t['border']}; border-radius:14px;
+  padding:5px; gap:4px !important; margin-top:4px; }}
+.st-key-tj_nav > div {{ animation:tjRise .45s cubic-bezier(.22,1,.36,1) both; }}
+{_stagger}
+{_nav_btn} {{
+  background:transparent !important; border:1px solid transparent !important; box-shadow:none !important;
+  color:{_t['muted']} !important; border-radius:10px !important; min-height:36px !important;
+  padding:5px 13px !important; font-weight:600 !important; transition:all .18s ease !important; }}
+{_nav_btn.replace(' button', ' button:hover')} {{
+  background:{_t['accent']}14 !important; border-color:{_t['accent']}33 !important;
+  color:{_t['text']} !important; transform:translateY(-1px); filter:none !important; }}
+[class*="st-key-tjnav_"] button[kind="primary"], [class*="st-key-tjmnav_"] button[kind="primary"] {{
+  background:linear-gradient(135deg,{_t['accent']},{_t['alt']}) !important; color:{_t['btn_text']} !important;
+  box-shadow:0 6px 16px {_t['accent']}40 !important; animation:tjPop .3s ease-out both; }}
+[class*="st-key-tjnav_"] button p, [class*="st-key-tjmnav_"] button p {{
+  font-size:13px !important; color:inherit !important; margin:0 !important; }}
+[class*="st-key-tjnav_"] button [data-testid="stIconMaterial"], [class*="st-key-tjmnav_"] button [data-testid="stIconMaterial"] {{
+  font-size:18px !important; color:inherit !important; }}
+[class*="st-key-tjnav_"] button[kind="primary"] *, [class*="st-key-tjmnav_"] button[kind="primary"] * {{
+  color:{_t['btn_text']} !important; }}
+/* Boutons d'action ronds (synchro, déconnexion, masquer/afficher) */
+.st-key-hdr_sync button, .st-key-hdr_logout button, .st-key-hdr_toggle button, .st-key-hdr_show button {{
+  background:{_t['bg2']} !important; color:{_t['muted']} !important; border:1px solid {_t['border']} !important;
+  box-shadow:none !important; border-radius:11px !important; min-height:38px !important; padding:4px 10px !important;
+  transition:all .18s ease !important; }}
+.st-key-hdr_sync button:hover, .st-key-hdr_logout button:hover, .st-key-hdr_toggle button:hover, .st-key-hdr_show button:hover {{
+  color:{_t['accent']} !important; border-color:{_t['accent']}66 !important; transform:translateY(-1px); }}
+.st-key-hdr_show button {{ background:linear-gradient(135deg,{_t['accent']},{_t['alt']}) !important;
+  color:{_t['btn_text']} !important; border:none !important; }}
+.st-key-hdr_show button * {{ color:{_t['btn_text']} !important; }}
+.st-key-tj_hdr_min [class*="st-key-tjmnav_"] button {{ padding:3px 9px !important; min-height:32px !important; }}
+.st-key-tj_hdr_min [class*="st-key-tjmnav_"] button p {{ font-size:12px !important; }}
+.st-key-tj_hdr_min [class*="st-key-tjmnav_"] button [data-testid="stIconMaterial"] {{ font-size:16px !important; }}
+.st-key-tj_hdr_min {{ gap:2px !important; }}
+.tj-cap {{ display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; padding:2px 2px 4px; animation:tjRise .5s .1s both; }}
+</style>""", unsafe_allow_html=True)
+
+_role_lbl = "Admin" if is_admin() else "Utilisateur"
+_brand = (f"<div style='display:flex;align-items:center;gap:10px'>"
+          f"<span style='display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;"
+          f"border-radius:10px;background:linear-gradient(135deg,{_t['accent']},{_t['alt']});"
+          f"box-shadow:0 6px 14px {_t['accent']}40'>" + _logo_svg(_t['btn_text'], 17) + "</span>"
+          f"<span style='line-height:1.15'><span style='font-size:15px;font-weight:800;color:{_t['text']}'>"
+          f"Trading Journal <span class='grad-accent'>Pro</span></span><br>"
+          f"<span style='font-size:11px;color:{_t['muted']}'>{st.session_state.get('auth_user','')} · {_role_lbl}</span>"
+          f"</span></div>")
+
+if st.session_state.hdr_open:
+    with st.container(key="tj_hdr"):
+        _r = st.columns([2.1, 1.55, 1.45, 2.5, 0.42, 0.42, 0.42], vertical_alignment="center", gap="small")
+        with _r[0]:
+            st.markdown(_brand, unsafe_allow_html=True)
+        with _r[1]:
+            _sel_theme = st.selectbox("Design", THEME_NAMES,
+                index=THEME_NAMES.index(st.session_state.theme_name)
+                      if st.session_state.theme_name in THEME_NAMES else 0,
+                key="theme_selector", label_visibility="collapsed", format_func=theme_label,
+                help="Design de l'interface : clair ou sombre, couleurs et style des graphiques")
+            if _sel_theme != st.session_state.theme_name:
+                st.session_state.theme_name = _sel_theme; st.rerun()
+        with _r[2]:
+            _cs_opts = ["Auto"] + CHART_STYLE_NAMES
+            _cur_cs = st.session_state.get("chart_style_override", "Auto")
+            _sel_cs = st.selectbox("Graphiques", _cs_opts,
+                index=_cs_opts.index(_cur_cs) if _cur_cs in _cs_opts else 0,
+                format_func=lambda x: (f"Graphiques · auto" if x == "Auto" else f"Graphiques · {x}"),
+                key="chart_style_selector", label_visibility="collapsed",
+                help="Type et configuration des graphiques. Auto = suit le design choisi "
+                     f"(actuellement {THEME_CHART_STYLE.get(st.session_state.theme_name, 'Classique')}).")
+            if _sel_cs != _cur_cs:
+                st.session_state.chart_style_override = _sel_cs; st.rerun()
+        with _r[3]:
+            if len(_allowed) <= 1:
+                st.markdown(f"<div style='font-size:12px;color:{_t['muted']}'>Compte : "
+                            f"<b style='color:{_t['text']}'>{(_allowed[0] if _allowed else '—')}</b></div>",
+                            unsafe_allow_html=True)
+            else:
+                _cur_sel = list(st.session_state.mode_selection)
+                _new_sel = st.multiselect("Afficher", _allowed, default=_cur_sel,
+                    placeholder="Tous les comptes", label_visibility="collapsed", key="mode_multiselect")
+                if _new_sel != _cur_sel:
+                    st.session_state.mode_selection = _new_sel; st.rerun()
+        with _r[4]:
+            if st.button("", icon=":material/sync:", key="hdr_sync", help="Synchroniser", use_container_width=True):
+                force_reload(); st.rerun()
+        with _r[5]:
+            if st.button("", icon=":material/logout:", key="hdr_logout", help="Déconnexion", use_container_width=True):
+                logout()
+        with _r[6]:
+            st.button("", icon=":material/keyboard_arrow_up:", key="hdr_toggle", help="Masquer le panneau",
+                      on_click=_hdr_toggle, use_container_width=True)
+        st.markdown(
+            f"<div class='tj-cap'>"
+            f"<span style='font-size:10.5px;color:{_t['muted']};text-transform:uppercase;letter-spacing:1.2px;"
+            f"font-weight:700'>Capital · {selection_label()}</span>"
+            f"<span style='font-size:20px;font-weight:800;color:{col_pnl};font-family:JetBrains Mono,monospace'>"
+            f"{fmt(total)}</span>"
+            f"<span style='font-size:11.5px;color:{_t['muted']}'>{len(df_side)} trades · {wr:.0f}% win</span></div>",
             unsafe_allow_html=True)
+        with st.container(horizontal=True, key="tj_nav", gap="small"):
+            _render_nav("tjnav")
+else:
+    with st.container(horizontal=True, key="tj_hdr_min", gap="small", vertical_alignment="center"):
+        st.markdown(
+            f"<span style='display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;"
+            f"border-radius:9px;background:linear-gradient(135deg,{_t['accent']},{_t['alt']})'>"
+            + _logo_svg(_t['btn_text'], 15) + "</span>",
+            unsafe_allow_html=True)
+        _render_nav("tjmnav")
+        st.markdown(f"<span style='font-size:13px;font-weight:800;color:{col_pnl};"
+                    f"font-family:JetBrains Mono,monospace;padding:0 6px'>{fmt(total)}</span>",
+                    unsafe_allow_html=True)
+        st.button("", icon=":material/keyboard_arrow_down:", key="hdr_show", help="Afficher le panneau",
+                  on_click=_hdr_toggle)
+st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
 # ── CHRONOMÈTRE GLOBAL : prochaine annonce majeure, visible quelle que soit la page ──
 if "_alert_prefs" not in st.session_state:
@@ -3205,67 +3273,29 @@ elif st.session_state.page == "analyse":
     st.caption("Ce que le marché prévoyait (consensus) vs ce qui est publié, et l'impact "
                "estimé de chaque chiffre sur vos actifs. Heures en GMT+1.")
 
-    # ── Alertes e-mail & chronomètre ──────────────────────────────────────────
+    # ── Réglages du chronomètre (annonces suivies) ────────────────────────────
     _me = st.session_state.get("auth_user", "")
     _ap = st.session_state.get("_alert_prefs") or alert_prefs_get(_me)
-    _al_on = bool(_ap.get("enabled") and _ap.get("email"))
-    with st.expander("Alertes e-mail et chronomètre · " +
-                     (f"activées ({_ap.get('lead_min')} min avant, {_ap.get('email')})" if _al_on
-                      else "désactivées")):
-        with st.form("alert_form"):
-            a1, a2 = st.columns([2, 1])
-            with a1:
-                al_email = st.text_input("Adresse e-mail pour les alertes", value=_ap.get("email", ""),
-                                         placeholder="vous@exemple.com")
-            with a2:
-                al_on = st.toggle("Alertes e-mail activées", value=bool(_ap.get("enabled")))
-            a3, a4, a5 = st.columns([1, 1.3, 2])
-            with a3:
-                _leads = [15, 30, 60, 120]
-                al_lead = st.selectbox("Prévenir", _leads,
-                    index=_leads.index(_ap.get("lead_min", 30)) if _ap.get("lead_min", 30) in _leads else 1,
-                    format_func=lambda m: f"{m} min avant" if m < 60 else f"{m//60} h avant")
-            with a4:
-                al_imp = st.multiselect("Importance", ["High", "Medium", "Low"],
+    with st.expander(f"Chronomètre · {', '.join(_ap.get('ccys') or ['USD'])} · "
+                     f"affiché {int(_ap.get('chrono_h', 4))} h avant"):
+        with st.form("chrono_form"):
+            c1, c2, c3 = st.columns([2, 1.3, 1.6])
+            with c1:
+                ch_ccy = st.multiselect("Devises suivies", ALERT_CCYS,
+                    default=[c for c in _ap.get("ccys", ["USD", "EUR"]) if c in ALERT_CCYS] or ["USD"])
+            with c2:
+                ch_imp = st.multiselect("Importance", ["High", "Medium", "Low"],
                     default=[i for i in _ap.get("impacts", ["High"]) if i in ("High", "Medium", "Low")] or ["High"],
                     format_func=lambda x: {"High": "Fort", "Medium": "Moyen", "Low": "Faible"}[x])
-            with a5:
-                al_ccy = st.multiselect("Devises suivies", ALERT_CCYS,
-                    default=[c for c in _ap.get("ccys", ["USD", "EUR"]) if c in ALERT_CCYS] or ["USD"])
-            al_chrono = st.slider("Afficher le chronomètre en grand à partir de (heures avant l'annonce)",
-                                  1, 24, int(_ap.get("chrono_h", 4)))
-            b1, b2 = st.columns(2)
-            with b1:
-                al_save = st.form_submit_button("Enregistrer", use_container_width=True, type="primary")
-            with b2:
-                al_test = st.form_submit_button("Envoyer un e-mail de test", use_container_width=True)
-        import re as _re_mail
-        _mail_ok = bool(_re_mail.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", (al_email or "").strip()))
-        if al_save:
-            if al_on and not _mail_ok:
-                st.error("Adresse e-mail invalide.")
-            else:
-                _newp = {"email": (al_email or "").strip(), "enabled": bool(al_on), "lead_min": int(al_lead),
-                         "impacts": al_imp or ["High"], "ccys": al_ccy or ["USD"], "chrono_h": int(al_chrono)}
-                if alert_prefs_set(_me, _newp):
-                    st.session_state["_alert_prefs"] = _newp
-                    st.success("Préférences enregistrées. Le chronomètre et les alertes les utilisent désormais.")
-                    st.rerun()
-                else:
-                    st.session_state["_alert_prefs"] = _newp
-                    st.warning("Enregistré pour cette session seulement (base de données injoignable).")
-        if al_test:
-            if not _mail_ok:
-                st.error("Saisissez d'abord une adresse e-mail valide.")
-            elif not smtp_ready():
-                st.info("Envoi impossible : ajoutez SMTP_HOST, SMTP_PORT, SMTP_USER et SMTP_PASS dans les "
-                        "secrets de l'app (voir le guide de mise en place des alertes).")
-            else:
-                _ok, _msg = send_email(al_email.strip(), "Trading Journal · e-mail de test",
-                    "<p>Les alertes d'annonces économiques sont correctement configurées.</p>")
-                (st.success if _ok else st.error)(_msg)
-        st.caption("Le chronomètre s'affiche en haut de toutes les pages. Les e-mails sont envoyés par une "
-                   "tâche planifiée (GitHub Actions, toutes les 5 min) : l'app n'a pas besoin d'être ouverte.")
+            with c3:
+                ch_h = st.slider("Compte à rebours à partir de (h)", 1, 24, int(_ap.get("chrono_h", 4)))
+            if st.form_submit_button("Enregistrer", type="primary"):
+                _newp = dict(_ap); _newp.update({"ccys": ch_ccy or ["USD"], "impacts": ch_imp or ["High"],
+                                                 "chrono_h": int(ch_h), "enabled": False})
+                alert_prefs_set(_me, _newp)
+                st.session_state["_alert_prefs"] = _newp
+                st.rerun()
+        st.caption("Le chronomètre s'affiche en haut de toutes les pages pour la prochaine annonce suivie.")
 
     USER_TZ_OFFSET = 1  # GMT+1 (position géographique de l'utilisateur)
 
