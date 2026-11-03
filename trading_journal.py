@@ -156,6 +156,8 @@ THEME_NAMES = ([n for n, t in THEMES.items() if _is_light(t)]
                + [n for n, t in THEMES.items() if not _is_light(t)])
 DEFAULT_THEME = "Navy Corporate"   # design par défaut : clair, bleu marine et sarcelle
 LOGIN_THEME   = "Navy Corporate"   # design unique de la page de connexion
+DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
+DEFAULT_BG      = "Stat Vision"        # fond d'écran par défaut
 
 # ── FONDS D'ÉCRAN (photos libres de droits, licence Unsplash) ─────────────────
 # Rempli avec des photos dont la licence gratuite a été vérifiée. "Aucun" = pas d'image.
@@ -1218,8 +1220,12 @@ div[data-testid="stForm"] button {{ padding:11px 0 !important; font-size:14px !i
                     st.session_state.auth_user = user["username"]
                     st.session_state.auth_role = user.get("role", "user")
                     st.session_state.auth_accounts = user.get("accounts", [])
-                    # Sélection par défaut : tous les comptes autorisés (liste vide = tous)
-                    st.session_state.mode_selection = []
+                    # Compte affiché par défaut à l'ouverture : Réel Indépendant (s'il est autorisé)
+                    try:
+                        _def_acc = [a for a in allowed_accounts() if a == DEFAULT_ACCOUNT]
+                    except Exception:
+                        _def_acc = []
+                    st.session_state.mode_selection = _def_acc
                     st.rerun()
                 else:
                     st.error(msg)
@@ -1526,7 +1532,7 @@ if not login_gate():
 # ── INJECTION CSS (avant le header pour que le thème s'applique) ─────────────────
 st.markdown(build_css(get_theme()), unsafe_allow_html=True)
 if "bg_name" not in st.session_state:
-    st.session_state.bg_name = "Aucun"
+    st.session_state.bg_name = DEFAULT_BG if DEFAULT_BG in BACKGROUNDS else "Aucun"
 if st.session_state.bg_name not in BACKGROUNDS:
     st.session_state.bg_name = "Aucun"
 st.markdown(background_css(get_theme(), st.session_state.bg_name), unsafe_allow_html=True)
@@ -1567,7 +1573,7 @@ if st.session_state.page not in [k for k, _, _ in _NAV]:
 # Comptes autorisés : nettoyage de la sélection, que le panneau soit ouvert ou non
 _allowed = allowed_accounts()
 if "mode_selection" not in st.session_state:
-    st.session_state.mode_selection = []
+    st.session_state.mode_selection = [a for a in _allowed if a == DEFAULT_ACCOUNT]
 st.session_state.mode_selection = [m for m in st.session_state.mode_selection if m in _allowed]
 if len(_allowed) <= 1:
     st.session_state.mode_selection = list(_allowed)
@@ -1993,47 +1999,51 @@ def behavior_analysis(df, keep_ids=None):
     return res
 
 def emotion_level(res):
-    """Conclusion sur le niveau émotionnel : (libellé, couleur clé, phrase)."""
+    """Conclusion sur le niveau émotionnel : (libellé, couleur clé, phrase sensible au signe)."""
     s = res.get("reactive_share", 0)
     re_, ca = res.get("reactive_exp"), res.get("calm_exp")
     cost = ""
     if re_ is not None and ca is not None:
-        cost = (f" Ces trades rapportent en moyenne {fmt(re_)} contre {fmt(ca)} en état calme.")
+        cost = f" Ces trades {result_phrase(re_)}, contre {result_noun(ca)} en état calme."
     if s >= 40:
         return "Élevé", "loss", f"{s:.0f} % de tes trades sont pris dans un état réactif (frustration, euphorie, anxiété, peur).{cost}"
     if s >= 20:
         return "Modéré", "orange", f"{s:.0f} % de tes trades sont pris dans un état réactif.{cost}"
-    return "Maîtrisé", "win", f"Seulement {s:.0f} % de trades pris dans un état réactif.{cost}"
+    return "Maîtrisé", "win", f"Seulement {s:.0f} % de tes trades sont pris dans un état réactif.{cost}"
 
 def recommendations(res, min_n=5):
-    """Recommandations chiffrées, triées par priorité. Chaque règle exige un échantillon minimal."""
+    """Recommandations comportementales chiffrées, formulées selon le signe des métriques."""
     R = []
     if not res.get("n"):
         return R
     base = res["base"]; bwr, bexp = base["wr"] or 0, base["exp"] or 0
     ctx = {c["label"]: c for c in res["context"]}
-    def add(level, title, detail, action):
-        R.append({"level": level, "title": title, "detail": detail, "action": action})
+    def add(level, title, detail, action, cat="Comportement & émotions"):
+        R.append({"level": level, "cat": cat, "title": title, "detail": detail, "action": action})
+    import math
     q = ctx.get("≤ 30 min après une perte")
     if q and q["n"] >= min_n and q["wr"] is not None and (q["wr"] < bwr - 8 or q["exp"] < min(0, bexp)):
         pause = res["resume_after_win"]["median"]
         add("critique", "Trading de revanche après une perte",
             f"Les {q['n']} trades repris moins de 30 min après une perte gagnent {q['wr']:.0f} % du temps "
-            f"(contre {bwr:.0f} % en général), pour {fmt(q['exp'])} en moyenne par trade.",
+            f"(contre {bwr:.0f} % en général) et {result_phrase(q['exp'])}.",
             f"Impose-toi une pause d'au moins {fmt_gap(max(30, pause or 30))} après chaque perte avant de reprendre.")
     l2 = ctx.get("Après 2 pertes ou plus")
-    # série maximale attendue par le hasard : log_{1/q}(n·(1-q)), q = taux de pertes
-    import math
     q_loss = max(0.01, min(0.99, 1 - bwr / 100)); n_tr = max(2, res["n"])
     exp_streak = math.log(max(1.0001, n_tr * (1 - q_loss))) / -math.log(q_loss)
     res["expected_loss_streak"] = exp_streak
     l2_bad = bool(l2 and l2["n"] >= min_n and l2["exp"] is not None and l2["exp"] < 0 and (l2["wr"] or 0) < bwr - 10)
-    if res.get("max_loss_streak", 0) > exp_streak + 1.5 or l2_bad:
-        extra = (f" Après 2 pertes d'affilée, l'espérance tombe à {fmt(l2['exp'])} par trade ({l2['n']} trades)."
-                 if l2_bad else "")
+    streak_bad = res.get("max_loss_streak", 0) > exp_streak + 1.5
+    if streak_bad or l2_bad:
+        parts = []
+        if streak_bad:
+            parts.append(f"Ta plus longue série est de {res['max_loss_streak']} pertes consécutives, plus que ce que "
+                         f"le hasard explique avec ton taux de réussite (environ {exp_streak:.0f}).")
+        if l2_bad:
+            parts.append(f"Après 2 pertes d'affilée, tes trades {result_phrase(l2['exp'])} ({l2['n']} trades) et ne "
+                         f"gagnent plus que {l2['wr']:.0f} % du temps.")
         add("critique" if res.get("max_loss_streak", 0) > exp_streak + 3 else "attention", "Séries de pertes",
-            f"Ta plus longue série est de {res['max_loss_streak']} pertes consécutives (le hasard seul en "
-            f"expliquerait environ {exp_streak:.0f} avec ton taux de réussite).{extra}",
+            " ".join(parts),
             "Fixe un stop journalier : arrêt après 2 pertes d'affilée ou une perte cumulée de 2 % du capital.")
     if res.get("tilt_episodes", 0) >= 1:
         add("attention", "Épisodes de tilt",
@@ -2044,66 +2054,335 @@ def recommendations(res, min_n=5):
         first = rk[0]; late = [r for r in rk if r["label"] in ("4e", "5e", "6e+")]
         if late:
             lexp = sum(r["exp"] * r["n"] for r in late) / sum(r["n"] for r in late)
-            if lexp < min(0, first["exp"]):
-                best = max(rk, key=lambda r: r["exp"])
+            if lexp < 0 and lexp < first["exp"]:
                 cutoff = next((i for i, r in enumerate(rk) if r["exp"] < 0), len(rk))
+                best = max(rk, key=lambda r: r["exp"])
+                best_txt = (f" ; tes trades les plus rentables sont les {best['label']} de la journée "
+                            f"({result_noun(best['exp'])})" if best["exp"] > 0 else "")
                 add("attention", "Suractivité en fin de journée",
-                    f"À partir du 4e trade du jour, l'espérance passe à {fmt(lexp)} par trade, contre "
-                    f"{fmt(first['exp'])} pour le 1er.",
-                    f"Limite-toi à {max(1, cutoff)} trade(s) par jour et par compte ; ton meilleur rang est le {best['label']}.")
+                    f"À partir du 4e trade du jour, tes trades {result_phrase(lexp)}, contre {result_noun(first['exp'])} "
+                    f"pour le 1er trade.",
+                    f"Limite-toi à {max(1, cutoff)} trade(s) par jour et par compte{best_txt}.",
+                    cat="Horaires & actifs")
     if res.get("payoff") is not None and res["payoff"] < 1 and bwr < 60:
         add("attention", "Gains trop courts par rapport aux pertes",
-            f"Gain moyen {fmt(res['avg_win'])} contre perte moyenne {fmt(abs(res['avg_loss']))} "
-            f"(ratio {res['payoff']:.2f}), avec un taux de réussite de {bwr:.0f} %.",
-            "Laisse courir les gagnants jusqu'à un objectif d'au moins 1,5 R et coupe les pertes au stop prévu.")
+            f"Ton gain moyen ({money(res['avg_win'])}) est inférieur à ta perte moyenne ({money(res['avg_loss'])}) : "
+            f"ratio {num(res['payoff'])}, avec {bwr:.0f} % de trades gagnants.",
+            "Laisse courir les gagnants jusqu'à un objectif d'au moins 1,5 R et coupe les pertes au stop prévu.",
+            cat="Risque & stops")
+    elif res.get("payoff") is not None and res["payoff"] >= 1.5 and (base["exp"] or 0) > 0:
+        add("positif", "Bon ratio gain / perte",
+            f"Ton gain moyen ({money(res['avg_win'])}) vaut {num(res['payoff'])} fois ta perte moyenne.",
+            "Garde ta gestion des sorties actuelle.", cat="Risque & stops")
     if res.get("vol_after_loss") and res["vol_after_loss"] >= 1.15:
         add("critique", "Taille de position augmentée après une perte",
-            f"Après une perte, ta taille est en moyenne {res['vol_after_loss']:.2f} fois ta taille habituelle.",
-            "Garde une taille fixe (ou réduite) après une perte : ne cherche pas à te refaire.")
+            f"Après une perte, ta taille est en moyenne {num(res['vol_after_loss'])} fois ta taille habituelle.",
+            "Garde une taille fixe (ou réduite) après une perte : ne cherche pas à te refaire.", cat="Volume & taille")
     bw = ctx.get("Après un gros gain")
-    if bw and bw["n"] >= min_n and bw["exp"] is not None and bw["exp"] < min(0, bexp):
+    if bw and bw["n"] >= min_n and bw["exp"] is not None and bw["exp"] < 0 and bw["exp"] < bexp:
         add("attention", "Excès de confiance après un gros gain",
-            f"Le trade qui suit un gros gain rapporte {fmt(bw['exp'])} en moyenne ({bw['n']} cas).",
+            f"Le trade qui suit un gros gain {result_phrase(bw['exp'], plural=False)} ({bw['n']} cas), "
+            f"alors que l'ensemble de tes trades {result_phrase(bexp)}.",
             "Après un gros gain, fais une pause ou réduis la taille du trade suivant.")
     bm = res.get("by_mood")
     if bm is not None and len(bm):
-        worst = bm[bm["count"] >= min_n].sort_values("mean").head(1)
+        b5 = bm[bm["count"] >= min_n]
+        worst = b5.sort_values("mean").head(1)
         if len(worst) and worst.iloc[0]["mean"] < 0 and worst.iloc[0]["mood_final"] in REACTIVE_MOODS:
             w0 = worst.iloc[0]
             add("attention", f"Trades en état « {w0['mood_final']} » perdants",
-                f"{int(w0['count'])} trades dans cet état, espérance {fmt(w0['mean'])} par trade, "
-                f"taux de réussite {w0['wr']:.0f} %.",
+                f"Les {int(w0['count'])} trades pris dans cet état {result_phrase(w0['mean'])} et gagnent "
+                f"{w0['wr']:.0f} % du temps.",
                 f"Quand tu te sens {w0['mood_final'].lower()}, ne prends pas de position : note-le dans le journal et attends.")
+        bestm = b5.sort_values("mean").tail(1)
+        if len(bestm) and bestm.iloc[0]["mean"] > 0 and bestm.iloc[0]["mood_final"] in CALM_MOODS:
+            add("positif", f"État « {bestm.iloc[0]['mood_final']} » rentable",
+                f"Tes trades pris dans cet état {result_phrase(bestm.iloc[0]['mean'])} "
+                f"({int(bestm.iloc[0]['count'])} trades).",
+                "C'est ton état de référence : vérifie-le avant chaque entrée.")
     bh = res.get("by_hour")
     if bh is not None and len(bh):
-        bh5 = bh[bh["count"] >= min_n]
+        bh5 = bh[bh["count"] >= min_n].sort_values("mean")
         if len(bh5) >= 2:
-            wst, bst = bh5.sort_values("mean").iloc[0], bh5.sort_values("mean").iloc[-1]
+            wst, bst = bh5.iloc[0], bh5.iloc[-1]
             if wst["mean"] < 0:
+                alt = (f" ; ton créneau le plus rentable est {int(bst['_h']):02d}h ({result_noun(bst['mean'])})"
+                       if bst["mean"] > 0 else " ; aucun créneau n'est rentable sur cette sélection")
                 add("attention", f"Créneau de {int(wst['_h']):02d}h à éviter",
-                    f"Les {int(wst['count'])} trades ouverts à {int(wst['_h']):02d}h perdent {fmt(wst['mean'])} en moyenne.",
-                    f"Évite d'ouvrir à {int(wst['_h']):02d}h ; ton meilleur créneau est {int(bst['_h']):02d}h "
-                    f"({fmt(bst['mean'])} par trade).")
+                    f"Les {int(wst['count'])} trades ouverts à {int(wst['_h']):02d}h {result_phrase(wst['mean'])}.",
+                    f"Évite d'ouvrir à {int(wst['_h']):02d}h{alt}.", cat="Horaires & actifs")
+            elif bst["mean"] > 0:
+                add("positif", f"Créneau fort : {int(bst['_h']):02d}h",
+                    f"Les {int(bst['count'])} trades ouverts à {int(bst['_h']):02d}h {result_phrase(bst['mean'])}.",
+                    "Privilégie ce créneau pour tes meilleurs setups.", cat="Horaires & actifs")
     bs = res.get("by_sym")
     if bs is not None and len(bs):
         bs5 = bs[bs["count"] >= min_n].sort_values("sum")
         if len(bs5) >= 2 and bs5.iloc[0]["sum"] < 0:
+            alt = (f" et concentre-toi sur {bs5.iloc[-1]['symbol']} (gain cumulé de {money(bs5.iloc[-1]['sum'])})"
+                   if bs5.iloc[-1]["sum"] > 0 else " : aucun actif n'est rentable sur cette sélection")
             add("attention", f"Actif pénalisant : {bs5.iloc[0]['symbol']}",
-                f"{int(bs5.iloc[0]['count'])} trades pour un total de {fmt(bs5.iloc[0]['sum'])}.",
-                f"Réduis ou suspends {bs5.iloc[0]['symbol']} et concentre-toi sur {bs5.iloc[-1]['symbol']} "
-                f"({fmt(bs5.iloc[-1]['sum'])}).")
+                f"Les {int(bs5.iloc[0]['count'])} trades sur {bs5.iloc[0]['symbol']} cumulent une perte de "
+                f"{money(bs5.iloc[0]['sum'])}.",
+                f"Réduis ou suspends {bs5.iloc[0]['symbol']}{alt}.", cat="Horaires & actifs")
     lw = res["gaps"]["LW"]
     if lw["n"] >= min_n and lw["median"] is not None:
         add("info", "Temps de récupération",
             f"Il faut en médiane {fmt_gap(lw['median'])} pour qu'un gain suive une perte ({lw['n']} cas).",
             "Utilise ce délai comme repère : inutile de forcer un trade pour « te refaire » avant.")
-    if not any(r["level"] in ("critique", "attention") for r in R):
-        add("positif", "Discipline correcte",
-            "Aucun biais comportemental marqué sur l'échantillon sélectionné.",
-            "Continue ainsi et garde le même plan de trading.")
+    return R
+
+def all_recommendations(bh, rk):
+    """Toutes les recommandations, triées : critique, attention, info, puis points forts."""
+    R = recommendations(bh) + risk_recommendations(rk)
+    _exit_alerts = {"TP souvent trop loin", "Gains coupés avant l'objectif", "Trades gagnants qui finissent au stop",
+                    "Sorties peu efficaces", "Gains trop courts par rapport aux pertes"}
+    if any(r["title"] in _exit_alerts for r in R):
+        R = [r for r in R if r["title"] not in ("Bonne capture des mouvements", "Bon ratio gain / perte")]
+    if not any(r["level"] in ("critique", "attention") for r in R) and (bh.get("n") or 0) >= 5:
+        R.append({"level": "positif", "cat": "Comportement & émotions", "title": "Discipline correcte",
+                  "detail": "Aucun biais comportemental ou de gestion du risque marqué sur la sélection.",
+                  "action": "Continue ainsi et garde le même plan de trading."})
     order = {"critique": 0, "attention": 1, "info": 2, "positif": 3}
     return sorted(R, key=lambda r: order[r["level"]])
 
+# ════════════════════════════════════════════════════════════════════════════
+# ANALYSE DU RISQUE : stops, TP, MAE / MFE, volumes. Formulations sensibles au signe.
+# ════════════════════════════════════════════════════════════════════════════
+def money(v):
+    """Montant sans signe (le sens est porté par le verbe)."""
+    return f"{abs(float(v)):,.2f}".replace(",", "\u202f").replace(".", ",") + " $"
+
+def result_phrase(v, plural=True):
+    """« rapportent en moyenne 12,30 $ » / « perdent en moyenne 6,88 $ » (jamais « perdent -6,88 »)."""
+    v = float(v or 0)
+    if plural:
+        return f"rapportent en moyenne {money(v)}" if v >= 0 else f"perdent en moyenne {money(v)}"
+    return f"rapporte en moyenne {money(v)}" if v >= 0 else f"perd en moyenne {money(v)}"
+
+def result_noun(v):
+    """« un gain moyen de 22,19 $ » / « une perte moyenne de 1,33 $ »."""
+    v = float(v or 0)
+    return f"un gain moyen de {money(v)}" if v >= 0 else f"une perte moyenne de {money(v)}"
+
+def pct(v):
+    return f"{v:.0f} %"
+
+def num(v, d=2):
+    """Nombre avec virgule décimale (phrases)."""
+    return f"{float(v):.{d}f}".replace(".", ",")
+
+EXIT_LABELS = ["Stop touché", "Stop suiveur / point mort", "TP touché",
+               "Sortie manuelle en gain", "Sortie manuelle en perte", "Stop-out (marge)", "Sortie non mesurable"]
+
+def risk_analysis(df):
+    """Stops / TP / MAE-MFE / volume sur les trades filtrés du dashboard."""
+    d = df.copy()
+    res = {"n": int(len(d))}
+    if d.empty:
+        return res
+    for c in ("entry", "exit", "sl", "tp", "volume", "mae", "mfe", "mae_money", "mfe_money", "pnl"):
+        d[c] = pd.to_numeric(d[c], errors="coerce") if c in d.columns else np.nan
+    if "notes" in d.columns:
+        _v = d["notes"].map(_bh_volume)
+        d["volume"] = d["volume"].fillna(pd.to_numeric(_v, errors="coerce"))
+    d["exit_reason"] = d["exit_reason"].astype(str).str.upper() if "exit_reason" in d.columns else ""
+    d["_dir"] = np.where(d.get("direction", pd.Series("LONG", index=d.index)).astype(str).str.upper().str.startswith("S"), -1, 1)
+    e, x, sl, tp = d["entry"], d["exit"], d["sl"], d["tp"]
+    # prix de sortie exploitable (les anciens imports enregistraient le prix d'entrée)
+    d["_exit_ok"] = (e > 0) & (x > 0) & ~((x == e) & (d["pnl"].fillna(0) != 0))
+    d["_has_sl"] = (sl > 0) & (sl != e) & (e > 0)
+    d["_has_tp"] = (tp > 0) & (tp != e) & (e > 0)
+    d["_sl_dist"] = np.where(d["_has_sl"], (e - sl).abs(), np.nan)
+    d["_tp_dist"] = np.where(d["_has_tp"], (tp - e).abs(), np.nan)
+    d["_sl_protect"] = d["_has_sl"] & ((e - sl) * d["_dir"] > 0)      # stop du côté de la perte (risque réel)
+    d["_move"] = np.where(d["_exit_ok"], (x - e) * d["_dir"], np.nan)
+    d["_R"] = np.where(d["_sl_protect"] & d["_exit_ok"], d["_move"] / d["_sl_dist"], np.nan)
+    d["_rr_plan"] = np.where(d["_sl_protect"] & d["_has_tp"], d["_tp_dist"] / d["_sl_dist"], np.nan)
+
+    def classify(r):
+        rs = r["exit_reason"]
+        if rs in ("SL", "TP", "STOPOUT"):
+            if rs == "TP":
+                return "TP touché"
+            if rs == "STOPOUT":
+                return "Stop-out (marge)"
+            return "Stop touché" if (r["pnl"] or 0) < 0 else "Stop suiveur / point mort"
+        if not r["_exit_ok"]:
+            return "Sortie non mesurable"
+        ref = r["_sl_dist"] if r["_has_sl"] else r["_tp_dist"]
+        tol = 0.08 * ref if ref and ref > 0 else 0
+        if r["_has_sl"] and tol and abs(r["exit"] - r["sl"]) <= tol:
+            return "Stop touché" if (r["pnl"] or 0) < 0 else "Stop suiveur / point mort"
+        if r["_has_tp"] and tol and abs(r["exit"] - r["tp"]) <= tol:
+            return "TP touché"
+        return "Sortie manuelle en gain" if (r["pnl"] or 0) >= 0 else "Sortie manuelle en perte"
+    d["_exit_cls"] = d.apply(classify, axis=1)
+    res["d"] = d
+    measurable = d[d["_exit_cls"] != "Sortie non mesurable"]
+    res["n_measurable"] = int(len(measurable))
+    res["n_bad_exit"] = int(((d["exit"] == d["entry"]) & (d["pnl"].fillna(0) != 0) & (d["entry"] > 0)).sum())
+    res["sl_cov"] = float(d["_has_sl"].mean() * 100)
+    res["tp_cov"] = float(d["_has_tp"].mean() * 100)
+    res["exit_mix"] = (measurable["_exit_cls"].value_counts(normalize=True) * 100).reindex(EXIT_LABELS).dropna()
+    res["exit_exp"] = measurable.groupby("_exit_cls")["pnl"].agg(["count", "mean"]).reindex(EXIT_LABELS).dropna()
+    res["rr_plan_med"] = float(np.nanmedian(d["_rr_plan"])) if d["_rr_plan"].notna().any() else None
+    res["R_med"] = float(np.nanmedian(d["_R"])) if d["_R"].notna().any() else None
+    res["R_win_med"] = float(np.nanmedian(d.loc[d["pnl"] > 0, "_R"])) if d.loc[d["pnl"] > 0, "_R"].notna().any() else None
+    mw = d[(d["_exit_cls"] == "Sortie manuelle en gain") & d["_has_tp"] & d["_exit_ok"]]
+    ml = d[(d["_exit_cls"] == "Sortie manuelle en perte") & d["_sl_protect"] & d["_exit_ok"]]
+    res["manual_win_n"] = int(len(mw))
+    res["manual_win_tp_frac"] = float((mw["_move"] / mw["_tp_dist"]).median()) if len(mw) else None
+    res["manual_loss_n"] = int(len(ml))
+    res["manual_loss_sl_frac"] = float((-ml["_move"] / ml["_sl_dist"]).median()) if len(ml) else None
+    # ── MAE / MFE ───────────────────────────────────────────────────────────
+    ex = d[d["mae"].notna() & d["mfe"].notna() & (d["mae"] >= 0) & (d["mfe"] >= 0)]
+    res["n_excursion"] = int(len(ex))
+    exR = ex[ex["_sl_protect"]].copy()
+    if len(exR):
+        exR["_maeR"] = exR["mae"] / exR["_sl_dist"]; exR["_mfeR"] = exR["mfe"] / exR["_sl_dist"]
+        win, los = exR[exR["pnl"] > 0], exR[exR["pnl"] < 0]
+        stopped = exR[exR["_exit_cls"] == "Stop touché"]
+        res["exR"] = exR
+        res["win_maeR_q"] = {q: float(win["_maeR"].quantile(q)) for q in (0.5, 0.8, 0.9, 0.95)} if len(win) >= 5 else None
+        res["near_miss"] = float((win["_maeR"] >= 0.8).mean() * 100) if len(win) >= 5 else None
+        res["stopped_mfe_1R"] = float((stopped["_mfeR"] >= 1).mean() * 100) if len(stopped) >= 5 else None
+        res["stopped_mfe_half"] = float((stopped["_mfeR"] >= 0.5).mean() * 100) if len(stopped) >= 5 else None
+        res["n_stopped_ex"] = int(len(stopped)); res["n_win_ex"] = int(len(win))
+        res["e_ratio"] = float(exR["_mfeR"].mean() / exR["_maeR"].mean()) if exR["_maeR"].mean() > 0 else None
+        res["mfe_med_R"] = float(exR["_mfeR"].median())
+        tpR = exR[exR["_has_tp"]]
+        if len(tpR) >= 5:
+            reach = (tpR["mfe"] >= tpR["_tp_dist"])
+            res["tp_reach"] = float(reach.mean() * 100)
+            res["tp_reach_not_taken"] = float(((tpR["mfe"] >= tpR["_tp_dist"]) & (tpR["_exit_cls"] != "TP touché")).mean() * 100)
+            res["tp_plan_med_R"] = float(tpR["_rr_plan"].median())
+    winx = ex[(ex["pnl"] > 0) & (ex["mfe"] > 0) & ex["_exit_ok"]]
+    res["exit_eff"] = float((winx["_move"] / winx["mfe"]).clip(0, 1).median() * 100) if len(winx) >= 5 else None
+    # ── Volume ──────────────────────────────────────────────────────────────
+    v = d[d["volume"] > 0].copy()
+    res["n_volume"] = int(len(v))
+    if len(v) >= 10:
+        v["_rel"] = v["volume"] / v.groupby("symbol")["volume"].transform("median")
+        v["_bucket"] = pd.cut(v["_rel"], [0, 0.8, 1.25, np.inf], labels=["Petite taille", "Taille habituelle", "Grande taille"])
+        g = v.groupby("_bucket", observed=False)["pnl"]
+        res["by_size"] = pd.DataFrame({"count": g.count(), "mean": g.mean(),
+                                       "wr": g.apply(lambda s: (s > 0).mean() * 100 if len(s) else np.nan),
+                                       "avg_loss": v[v["pnl"] < 0].groupby("_bucket", observed=False)["pnl"].mean()}).reset_index()
+    st_l = d[(d["_exit_cls"] == "Stop touché")]["pnl"].abs()
+    all_l = d[d["pnl"] < 0]["pnl"].abs()
+    res["stop_loss_avg"] = float(st_l.mean()) if len(st_l) else None
+    res["loss_cv"] = float(all_l.std() / all_l.mean()) if len(all_l) >= 10 and all_l.mean() > 0 else None
+    res["loss_max_ratio"] = float(all_l.max() / all_l.mean()) if len(all_l) >= 10 and all_l.mean() > 0 else None
+    res["loss_max"] = float(all_l.max()) if len(all_l) else None
+    res["loss_avg"] = float(all_l.mean()) if len(all_l) else None
+    return res
+
+def risk_recommendations(rk, min_n=5):
+    """Recommandations stops / TP / volume, formulées selon le signe des métriques."""
+    R = []
+    if not rk.get("n"):
+        return R
+    def add(level, title, detail, action):
+        R.append({"level": level, "cat": "Risque & stops", "title": title, "detail": detail, "action": action})
+    def addv(level, title, detail, action):
+        R.append({"level": level, "cat": "Volume & taille", "title": title, "detail": detail, "action": action})
+    if rk.get("n_bad_exit", 0) >= min_n:
+        add("info", "Prix de sortie à corriger",
+            f"{rk['n_bad_exit']} trades ont un prix de sortie égal au prix d'entrée (ancien import) : ils sont "
+            "écartés de l'analyse des stops et TP.",
+            "Réimporte tes rapports MT5 et clique sur « Corriger les trades déjà importés », ou importe le "
+            "fichier du script MAE/MFE.")
+    if rk["sl_cov"] < 80:
+        add("critique" if rk["sl_cov"] < 50 else "attention", "Trades sans stop",
+            f"Seulement {pct(rk['sl_cov'])} de tes trades ont un stop enregistré.",
+            "Place un stop à l'ouverture de chaque position, avant même de penser à l'objectif.")
+    elif rk["sl_cov"] >= 95:
+        add("positif", "Stops systématiques", f"{pct(rk['sl_cov'])} de tes trades ont un stop.", "Garde cette règle.")
+    if rk.get("rr_plan_med") is not None and rk["rr_plan_med"] < 1:
+        add("attention", "R:R prévu inférieur à 1",
+            f"En médiane, ton objectif est à {num(rk['rr_plan_med'])} fois la distance du stop : tu risques plus que "
+            "tu ne vises.",
+            "Ne prends que des setups où le TP est au moins à 1,5 fois la distance du stop.")
+    fr = rk.get("manual_win_tp_frac")
+    if fr is not None and rk.get("manual_win_n", 0) >= min_n and fr < 0.6:
+        reach = rk.get("tp_reach_not_taken")
+        if reach is not None and reach >= 20:
+            add("attention", "Gains coupés avant l'objectif",
+                f"Tu clôtures tes gagnants à la main à {pct(fr * 100)} du chemin vers le TP (médiane, "
+                f"{rk['manual_win_n']} trades), alors que le prix atteint ensuite ou déjà le TP dans "
+                f"{pct(reach)} des cas.",
+                "Laisse travailler le TP : sors seulement si le scénario est invalidé, pas par peur de rendre le gain.")
+        else:
+            add("attention", "TP souvent trop loin",
+                f"Tes sorties manuelles en gain se font à {pct(fr * 100)} du chemin vers le TP (médiane, "
+                f"{rk['manual_win_n']} trades) : l'objectif est rarement réaliste.",
+                "Rapproche le TP du mouvement que tu obtiens réellement, ou prends une partie des gains à mi-parcours.")
+    ws = rk.get("win_maeR_q")
+    if ws and rk.get("n_win_ex", 0) >= min_n:
+        p90 = ws[0.9]
+        if p90 < 0.6:
+            add("attention", "Stop probablement trop large",
+                f"90 % de tes gagnants n'ont jamais reculé de plus de {num(p90)} R avant de partir dans le bon sens "
+                f"({rk['n_win_ex']} gagnants mesurés).",
+                f"Un stop vers {num(min(1.0, p90 * 1.15))} fois ta distance actuelle conserverait l'essentiel des "
+                "gagnants et améliorerait ton R:R.")
+        nm = rk.get("near_miss")
+        if nm is not None and nm >= 30:
+            add("attention", "Stop probablement trop court",
+                f"{pct(nm)} de tes gagnants sont passés à moins de 0,2 R du stop avant de repartir : tu frôles "
+                "souvent la sortie.",
+                "Place le stop derrière la structure (dernier swing, zone de liquidité) plutôt qu'à une distance fixe, "
+                "en réduisant la taille pour garder le même risque.")
+    s1 = rk.get("stopped_mfe_1R")
+    if s1 is not None and rk.get("n_stopped_ex", 0) >= min_n and s1 >= 20:
+        add("attention", "Trades gagnants qui finissent au stop",
+            f"{pct(s1)} des trades stoppés étaient d'abord allés au moins 1 R en ta faveur "
+            f"({rk['n_stopped_ex']} stops mesurés).",
+            "Passe le stop au point mort à +1 R, ou prends une partie des gains à +1 R.")
+    ef = rk.get("exit_eff")
+    if ef is not None:
+        if ef < 45:
+            add("attention", "Sorties peu efficaces",
+                f"Sur tes gagnants, tu ne gardes que {pct(ef)} du mouvement favorable maximal (médiane).",
+                "Utilise un stop suiveur derrière les derniers creux/sommets, ou une sortie partielle sur l'extrême.")
+        elif ef >= 65:
+            add("positif", "Bonne capture des mouvements", f"Tu gardes {pct(ef)} du mouvement favorable maximal sur tes gagnants.",
+                "Continue à gérer tes sorties de la même façon.")
+    er = rk.get("e_ratio")
+    if er is not None and rk.get("n_excursion", 0) >= 20:
+        if er < 1:
+            add("attention", "Avantage statistique faible à l'entrée",
+                f"En moyenne, le prix va plus loin contre toi qu'en ta faveur (ratio MFE/MAE {num(er)}).",
+                "Revois tes critères d'entrée : attends une confirmation ou entre plus près de la zone d'invalidation.")
+        elif er >= 1.5:
+            add("positif", "Bonnes entrées", f"Le prix va en moyenne {num(er, 1)} fois plus loin en ta faveur que contre toi.",
+                "Tes entrées sont un point fort : concentre tes efforts sur la gestion de sortie.")
+    bs = rk.get("by_size")
+    if bs is not None and len(bs):
+        big = bs[bs["_bucket"] == "Grande taille"]; usual = bs[bs["_bucket"] == "Taille habituelle"]
+        if len(big) and len(usual) and big["count"].iloc[0] >= min_n and usual["count"].iloc[0] >= min_n:
+            bm, um = float(big["mean"].iloc[0]), float(usual["mean"].iloc[0])
+            if bm < min(0, um):
+                addv("critique", "Tes grosses positions perdent",
+                     f"Les trades de grande taille {result_phrase(bm)} ({int(big['count'].iloc[0])} trades), "
+                     f"contre {result_noun(um)} en taille habituelle.",
+                     "Fixe une taille maximale et calcule chaque position à partir d'un risque fixe en % du capital.")
+            elif bm > um > 0:
+                addv("info", "Grandes tailles plus rentables",
+                     f"Les trades de grande taille {result_phrase(bm)}, contre {result_noun(um)} en taille habituelle.",
+                     "N'augmente la taille que sur ces mêmes setups, en gardant un risque par trade plafonné.")
+    cv = rk.get("loss_cv"); mr = rk.get("loss_max_ratio")
+    if cv is not None and cv > 0.7:
+        addv("attention", "Risque par trade irrégulier",
+             f"Tes pertes varient beaucoup d'un trade à l'autre (perte moyenne {money(rk['loss_avg'])}, "
+             f"coefficient de variation {num(cv)}).",
+             "Dimensionne chaque position pour que la perte au stop soit toujours le même montant (ex. 1 % du capital).")
+    if mr is not None and mr >= 3:
+        addv("critique" if mr >= 5 else "attention", "Pertes extrêmes",
+             f"Ta plus grosse perte ({money(rk['loss_max'])}) vaut {num(mr, 1)} fois ta perte moyenne.",
+             "Ne déplace jamais un stop pour l'éloigner, et coupe toute position qui dépasse le risque prévu.")
+    return R
 
 if st.session_state.page == "dashboard":
     _tdb = get_theme()
@@ -2186,9 +2465,16 @@ if st.session_state.page == "dashboard":
         # Analyse comportementale : contexte calculé sur les comptes sélectionnés, stats sur les trades filtrés
         try:
             _bh = behavior_analysis(_df_scope, keep_ids=set(df["id"]) if "id" in df.columns else None)
-            _recos = recommendations(_bh)
         except Exception as _e_bh:
-            _bh, _recos = {"n": 0, "error": str(_e_bh)}, []
+            _bh = {"n": 0, "error": str(_e_bh)}
+        try:
+            _risk = risk_analysis(df)
+        except Exception as _e_rk:
+            _risk = {"n": 0, "error": str(_e_rk)}
+        try:
+            _recos = all_recommendations(_bh, _risk) if _bh.get("n") else risk_recommendations(_risk)
+        except Exception:
+            _recos = []
         _top = [r for r in _recos if r["level"] in ("critique", "attention")][:2]
         if _top:
             _lv = {"critique": _tdb["loss"], "attention": _tdb["orange"]}
@@ -2199,7 +2485,7 @@ if st.session_state.page == "dashboard":
                     f"<span style='font-size:12px;font-weight:700;color:{_lv[r['level']]};background:{_lv[r['level']]}14;"
                     f"border:1px solid {_lv[r['level']]}40;border-radius:8px;padding:3px 10px'>"
                     f"{'●' if r['level'] == 'critique' else '▲'} {r['title']}</span>" for r in _top) +
-                f"<span style='font-size:11px;color:{_tdb['muted']}'>détails : onglet Comportement &amp; émotions</span></div>",
+                f"<span style='font-size:11px;color:{_tdb['muted']}'>détails : onglet Recommandations</span></div>",
                 unsafe_allow_html=True)
 
         # Comparaison par compte : une seule ligne de pastilles (pas une 2e rangée de cartes)
@@ -2353,9 +2639,63 @@ if st.session_state.page == "dashboard":
         # ════════════════════════════════════════════════════════════════════
         # DÉTAIL PAR CATÉGORIE : un onglet par thème
         # ════════════════════════════════════════════════════════════════════
-        (tab_perf, tab_bh, tab_risk, tab_assets, tab_psy, tab_cal, tab_last) = st.tabs([
-            "Performance", "Comportement & émotions", "Risque & Volume", "Actifs & Stratégies",
+        (tab_reco, tab_perf, tab_bh, tab_risk, tab_assets, tab_psy, tab_cal, tab_last) = st.tabs([
+            "Recommandations", "Performance", "Comportement & émotions", "Risque & Volume", "Actifs & Stratégies",
             "Psychologie", "Calendrier", "Derniers trades"])
+        def _reco_card(r, T):
+            c = {"critique": T["loss"], "attention": T["orange"], "info": T["accent"], "positif": T["win"]}[r["level"]]
+            lab = {"critique": "critique", "attention": "attention", "info": "à savoir", "positif": "point fort"}[r["level"]]
+            st.markdown(
+                f"<div style='background:{T['card']};border:1px solid {T['border']};border-left:4px solid {c};"
+                f"border-radius:10px;padding:9px 13px;margin-bottom:8px'>"
+                f"<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>"
+                f"<span style='font-size:9.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;"
+                f"color:{c};background:{c}16;border-radius:5px;padding:1px 6px'>{lab}</span>"
+                f"<b style='font-size:13px;color:{T['text']}'>{r['title']}</b>"
+                f"<span style='font-size:10.5px;color:{T['muted']};margin-left:auto'>{r.get('cat', '')}</span></div>"
+                f"<div style='font-size:12px;color:{T['muted']};margin:4px 0 3px'>{r['detail']}</div>"
+                f"<div style='font-size:12.5px;color:{T['text']}'><b style='color:{c}'>→</b> {r['action']}</div></div>",
+                unsafe_allow_html=True)
+
+        with tab_reco:
+            _T = _theme
+            if not _recos:
+                st.info("Pas assez de trades sur la sélection pour générer des recommandations (5 minimum).")
+            else:
+                _cnt = {lv: sum(1 for r in _recos if r["level"] == lv) for lv in ("critique", "attention", "info", "positif")}
+                _chips = [("critique", "critique(s)", _T["loss"]), ("attention", "à surveiller", _T["orange"]),
+                          ("info", "à savoir", _T["accent"]), ("positif", "point(s) fort(s)", _T["win"])]
+                st.markdown(
+                    "<div style='display:flex;gap:10px;flex-wrap:wrap;margin:4px 0 12px'>" + "".join(
+                        f"<span style='font-size:12.5px;font-weight:700;color:{c};background:{c}14;border:1px solid {c}40;"
+                        f"border-radius:9px;padding:4px 12px'><b style='font-size:15px'>{_cnt[k]}</b> {lab}</span>"
+                        for k, lab, c in _chips) +
+                    f"<span style='font-size:11.5px;color:{_T['muted']};align-self:center'>Calculé sur "
+                    f"{_bh.get('n') or _risk.get('n', 0)} trades · comptes : {selection_label()} · filtres du dashboard appliqués</span></div>",
+                    unsafe_allow_html=True)
+                rc1, rc2 = st.columns([3, 2], gap="medium")
+                with rc1:
+                    _card("Priorités", "à corriger en premier")
+                    _pri = [r for r in _recos if r["level"] in ("critique", "attention")]
+                    if not _pri:
+                        st.success("Aucun point critique ou à surveiller sur cette sélection.")
+                    for r in _pri:
+                        _reco_card(r, _T)
+                with rc2:
+                    _card("Points forts", "à conserver")
+                    _pos = [r for r in _recos if r["level"] == "positif"]
+                    if not _pos:
+                        st.caption("Aucun point fort statistiquement net pour l'instant.")
+                    for r in _pos:
+                        _reco_card(r, _T)
+                    _inf_r = [r for r in _recos if r["level"] == "info"]
+                    if _inf_r:
+                        _card("À savoir")
+                        for r in _inf_r:
+                            _reco_card(r, _T)
+                st.caption("Chaque recommandation exige au moins 5 trades concernés. Les montants sont des moyennes par "
+                           "trade, sur la sélection en cours.")
+
         with tab_perf:
             pf1, pf2 = st.columns(2)
             with pf1:
@@ -2448,22 +2788,8 @@ if st.session_state.page == "dashboard":
                         f"{_bh['max_win_streak']} G / {_bh['max_loss_streak']} P",
                         f"{_bh['trades_per_day_med']:.0f} trades/jour (médiane)", _T["alt"])
 
-                b1, b2 = st.columns([3, 2], gap="medium")
+                b1, b2 = st.columns([2, 3], gap="medium")
                 with b1:
-                    _card("Recommandations", "tirées des métriques ci-dessous")
-                    for r in _recos:
-                        c = _lvc[r["level"]]
-                        st.markdown(
-                            f"<div style='background:{_T['card']};border:1px solid {_T['border']};border-left:4px solid {c};"
-                            f"border-radius:10px;padding:9px 13px;margin-bottom:8px'>"
-                            f"<div style='display:flex;gap:8px;align-items:center'>"
-                            f"<span style='font-size:9.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;"
-                            f"color:{c};background:{c}16;border-radius:5px;padding:1px 6px'>{r['level']}</span>"
-                            f"<b style='font-size:13px;color:{_T['text']}'>{r['title']}</b></div>"
-                            f"<div style='font-size:12px;color:{_T['muted']};margin:4px 0 3px'>{r['detail']}</div>"
-                            f"<div style='font-size:12.5px;color:{_T['text']}'><b style='color:{c}'>→</b> {r['action']}</div></div>",
-                            unsafe_allow_html=True)
-                with b2:
                     _lvl, _lk, _ltxt = emotion_level(_bh)
                     _lc = _T[_lk]
                     _card("Niveau émotionnel", "émotions déclarées + déduites")
@@ -2479,6 +2805,8 @@ if st.session_state.page == "dashboard":
                         f"<div style='font-size:11px;color:{_T['muted']};margin-top:6px'>{_bh['n_inferred']} émotion(s) déduite(s) "
                         f"du comportement à l'entrée (case vide ou « Neutre » par défaut de l'import MT5).</div></div>",
                         unsafe_allow_html=True)
+                with b2:
+                    _card("Espérance par émotion", "déclarées + déduites")
                     _bm = _bh["by_mood"].sort_values("mean")
                     fig_bm = category_figure(_bm["mood_final"].tolist(), _bm["mean"].round(2).tolist(),
                         [_T["win"] if v >= 0 else _T["loss"] for v in _bm["mean"]], _T, _cs, kind=_cs["ranking"],
@@ -2560,6 +2888,147 @@ if st.session_state.page == "dashboard":
                                 (st.success if db_save(st.session_state.trades) else st.warning)("Émotions d'origine restaurées.")
                                 st.rerun()
         with tab_risk:
+            _R = _risk
+            _T = _theme
+            if _R.get("n", 0) >= 5:
+                st.caption(f"{_R['n']} trades · comptes : {selection_label()} · filtres du dashboard appliqués. "
+                           "R = distance entre l'entrée et le stop initial.")
+                if _R.get("n_bad_exit", 0):
+                    st.warning(f"{_R['n_bad_exit']} trades ont un prix de sortie égal au prix d'entrée (ancien import MT5) : "
+                               "ils sont exclus de l'analyse des stops et des TP. Pour les corriger : page Import MT5, "
+                               "réimporte tes rapports puis clique sur « Corriger les trades déjà importés ».")
+                _mix = _R.get("exit_mix", pd.Series(dtype=float))
+                kk = st.columns(6)
+                with kk[0]: kpi('<i class="fa-solid fa-shield-halved"></i>', "Trades avec stop", f"{_R['sl_cov']:.0f} %",
+                                "SL enregistré", _T["win"] if _R["sl_cov"] >= 90 else _T["orange"] if _R["sl_cov"] >= 60 else _T["loss"])
+                with kk[1]: kpi('<i class="fa-solid fa-bullseye"></i>', "Trades avec TP", f"{_R['tp_cov']:.0f} %", "TP enregistré", _T["alt"])
+                with kk[2]: kpi('<i class="fa-solid fa-circle-stop"></i>', "Stops touchés",
+                                f"{float(_mix.get('Stop touché', 0)):.0f} %", f"{_R['n_measurable']} sorties mesurables", _T["loss"])
+                with kk[3]: kpi('<i class="fa-solid fa-flag-checkered"></i>', "TP touchés",
+                                f"{float(_mix.get('TP touché', 0)):.0f} %", "des sorties mesurables", _T["win"])
+                with kk[4]: kpi('<i class="fa-solid fa-scale-balanced"></i>', "R:R prévu",
+                                f"{_R['rr_plan_med']:.2f}" if _R.get("rr_plan_med") is not None else "—", "médiane TP / stop", _T["alt"])
+                with kk[5]: kpi('<i class="fa-solid fa-ruler"></i>', "R réalisé",
+                                f"{_R['R_med']:+.2f} R" if _R.get("R_med") is not None else "—",
+                                (f"gagnants : {_R['R_win_med']:+.2f} R" if _R.get("R_win_med") is not None else "médiane par trade"),
+                                _T["win"] if (_R.get("R_med") or 0) >= 0 else _T["loss"])
+                g1, g2 = st.columns(2, gap="medium")
+                with g1:
+                    _card("Comment se terminent tes trades", "part des sorties mesurables")
+                    _ee = _R.get("exit_exp")
+                    if _ee is not None and len(_ee):
+                        _cmap = {"Stop touché": _T["loss"], "Stop suiveur / point mort": _T["muted"], "TP touché": _T["win"],
+                                 "Sortie manuelle en gain": _T["alt"], "Sortie manuelle en perte": _T["orange"],
+                                 "Stop-out (marge)": _T["loss"]}
+                        _labs = [l for l in _mix.index][::-1]
+                        fig_ex = category_figure(_labs, [round(float(_mix[l]), 1) for l in _labs], [_cmap.get(l, _T["accent"]) for l in _labs],
+                            _T, _cs, kind=_cs["ranking"], orientation="h",
+                            texts=[f"{float(_mix[l]):.0f} % · {int(_ee.loc[l, 'count'])} tr. · {fmt(float(_ee.loc[l, 'mean']))}" for l in _labs],
+                            hovertemplate="<b>%{y}</b><br>%{x:.1f} % des sorties<extra></extra>")
+                        fig_ex.update_layout(**_base_layout(height=250, margin=dict(l=170, r=130, t=10, b=26)))
+                        _style_axes(fig_ex); fig_ex.update_xaxes(ticksuffix="%", range=[0, max(100, float(_mix.max()) * 1.3)])
+                        fig_ex.update_traces(cliponaxis=False)
+                        st.plotly_chart(fig_ex, use_container_width=True, config=_chart_cfg)
+                    else:
+                        st.info("Aucune sortie mesurable (prix de sortie manquants).")
+                with g2:
+                    _card("Tes sorties manuelles par rapport au plan")
+                    def _bar(label, frac, n, good_high, note):
+                        if frac is None or n < 3:
+                            return (f"<div style='margin:8px 0 14px;font-size:12px;color:{_T['muted']}'><b style='color:{_T['text']}'>"
+                                    f"{label}</b> : pas assez de cas ({n}).</div>")
+                        v = max(0.0, min(1.5, frac))
+                        c = (_T["win"] if v >= 0.7 else _T["orange"]) if good_high else _T["accent"]
+                        return (f"<div style='margin:8px 0 14px'><div style='display:flex;justify-content:space-between;font-size:12px'>"
+                                f"<b style='color:{_T['text']}'>{label}</b><span style='color:{c};font-weight:800'>{frac * 100:.0f} %</span></div>"
+                                f"<div style='height:9px;border-radius:5px;background:{_T['bg2']};margin:5px 0 4px;overflow:hidden'>"
+                                f"<div style='width:{min(100, v / 1.0 * 100):.0f}%;height:100%;background:{c}'></div></div>"
+                                f"<div style='font-size:11px;color:{_T['muted']}'>{note} · {n} trades</div></div>")
+                    st.markdown(
+                        f"<div style='background:{_T['card']};border:1px solid {_T['border']};border-radius:12px;padding:8px 14px'>"
+                        + _bar("Gains pris à la main", _R.get("manual_win_tp_frac"), _R.get("manual_win_n", 0), True,
+                               "part du chemin vers le TP au moment de sortir (100 % = TP)")
+                        + _bar("Pertes coupées à la main", _R.get("manual_loss_sl_frac"), _R.get("manual_loss_n", 0), False,
+                               "part de la distance du stop au moment de couper (100 % = stop)")
+                        + "</div>", unsafe_allow_html=True)
+                # ── MAE / MFE ──────────────────────────────────────────────────
+                _exR = _R.get("exR")
+                if _exR is not None and len(_exR) >= 5:
+                    m1, m2 = st.columns(2, gap="medium")
+                    with m1:
+                        _card("MAE / MFE par trade", "en R · ligne verticale = stop initial")
+                        fig_mm = go.Figure()
+                        for lab, msk, col in (("Gagnants", _exR["pnl"] > 0, _T["win"]), ("Perdants", _exR["pnl"] <= 0, _T["loss"])):
+                            sub = _exR[msk]
+                            fig_mm.add_trace(go.Scatter(x=sub["_maeR"].clip(upper=3), y=sub["_mfeR"].clip(upper=6), mode="markers", name=lab,
+                                marker=dict(color=col, size=7, opacity=0.7, line=dict(color=_T["card"], width=0.5)),
+                                hovertemplate=lab + "<br>MAE %{x:.2f} R · MFE %{y:.2f} R<extra></extra>"))
+                        fig_mm.add_vline(x=1, line_dash="dot", line_color=_T["loss"], line_width=1,
+                                         annotation_text="stop", annotation_font=dict(color=_T["muted"], size=10))
+                        if _R.get("tp_plan_med_R"):
+                            fig_mm.add_hline(y=_R["tp_plan_med_R"], line_dash="dot", line_color=_T["win"], line_width=1,
+                                             annotation_text="TP médian", annotation_font=dict(color=_T["muted"], size=10))
+                        fig_mm.update_layout(**_base_layout(height=300, showlegend=True))
+                        _style_axes(fig_mm, free_y=True); fig_mm.update_xaxes(title_text="MAE (R)"); fig_mm.update_yaxes(title_text="MFE (R)")
+                        st.plotly_chart(fig_mm, use_container_width=True, config=_chart_cfg)
+                    with m2:
+                        _card("Recul des gagnants avant de partir (MAE)", "en R")
+                        _w = _exR[_exR["pnl"] > 0]["_maeR"].clip(upper=1.5)
+                        fig_h = go.Figure(go.Histogram(x=_w, nbinsx=20, marker=dict(color=_T["accent"], opacity=0.85),
+                                                       hovertemplate="MAE %{x:.2f} R : %{y} gagnants<extra></extra>"))
+                        if _R.get("win_maeR_q"):
+                            fig_h.add_vline(x=_R["win_maeR_q"][0.9], line_dash="dash", line_color=_T["orange"], line_width=1.5,
+                                            annotation_text="90 % des gagnants", annotation_position="top left", annotation_font=dict(color=_T["muted"], size=10))
+                        fig_h.add_vline(x=1, line_dash="dot", line_color=_T["loss"], line_width=1,
+                                        annotation_text="stop", annotation_position="bottom right", annotation_font=dict(color=_T["muted"], size=10))
+                        fig_h.update_layout(**_base_layout(height=230))
+                        _style_axes(fig_h); fig_h.update_xaxes(title_text="MAE (R)")
+                        st.plotly_chart(fig_h, use_container_width=True, config=_chart_cfg)
+                        _txt = []
+                        if _R.get("e_ratio") is not None: _txt.append(f"Ratio MFE/MAE : <b>{_R['e_ratio']:.2f}</b>")
+                        if _R.get("exit_eff") is not None: _txt.append(f"Mouvement capturé par les gagnants : <b>{_R['exit_eff']:.0f} %</b>")
+                        if _R.get("stopped_mfe_1R") is not None: _txt.append(f"Stops passés d'abord par +1 R : <b>{_R['stopped_mfe_1R']:.0f} %</b>")
+                        if _R.get("near_miss") is not None: _txt.append(f"Gagnants passés à moins de 0,2 R du stop : <b>{_R['near_miss']:.0f} %</b>")
+                        st.markdown(f"<div style='font-size:12px;color:{_T['text']};line-height:1.7'>" + " · ".join(_txt) + "</div>",
+                                    unsafe_allow_html=True)
+                else:
+                    st.info(f"MAE / MFE disponibles pour {_R.get('n_excursion', 0)} trade(s) sur cette sélection. Pour les "
+                            "obtenir, exporte tes positions avec le script MT5 **ExportTJ_MAE_MFE** puis importe le fichier "
+                            "dans la page **Import MT5** (rubrique « Enrichir avec MAE / MFE »). Elles indiquent si tes stops "
+                            "sont trop larges ou trop courts et si tes TP sont réalistes.")
+                # ── Volume ────────────────────────────────────────────────────
+                v1, v2 = st.columns(2, gap="medium")
+                with v1:
+                    _card("Résultat selon la taille de position", "taille relative à ta taille habituelle sur l'actif")
+                    _bs = _R.get("by_size")
+                    if _bs is not None and len(_bs.dropna(subset=["mean"])):
+                        _bs = _bs.dropna(subset=["mean"])
+                        fig_bs = category_figure(_bs["_bucket"].astype(str).tolist(), _bs["mean"].round(2).tolist(),
+                            [_T["win"] if v >= 0 else _T["loss"] for v in _bs["mean"]], _T, _cs, kind="bar", orientation="v",
+                            texts=[f"{fmt(m)} · {int(c)} tr. · {w:.0f} %" for m, c, w in zip(_bs["mean"], _bs["count"], _bs["wr"])],
+                            hovertemplate="<b>%{x}</b><br>Résultat moyen : %{y:+,.2f}$<extra></extra>")
+                        fig_bs.add_hline(y=0, line_color=_grid, line_width=1)
+                        fig_bs.update_layout(**_base_layout(height=250)); _style_axes(fig_bs, yprefix="$")
+                        fig_bs.update_traces(cliponaxis=False)
+                        st.plotly_chart(fig_bs, use_container_width=True, config=_chart_cfg)
+                    else:
+                        st.info("Volume non disponible : il est lu dans les imports MT5 (ou le fichier MAE/MFE).")
+                with v2:
+                    _card("Régularité du risque", "montant des pertes")
+                    _ls = _R["d"].loc[_R["d"]["pnl"] < 0, "pnl"].abs()
+                    if len(_ls) >= 5:
+                        fig_ls = go.Figure(go.Histogram(x=_ls, nbinsx=25, marker=dict(color=_T["loss"], opacity=0.8),
+                                                        hovertemplate="Perte %{x:,.2f}$ : %{y} trades<extra></extra>"))
+                        fig_ls.add_vline(x=float(_ls.mean()), line_dash="dash", line_color=_T["text"], line_width=1,
+                                         annotation_text="moyenne", annotation_font=dict(color=_T["muted"], size=10))
+                        fig_ls.update_layout(**_base_layout(height=230)); _style_axes(fig_ls, xprefix="$")
+                        st.plotly_chart(fig_ls, use_container_width=True, config=_chart_cfg)
+                        _cvt = (f"Coefficient de variation {_R['loss_cv']:.2f} · " if _R.get("loss_cv") is not None else "")
+                        st.markdown(f"<div style='font-size:12px;color:{_T['muted']}'>{_cvt}perte moyenne {money(_R['loss_avg'])}"
+                                    f" · plus grosse perte {money(_R['loss_max'])}</div>", unsafe_allow_html=True)
+                st.markdown(f"<hr style='border-color:{_T['border']};margin:14px 0 6px'>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:12px;color:{_T['muted']};margin-bottom:4px'>Graphiques complémentaires</div>",
+                            unsafe_allow_html=True)
             r3c1, r3c2 = st.columns(2)
 
             with r3c1:
@@ -2661,7 +3130,7 @@ if st.session_state.page == "dashboard":
                                 for p in df_vol["pnl"]]
                     fig_vol = go.Figure(go.Scatter(
                         x=df_vol["_vol"].tolist(), y=df_vol["pnl"].tolist(),
-                        mode="markers",
+                        mode="markers", name="Trades",
                         marker=dict(color=colors_v, size=sizes_v, opacity=0.8,
                                     line=dict(color=_bg, width=1.5)),
                         hovertemplate="<b>%{customdata[0]}</b><br>Volume : %{x}<br>P&L : %{y:+,.2f}$<extra></extra>",
@@ -3400,6 +3869,74 @@ elif st.session_state.page == "import":
         st.session_state.page = "journal"; st.rerun()
     st.divider()
 
+    # ── Enrichissement MAE / MFE (script MT5 ExportTJ_MAE_MFE) ────────────────
+    with st.expander("Enrichir avec MAE / MFE et motifs de clôture (script MT5)"):
+        st.markdown(
+            "1. Dans MetaTrader 5 : **Fichier → Ouvrir le dossier des données → MQL5 → Scripts**, "
+            "copie `ExportTJ_MAE_MFE.mq5`, puis ouvre-le dans MetaEditor et compile-le (F7).\n"
+            "2. Glisse le script **ExportTJ_MAE_MFE** sur un graphique, choisis la profondeur d'historique, valide.\n"
+            "3. Le fichier `TJ_MAE_MFE.csv` est créé dans le dossier **Common\\Files** de MetaTrader "
+            "(le chemin exact s'affiche à la fin). Importe-le ci-dessous.")
+        _sp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ExportTJ_MAE_MFE.mq5")
+        if os.path.exists(_sp):
+            st.download_button("Télécharger le script ExportTJ_MAE_MFE.mq5", open(_sp, "rb").read(),
+                               file_name="ExportTJ_MAE_MFE.mq5", mime="text/plain", key="dl_mq5")
+        _mf = st.file_uploader("Fichier TJ_MAE_MFE.csv", type=["csv", "txt"], key="mae_csv")
+        if _mf is not None:
+            try:
+                _mx = pd.read_csv(_mf, sep=";", dtype=str, encoding_errors="ignore")
+                _mx.columns = [c.strip().lower() for c in _mx.columns]
+                _num = lambda v: (float(str(v).replace(",", ".")) if str(v).strip() not in ("", "nan", "None") else None)
+                def _symk(x):
+                    x = str(x).upper().replace("/", "").replace(".", "").replace("_", "")
+                    for suf in ("PRO", "ECN", "RAW", "M"):
+                        if x.endswith(suf) and len(x) > len(suf) + 2:
+                            x = x[: -len(suf)]
+                    return x
+                _by_id = {str(t.get("mt5_id", "")).strip(): t for t in st.session_state.trades
+                          if str(t.get("mt5_id", "")).strip()}
+                _by_key = {}
+                for t in st.session_state.trades:
+                    try:
+                        _k = (_symk(t.get("symbol")), str(pd.to_datetime(t.get("datetime") or t.get("date")))[:16],
+                              "LONG" if str(t.get("direction", "")).upper().startswith("L") else "SHORT")
+                        _by_key[_k] = t
+                    except Exception:
+                        pass
+                _upd = []
+                for _, r in _mx.iterrows():
+                    t = _by_id.get(str(r.get("position_id", "")).strip())
+                    if t is None:
+                        _k = (_symk(r.get("symbol")), str(pd.to_datetime(r.get("open_time"), errors="coerce"))[:16],
+                              "LONG" if str(r.get("type", "")).upper() == "BUY" else "SHORT")
+                        t = _by_key.get(_k)
+                    if t is not None:
+                        _upd.append((t, r))
+                st.info(f"{len(_mx)} positions dans le fichier · {len(_upd)} correspondent à des trades du journal "
+                        f"· {sum(1 for _, r in _upd if _num(r.get('mae_price')) is not None)} avec MAE/MFE.")
+                if _upd and st.button(f"Enrichir {len(_upd)} trades (MAE/MFE, sortie, SL/TP, motif de clôture)",
+                                      type="primary", key="mae_apply"):
+                    for t, r in _upd:
+                        for src, dst in (("close_price", "exit"), ("sl_open", "sl"), ("tp_open", "tp"),
+                                         ("sl_close", "sl_close"), ("tp_close", "tp_close"), ("volume", "volume"),
+                                         ("mae_price", "mae"), ("mfe_price", "mfe"),
+                                         ("mae_money", "mae_money"), ("mfe_money", "mfe_money")):
+                            v = _num(r.get(src))
+                            if v is not None and not (dst in ("sl", "tp") and v == 0):
+                                t[dst] = v
+                        if str(r.get("exit_reason", "")).strip():
+                            t["exit_reason"] = str(r["exit_reason"]).strip().upper()
+                        if str(r.get("close_time", "")).strip():
+                            t["close_datetime"] = str(r["close_time"]).strip().replace(" ", "T")
+                        if not t.get("mt5_id") and str(r.get("position_id", "")).strip():
+                            t["mt5_id"] = str(r["position_id"]).strip()
+                    (st.success if db_save(st.session_state.trades) else st.warning)(
+                        f"{len(_upd)} trade(s) enrichi(s). L'analyse MAE/MFE est disponible dans le dashboard, "
+                        "onglet Risque & Volume.")
+            except Exception as _e:
+                st.error(f"Fichier illisible : {type(_e).__name__}: {_e}")
+    st.divider()
+
     # ── Mode du compte ────────────────────────────────────────────────────────
     ic1, ic2 = st.columns([2, 3])
     with ic1:
@@ -3722,10 +4259,18 @@ elif st.session_state.page == "import":
 
                 # Position ID MT5 : identifiant stable pour la déduplication
                 _mt5_pos = rv(col_position, "").strip() if col_position else ""
+                _close_full = ""
+                if col_close_time:
+                    try:
+                        _close_full = pd.to_datetime(rv(col_close_time, "")).strftime("%Y-%m-%dT%H:%M:%S")
+                    except Exception:
+                        _close_full = ""
 
                 new_trades.append({
                     "id":         int(datetime.now().timestamp()*1000000)+len(new_trades),
                     "mt5_id":     _mt5_pos,
+                    "close_datetime": _close_full,
+                    "volume":     volume,
                     "date":       parsed_date,
                     "time":       _time_str,
                     "datetime":   _dt_full,
@@ -3769,18 +4314,51 @@ elif st.session_state.page == "import":
         _existing_sig = {_sig(t) for t in st.session_state.trades}
         _dup_count = 0
         _fresh = []
+        _dups = []
         for t in new_trades:
             _is_dup = (t.get("mt5_id") and t["mt5_id"] in _existing_mt5) \
                       or (_sig(t) in _existing_sig)
             if _is_dup:
-                _dup_count += 1
+                _dup_count += 1; _dups.append(t)
             else:
                 _fresh.append(t)
         new_trades = _fresh
 
         if _dup_count:
-            st.warning(f"{_dup_count} position(s) déjà présente(s) en base — "
-                       f"ignorée(s) automatiquement (aucun doublon créé).")
+            # Correction des trades déjà en base : prix de sortie, SL/TP, clôture, volume.
+            # (Les anciens imports enregistraient le prix d'entrée comme prix de sortie.)
+            _by_id = {str(t.get("mt5_id", "")).strip(): t for t in st.session_state.trades
+                      if str(t.get("mt5_id", "")).strip()}
+            _by_sig = {_sig(t): t for t in st.session_state.trades}
+            _fixable = []
+            for nt in _dups:
+                old_t = _by_id.get(str(nt.get("mt5_id", "")).strip()) or _by_sig.get(_sig(nt))
+                if old_t is None:
+                    continue
+                if any(abs(float(old_t.get(k) or 0) - float(nt.get(k) or 0)) > 1e-9 for k in ("exit", "sl", "tp")) \
+                        or (nt.get("close_datetime") and not old_t.get("close_datetime")) \
+                        or (nt.get("volume") and not old_t.get("volume")) \
+                        or (nt.get("mt5_id") and not old_t.get("mt5_id")):
+                    _fixable.append((old_t, nt))
+            _bad_exit = sum(1 for o, _ in _fixable if float(o.get("exit") or 0) == float(o.get("entry") or 0)
+                            and float(o.get("pnl") or 0) != 0)
+            st.warning(f"{_dup_count} position(s) déjà présente(s) en base, non réimportée(s) (aucun doublon créé).")
+            if _fixable:
+                st.info(f"{len(_fixable)} de ces trades peuvent être complétés ou corrigés à partir de ce rapport"
+                        + (f", dont {_bad_exit} enregistrés avec un prix de sortie égal au prix d'entrée "
+                           f"(ancien import)" if _bad_exit else "")
+                        + ". Seuls le prix de sortie, le SL, le TP, l'heure de clôture, le volume et l'identifiant MT5 "
+                          "sont mis à jour : émotions, stratégies et notes sont conservées.")
+                if is_admin() and st.button(f"Corriger les {len(_fixable)} trades déjà importés",
+                                            key="imp_fix_existing", type="primary"):
+                    for old_t, nt in _fixable:
+                        for k in ("exit", "sl", "tp"):
+                            old_t[k] = nt.get(k, old_t.get(k))
+                        for k in ("close_datetime", "volume", "mt5_id"):
+                            if nt.get(k):
+                                old_t[k] = nt[k]
+                    (st.success if db_save(st.session_state.trades) else st.warning)(
+                        f"{len(_fixable)} trade(s) corrigé(s).")
 
         if not new_trades:
             st.success("Toutes les positions de cette plage sont déjà en base. "
