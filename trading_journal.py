@@ -324,7 +324,7 @@ def sequential_scale(t, cs):
     return cs["heat"]
 
 def chart_config(cs):
-    return {"displayModeBar": bool(cs["toolbar"]), "displaylogo": False, "responsive": True,
+    return {"displayModeBar": ("hover" if cs["toolbar"] else False), "displaylogo": False, "responsive": True,
             "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"]}
 
 def series_traces(x, y, color, cs, customdata=None, hovertemplate=None, name=None):
@@ -482,6 +482,8 @@ div[data-baseweb="select"] > div {{
 [role="listbox"] [role="option"][aria-selected="true"] {{ color:{t['accent']} !important; font-weight:700; }}
 .stButton > button {{ background:linear-gradient(135deg,{t['accent']},{t['alt']});color:{t['btn_text']};font-weight:800;border:none;border-radius:10px;box-shadow:0 2px 8px {t['accent']}33; }}
 .stButton > button:hover {{ filter:brightness(1.08); color:{t['btn_text']} !important; box-shadow:0 4px 14px {t['accent']}55; }}
+.stButton > button p, .stButton > button [data-testid="stMarkdownContainer"] p,
+.stButton > button [data-testid="stIconMaterial"] {{ color:{t['btn_text']} !important; }}
 /* Boutons de formulaire (Se connecter, Enregistrer...) : même style que les boutons du design */
 [data-testid="stFormSubmitButton"] > button {{ background:linear-gradient(135deg,{t['accent']},{t['alt']}) !important;
     color:{t['btn_text']} !important; font-weight:800; border:none !important; border-radius:10px;
@@ -497,11 +499,20 @@ div[data-baseweb="select"] > div {{
 .kpi-label {{ font-size:10px;color:{t['muted']};letter-spacing:1.2px;text-transform:uppercase;font-weight:600; }}
 .kpi-value {{ font-size:21px;font-weight:800;font-family:"JetBrains Mono",monospace;margin:3px 0 1px; }}
 /* Onglets du dashboard */
-.stTabs [data-baseweb="tab-list"] {{ gap:6px; border-bottom:1px solid {t['border']}; }}
-.stTabs [data-baseweb="tab"] {{ height:38px; padding:0 14px; border-radius:9px 9px 0 0;
-    color:{t['muted']} !important; font-weight:600; }}
-.stTabs [aria-selected="true"] {{ color:{t['accent']} !important; background:{t['accent']}12; }}
+.stTabs [data-baseweb="tab-list"], .stTabs [role="tablist"] {{ gap:6px; border-bottom:1px solid {t['border']}; }}
+.stTabs [data-baseweb="tab"], [data-testid="stTab"] {{ height:38px; padding:0 14px !important; border-radius:9px 9px 0 0;
+    color:{t['muted']} !important; font-weight:600; transition:all .15s ease; }}
+[data-testid="stTab"] p {{ color:inherit !important; font-size:13px !important; font-weight:600; }}
+[data-testid="stTab"]:hover {{ color:{t['text']} !important; background:{t['accent']}0d; }}
+.stTabs [aria-selected="true"], [data-testid="stTab"][data-selected="true"] {{ color:{t['accent']} !important;
+    background:{t['accent']}12; box-shadow:inset 0 -2px 0 {t['accent']}; }}
 .stTabs [data-baseweb="tab-highlight"] {{ background:{t['accent']} !important; }}
+[data-testid="stTab"] > div[data-rac] {{ background:{t['accent']} !important; }}
+/* Curseurs (sliders) : poignées et valeurs aux couleurs du design, piste neutre */
+[data-testid="stSlider"] div[data-rac][style*="translate(-50%"] {{ background:{t['accent']} !important;
+    box-shadow:0 0 0 3px {t['accent']}30 !important; }}
+[data-testid="stSlider"] div[style*="linear-gradient"] {{ filter:grayscale(1) contrast(1.1); }}
+[data-testid="stSliderThumbValue"], [data-testid="stSliderThumbValue"] * {{ color:{t['accent']} !important; }}
 div[data-testid="stExpander"] details {{ background:{t['card']}; border:1px solid {t['border']}; border-radius:10px; }}
 div[data-testid="stExpander"] summary p {{ font-size:12px !important; color:{t['muted']} !important; }}
 .kpi-sub {{ font-size:11px;color:{t['muted']}; }}
@@ -1762,11 +1773,343 @@ if _mig_msg:
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════
+# ANALYSE COMPORTEMENTALE : délais entre résultats, séries, contexte, émotions déduites,
+# recommandations. Calculée sur le DataFrame déjà filtré (comptes sélectionnés + filtres).
+# Les enchaînements sont calculés COMPTE PAR COMPTE (un trade démo n'est jamais la
+# « reprise » d'une perte sur le compte réel), puis regroupés.
+# ════════════════════════════════════════════════════════════════════════════
+import re as _re_bh
+
+REACTIVE_MOODS = ("Frustré", "Euphorique", "Anxieux", "Peureux")
+CALM_MOODS = ("Neutre", "Confiant")
+
+def _bh_mood_is_empty(row):
+    """Émotion non renseignée : vide, ou « Neutre » posé par défaut à l'import MT5."""
+    m = row.get("mood")
+    if m is None or (isinstance(m, float) and pd.isna(m)) or str(m).strip() in ("", "nan", "None"):
+        return True
+    if row.get("mood_auto"):
+        return True     # déjà déduite auparavant : on la recalcule
+    return str(m) == "Neutre" and str(row.get("strategy", "")) == "Importé MT5"
+
+def _bh_volume(notes):
+    m = _re_bh.search(r"vol:([\d.]+)", str(notes or ""))
+    try:
+        return float(m.group(1)) if m else None
+    except Exception:
+        return None
+
+def fmt_gap(minutes):
+    if minutes is None or pd.isna(minutes):
+        return "—"
+    m = float(minutes)
+    if m < 1:
+        return "< 1 min"
+    if m < 60:
+        return f"{m:.0f} min"
+    h = m / 60
+    if h < 24:
+        return f"{int(h)} h {int(m % 60):02d}"
+    return f"{int(h // 24)} j {int(h % 24)} h"
+
+def _bh_prepare(df):
+    """Trie par compte et par heure d'ouverture, ajoute les variables de contexte."""
+    d = df.copy()
+    if d.empty:
+        return d
+    if "trade_mode" not in d.columns:
+        d["trade_mode"] = "—"
+    dt = pd.to_datetime(d.get("datetime"), errors="coerce") if "datetime" in d.columns else pd.Series(pd.NaT, index=d.index)
+    dt = dt.fillna(pd.to_datetime(d["date"], errors="coerce"))
+    d["_t"] = dt
+    tm = d["time"].astype(str) if "time" in d.columns else pd.Series("", index=d.index)
+    d["_has_time"] = (tm.str.match(r"^\d{1,2}:\d{2}$") & (tm != "00:00")) | (d["_t"].dt.hour + d["_t"].dt.minute > 0)
+    d = d[d["_t"].notna()].sort_values(["trade_mode", "_t"]).reset_index(drop=True)
+    d["_out"] = np.where(d["pnl"] > 0, "W", np.where(d["pnl"] < 0, "L", "B"))
+    d["_vol"] = d["notes"].map(_bh_volume) if "notes" in d.columns else None
+    g = d.groupby("trade_mode", sort=False)
+    d["_prev_out"] = g["_out"].shift(1)
+    d["_prev_pnl"] = g["pnl"].shift(1)
+    d["_gap_prev"] = (d["_t"] - g["_t"].shift(1)).dt.total_seconds() / 60
+    # séries de pertes / gains juste avant le trade, dans la même journée (l'état émotionnel
+    # ne se reporte pas d'un jour à l'autre)
+    d["_day"] = d["_t"].dt.date
+    lb = pd.Series(0, index=d.index); wb = pd.Series(0, index=d.index)
+    for _, grp in d.groupby(["trade_mode", "_day"], sort=False):
+        cl = cw = 0
+        for idx, o in zip(grp.index, grp["_out"]):
+            lb[idx] = cl; wb[idx] = cw
+            if o == "L":   cl, cw = cl + 1, 0
+            elif o == "W": cw, cl = cw + 1, 0
+    d["_loss_before"] = lb; d["_win_before"] = wb
+    d["_day_rank"] = d.groupby(["trade_mode", "_day"]).cumcount() + 1
+    med_vol = g["_vol"].transform("median")
+    d["_vol_ratio"] = d["_vol"] / med_vol.replace(0, np.nan)
+    wins = d.loc[d["pnl"] > 0, "pnl"]
+    big = wins.quantile(0.8) if len(wins) >= 5 else (wins.max() if len(wins) else np.inf)
+    d["_prev_big_win"] = d["_prev_pnl"] >= big
+    return d
+
+def _bh_gaps_between(d, a, b):
+    """Délais (min) entre un trade de résultat a et le PROCHAIN trade de résultat b, par compte."""
+    out = []
+    for _, grp in d.groupby("trade_mode", sort=False):
+        times, outs = grp["_t"].tolist(), grp["_out"].tolist()
+        for i, o in enumerate(outs):
+            if o != a:
+                continue
+            for j in range(i + 1, len(outs)):
+                if outs[j] == b:
+                    out.append((times[j] - times[i]).total_seconds() / 60)
+                    break
+    return pd.Series(out, dtype=float)
+
+def _bh_stat(s):
+    s = s.dropna()
+    s5 = s[s <= 5 * 1440]          # au-delà de 5 jours (congés...) on écarte de la moyenne
+    return {"n": int(len(s)), "median": float(s.median()) if len(s) else None,
+            "mean": float(s5.mean()) if len(s5) else None}
+
+def infer_mood(r):
+    """Émotion probable AU MOMENT DE L'ENTRÉE, déduite du comportement (jamais du résultat du trade)."""
+    gap, prev, lb, wb = r["_gap_prev"], r["_prev_out"], r["_loss_before"], r["_win_before"]
+    vr, rank = r["_vol_ratio"], r["_day_rank"]
+    quick = lambda m: gap is not None and not pd.isna(gap) and gap <= m and r["_has_time"]
+    if lb >= 2 and quick(60):
+        return "Frustré", f"{lb} pertes d'affilée, reprise {fmt_gap(gap)} après"
+    if prev == "L" and quick(20):
+        return "Frustré", f"reprise {fmt_gap(gap)} après une perte"
+    if prev == "L" and vr is not None and not pd.isna(vr) and vr >= 1.3:
+        return "Frustré", f"taille augmentée de {(vr - 1) * 100:.0f} % après une perte"
+    if prev == "L" and vr is not None and not pd.isna(vr) and vr <= 0.7:
+        return "Peureux", f"taille réduite de {(1 - vr) * 100:.0f} % après une perte"
+    if lb >= 2 and quick(360):        # l'état émotionnel ne se reporte pas au lendemain
+        return "Anxieux", f"après {lb} pertes d'affilée"
+    if wb >= 3 and quick(360):
+        return "Euphorique", f"après {wb} gains d'affilée"
+    if prev == "W" and bool(r["_prev_big_win"]) and quick(30):
+        return "Euphorique", f"reprise {fmt_gap(gap)} après un gros gain"
+    if prev == "W" and vr is not None and not pd.isna(vr) and vr >= 1.3:
+        return "Euphorique", f"taille augmentée de {(vr - 1) * 100:.0f} % après un gain"
+    if rank >= 5:
+        return "Anxieux", f"{rank}e trade de la journée (suractivité)"
+    if prev == "W":
+        return "Confiant", "après un gain, rythme et taille habituels"
+    return "Neutre", "pas de signal émotionnel particulier"
+
+def _bh_group(d, mask, label):
+    s = d.loc[mask, "pnl"]
+    n = int(len(s))
+    return {"label": label, "n": n, "wr": float((s > 0).mean() * 100) if n else None,
+            "exp": float(s.mean()) if n else None}
+
+def behavior_analysis(df, keep_ids=None):
+    """Métriques comportementales + émotions déduites.
+    df : trades des comptes sélectionnés (séquence complète, pour le contexte de chaque trade).
+    keep_ids : trades retenus par les filtres du dashboard ; les statistiques portent sur eux."""
+    d = _bh_prepare(df)
+    if keep_ids is not None and "id" in d.columns:
+        d = d[d["id"].isin(keep_ids)].reset_index(drop=True)
+    res = {"n": int(len(d)), "d": d}
+    if d.empty:
+        return res
+    res["accounts"] = sorted(d["trade_mode"].unique().tolist())
+    res["time_share"] = float(d["_has_time"].mean() * 100)
+    res["gaps"] = {k: _bh_stat(_bh_gaps_between(d, a, b)) for k, (a, b) in {
+        "LL": ("L", "L"), "WW": ("W", "W"), "LW": ("L", "W"), "WL": ("W", "L")}.items()}
+    after_l = d.loc[d["_prev_out"] == "L", "_gap_prev"]
+    after_w = d.loc[d["_prev_out"] == "W", "_gap_prev"]
+    res["resume_after_loss"] = _bh_stat(after_l); res["resume_after_win"] = _bh_stat(after_w)
+    # séries
+    mx = {"W": 0, "L": 0}; cur = (None, 0)
+    for _, grp in d.groupby("trade_mode", sort=False):
+        c, k = None, 0
+        for o in grp["_out"]:
+            if o == "B":
+                continue
+            k = k + 1 if o == c else 1; c = o; mx[o] = max(mx[o], k)
+        cur = (c, k) if k > cur[1] else cur
+    res["max_win_streak"], res["max_loss_streak"] = mx["W"], mx["L"]
+    # contexte
+    base = _bh_group(d, d.index == d.index, "Tous les trades")
+    quick_l = (d["_prev_out"] == "L") & (d["_gap_prev"] <= 30) & d["_has_time"]
+    res["base"] = base
+    res["context"] = [
+        _bh_group(d, d["_prev_out"] == "W", "Après un gain"),
+        _bh_group(d, d["_prev_out"] == "L", "Après une perte"),
+        _bh_group(d, quick_l, "≤ 30 min après une perte"),
+        _bh_group(d, d["_loss_before"] >= 2, "Après 2 pertes ou plus"),
+        _bh_group(d, d["_prev_big_win"] & (d["_prev_out"] == "W"), "Après un gros gain"),
+        _bh_group(d, d["_day_rank"] == 1, "1er trade du jour"),
+        _bh_group(d, d["_day_rank"] >= 4, "4e trade du jour et +"),
+    ]
+    rk = d["_day_rank"].clip(upper=6)
+    res["by_rank"] = [_bh_group(d, rk == k, (f"{k}e" if k < 6 else "6e+")) for k in range(1, 7) if (rk == k).any()]
+    # volume après perte / gain
+    if d["_vol"].notna().sum() >= 10:
+        res["vol_after_loss"] = float(d.loc[d["_prev_out"] == "L", "_vol_ratio"].mean())
+        res["vol_after_win"] = float(d.loc[d["_prev_out"] == "W", "_vol_ratio"].mean())
+    # suractivité
+    per_day = d.groupby(["trade_mode", "_day"]).size()
+    res["trades_per_day_med"] = float(per_day.median())
+    res["trades_per_day_max"] = int(per_day.max())
+    # gains / pertes
+    w, l = d.loc[d["pnl"] > 0, "pnl"], d.loc[d["pnl"] < 0, "pnl"]
+    res["avg_win"] = float(w.mean()) if len(w) else 0.0
+    res["avg_loss"] = float(l.mean()) if len(l) else 0.0
+    res["payoff"] = (res["avg_win"] / abs(res["avg_loss"])) if len(l) and len(w) else None
+    res["expectancy"] = float(d["pnl"].mean())
+    # horaires
+    if d["_has_time"].mean() >= 0.5:
+        h = d[d["_has_time"]].assign(_h=lambda x: x["_t"].dt.hour)
+        res["by_hour"] = h.groupby("_h")["pnl"].agg(["count", "mean", "sum"]).reset_index()
+    wd = d.assign(_wd=d["_t"].dt.dayofweek)
+    res["by_wd"] = wd.groupby("_wd")["pnl"].agg(["count", "mean", "sum"]).reset_index()
+    res["by_sym"] = d.groupby("symbol")["pnl"].agg(["count", "mean", "sum"]).reset_index()
+    # émotions : déclarées ou déduites
+    empty = d.apply(_bh_mood_is_empty, axis=1)
+    inf = d.apply(infer_mood, axis=1)
+    d["mood_inferred"] = [x[0] for x in inf]; d["mood_reason"] = [x[1] for x in inf]
+    d["mood_src"] = np.where(empty, "déduite", "déclarée")
+    d["mood_final"] = np.where(empty, d["mood_inferred"], d["mood"])
+    res["n_inferred"] = int(empty.sum())
+    mf = d.groupby("mood_final")["pnl"].agg(["count", "mean", "sum"]).reset_index()
+    mf["wr"] = d.groupby("mood_final")["pnl"].apply(lambda s: (s > 0).mean() * 100).values
+    res["by_mood"] = mf
+    res["reactive_share"] = float(d["mood_final"].isin(REACTIVE_MOODS).mean() * 100)
+    res["reactive_exp"] = float(d.loc[d["mood_final"].isin(REACTIVE_MOODS), "pnl"].mean()) if d["mood_final"].isin(REACTIVE_MOODS).any() else None
+    res["calm_exp"] = float(d.loc[d["mood_final"].isin(CALM_MOODS), "pnl"].mean()) if d["mood_final"].isin(CALM_MOODS).any() else None
+    # épisodes de tilt : ≥ 3 pertes le même jour, chacune reprise en moins de 30 min
+    tilt = 0
+    for _, grp in d[d["_has_time"]].groupby(["trade_mode", "_day"]):
+        run = 0
+        for o, gp in zip(grp["_out"], grp["_gap_prev"].fillna(9e9)):
+            run = run + 1 if (o == "L" and (run == 0 or gp <= 30)) else (0 if o != "L" else 1)
+            if run == 3:
+                tilt += 1
+    res["tilt_episodes"] = tilt
+    res["d"] = d
+    return res
+
+def emotion_level(res):
+    """Conclusion sur le niveau émotionnel : (libellé, couleur clé, phrase)."""
+    s = res.get("reactive_share", 0)
+    re_, ca = res.get("reactive_exp"), res.get("calm_exp")
+    cost = ""
+    if re_ is not None and ca is not None:
+        cost = (f" Ces trades rapportent en moyenne {fmt(re_)} contre {fmt(ca)} en état calme.")
+    if s >= 40:
+        return "Élevé", "loss", f"{s:.0f} % de tes trades sont pris dans un état réactif (frustration, euphorie, anxiété, peur).{cost}"
+    if s >= 20:
+        return "Modéré", "orange", f"{s:.0f} % de tes trades sont pris dans un état réactif.{cost}"
+    return "Maîtrisé", "win", f"Seulement {s:.0f} % de trades pris dans un état réactif.{cost}"
+
+def recommendations(res, min_n=5):
+    """Recommandations chiffrées, triées par priorité. Chaque règle exige un échantillon minimal."""
+    R = []
+    if not res.get("n"):
+        return R
+    base = res["base"]; bwr, bexp = base["wr"] or 0, base["exp"] or 0
+    ctx = {c["label"]: c for c in res["context"]}
+    def add(level, title, detail, action):
+        R.append({"level": level, "title": title, "detail": detail, "action": action})
+    q = ctx.get("≤ 30 min après une perte")
+    if q and q["n"] >= min_n and q["wr"] is not None and (q["wr"] < bwr - 8 or q["exp"] < min(0, bexp)):
+        pause = res["resume_after_win"]["median"]
+        add("critique", "Trading de revanche après une perte",
+            f"Les {q['n']} trades repris moins de 30 min après une perte gagnent {q['wr']:.0f} % du temps "
+            f"(contre {bwr:.0f} % en général), pour {fmt(q['exp'])} en moyenne par trade.",
+            f"Impose-toi une pause d'au moins {fmt_gap(max(30, pause or 30))} après chaque perte avant de reprendre.")
+    l2 = ctx.get("Après 2 pertes ou plus")
+    # série maximale attendue par le hasard : log_{1/q}(n·(1-q)), q = taux de pertes
+    import math
+    q_loss = max(0.01, min(0.99, 1 - bwr / 100)); n_tr = max(2, res["n"])
+    exp_streak = math.log(max(1.0001, n_tr * (1 - q_loss))) / -math.log(q_loss)
+    res["expected_loss_streak"] = exp_streak
+    l2_bad = bool(l2 and l2["n"] >= min_n and l2["exp"] is not None and l2["exp"] < 0 and (l2["wr"] or 0) < bwr - 10)
+    if res.get("max_loss_streak", 0) > exp_streak + 1.5 or l2_bad:
+        extra = (f" Après 2 pertes d'affilée, l'espérance tombe à {fmt(l2['exp'])} par trade ({l2['n']} trades)."
+                 if l2_bad else "")
+        add("critique" if res.get("max_loss_streak", 0) > exp_streak + 3 else "attention", "Séries de pertes",
+            f"Ta plus longue série est de {res['max_loss_streak']} pertes consécutives (le hasard seul en "
+            f"expliquerait environ {exp_streak:.0f} avec ton taux de réussite).{extra}",
+            "Fixe un stop journalier : arrêt après 2 pertes d'affilée ou une perte cumulée de 2 % du capital.")
+    if res.get("tilt_episodes", 0) >= 1:
+        add("attention", "Épisodes de tilt",
+            f"{res['tilt_episodes']} journée(s) avec au moins 3 pertes enchaînées à moins de 30 min d'intervalle.",
+            "Dès la 2e perte rapide de la journée, ferme la plateforme et reviens le lendemain.")
+    rk = [r for r in res.get("by_rank", []) if r["n"] >= min_n]
+    if len(rk) >= 2:
+        first = rk[0]; late = [r for r in rk if r["label"] in ("4e", "5e", "6e+")]
+        if late:
+            lexp = sum(r["exp"] * r["n"] for r in late) / sum(r["n"] for r in late)
+            if lexp < min(0, first["exp"]):
+                best = max(rk, key=lambda r: r["exp"])
+                cutoff = next((i for i, r in enumerate(rk) if r["exp"] < 0), len(rk))
+                add("attention", "Suractivité en fin de journée",
+                    f"À partir du 4e trade du jour, l'espérance passe à {fmt(lexp)} par trade, contre "
+                    f"{fmt(first['exp'])} pour le 1er.",
+                    f"Limite-toi à {max(1, cutoff)} trade(s) par jour et par compte ; ton meilleur rang est le {best['label']}.")
+    if res.get("payoff") is not None and res["payoff"] < 1 and bwr < 60:
+        add("attention", "Gains trop courts par rapport aux pertes",
+            f"Gain moyen {fmt(res['avg_win'])} contre perte moyenne {fmt(abs(res['avg_loss']))} "
+            f"(ratio {res['payoff']:.2f}), avec un taux de réussite de {bwr:.0f} %.",
+            "Laisse courir les gagnants jusqu'à un objectif d'au moins 1,5 R et coupe les pertes au stop prévu.")
+    if res.get("vol_after_loss") and res["vol_after_loss"] >= 1.15:
+        add("critique", "Taille de position augmentée après une perte",
+            f"Après une perte, ta taille est en moyenne {res['vol_after_loss']:.2f} fois ta taille habituelle.",
+            "Garde une taille fixe (ou réduite) après une perte : ne cherche pas à te refaire.")
+    bw = ctx.get("Après un gros gain")
+    if bw and bw["n"] >= min_n and bw["exp"] is not None and bw["exp"] < min(0, bexp):
+        add("attention", "Excès de confiance après un gros gain",
+            f"Le trade qui suit un gros gain rapporte {fmt(bw['exp'])} en moyenne ({bw['n']} cas).",
+            "Après un gros gain, fais une pause ou réduis la taille du trade suivant.")
+    bm = res.get("by_mood")
+    if bm is not None and len(bm):
+        worst = bm[bm["count"] >= min_n].sort_values("mean").head(1)
+        if len(worst) and worst.iloc[0]["mean"] < 0 and worst.iloc[0]["mood_final"] in REACTIVE_MOODS:
+            w0 = worst.iloc[0]
+            add("attention", f"Trades en état « {w0['mood_final']} » perdants",
+                f"{int(w0['count'])} trades dans cet état, espérance {fmt(w0['mean'])} par trade, "
+                f"taux de réussite {w0['wr']:.0f} %.",
+                f"Quand tu te sens {w0['mood_final'].lower()}, ne prends pas de position : note-le dans le journal et attends.")
+    bh = res.get("by_hour")
+    if bh is not None and len(bh):
+        bh5 = bh[bh["count"] >= min_n]
+        if len(bh5) >= 2:
+            wst, bst = bh5.sort_values("mean").iloc[0], bh5.sort_values("mean").iloc[-1]
+            if wst["mean"] < 0:
+                add("attention", f"Créneau de {int(wst['_h']):02d}h à éviter",
+                    f"Les {int(wst['count'])} trades ouverts à {int(wst['_h']):02d}h perdent {fmt(wst['mean'])} en moyenne.",
+                    f"Évite d'ouvrir à {int(wst['_h']):02d}h ; ton meilleur créneau est {int(bst['_h']):02d}h "
+                    f"({fmt(bst['mean'])} par trade).")
+    bs = res.get("by_sym")
+    if bs is not None and len(bs):
+        bs5 = bs[bs["count"] >= min_n].sort_values("sum")
+        if len(bs5) >= 2 and bs5.iloc[0]["sum"] < 0:
+            add("attention", f"Actif pénalisant : {bs5.iloc[0]['symbol']}",
+                f"{int(bs5.iloc[0]['count'])} trades pour un total de {fmt(bs5.iloc[0]['sum'])}.",
+                f"Réduis ou suspends {bs5.iloc[0]['symbol']} et concentre-toi sur {bs5.iloc[-1]['symbol']} "
+                f"({fmt(bs5.iloc[-1]['sum'])}).")
+    lw = res["gaps"]["LW"]
+    if lw["n"] >= min_n and lw["median"] is not None:
+        add("info", "Temps de récupération",
+            f"Il faut en médiane {fmt_gap(lw['median'])} pour qu'un gain suive une perte ({lw['n']} cas).",
+            "Utilise ce délai comme repère : inutile de forcer un trade pour « te refaire » avant.")
+    if not any(r["level"] in ("critique", "attention") for r in R):
+        add("positif", "Discipline correcte",
+            "Aucun biais comportemental marqué sur l'échantillon sélectionné.",
+            "Continue ainsi et garde le même plan de trading.")
+    order = {"critique": 0, "attention": 1, "info": 2, "positif": 3}
+    return sorted(R, key=lambda r: order[r["level"]])
+
+
 if st.session_state.page == "dashboard":
     _tdb = get_theme()
     df_all_f    = get_df("Tous")
     syms_avail  = sorted(df_all_f["symbol"].unique().tolist()) if not df_all_f.empty else []
-    moods_avail = sorted(df_all_f["mood"].unique().tolist())   if not df_all_f.empty else []
+    moods_avail = list(MOODS)   # émotions déclarées ou déduites
     strat_avail = sorted(df_all_f["strategy"].unique().tolist()) if not df_all_f.empty else []
     dates       = sorted(df_all_f["date"].tolist()) if not df_all_f.empty else []
     d_min = date.fromisoformat(dates[0])  if dates else date(2024,1,1)
@@ -1794,8 +2137,19 @@ if st.session_state.page == "dashboard":
             with fc4: f_date_from = st.date_input("Depuis",   value=d_min, key="d_from")
             with fc5: f_date_to   = st.date_input("Jusqu'au", value=d_max, key="d_to")
 
-    df = get_df()
+    df = get_df()                       # trades des comptes sélectionnés dans le filtre du haut
+    _df_scope = df.copy()
     if not df.empty:
+        # Émotions : déclarées, ou déduites du comportement si la case est vide
+        try:
+            _ann = behavior_analysis(_df_scope)["d"]
+            if "id" in df.columns and "id" in _ann.columns:
+                _mf = dict(zip(_ann["id"], _ann["mood_final"]))
+                _ms = dict(zip(_ann["id"], _ann["mood_src"]))
+                df["mood"] = df["id"].map(_mf).fillna(df.get("mood"))
+                df["mood_src"] = df["id"].map(_ms).fillna("déclarée")
+        except Exception:
+            pass
         if f_sym   != "Tous":   df = df[df["symbol"]   == f_sym]
         if f_mood  != "Toutes": df = df[df["mood"]     == f_mood]
         if f_strat != "Toutes": df = df[df["strategy"] == f_strat]
@@ -1828,6 +2182,25 @@ if st.session_state.page == "dashboard":
         with c4: kpi('<i class="fa-solid fa-arrow-trend-down"></i>',"Max Drawdown",f"${mdd:,.2f}",   "Perte cumulée max",             _L)
         with c5: kpi('<i class="fa-solid fa-bolt"></i>',           "R:R Moyen",   f"{avg_rr:.2f}R" if avg_rr else "—","Risque/Récomp",_A)
         with c6: kpi('<i class="fa-solid fa-arrow-trend-up"></i>', "Gain moyen",   fmt(avg_w),       "Par trade gagnant",             _W)
+
+        # Analyse comportementale : contexte calculé sur les comptes sélectionnés, stats sur les trades filtrés
+        try:
+            _bh = behavior_analysis(_df_scope, keep_ids=set(df["id"]) if "id" in df.columns else None)
+            _recos = recommendations(_bh)
+        except Exception as _e_bh:
+            _bh, _recos = {"n": 0, "error": str(_e_bh)}, []
+        _top = [r for r in _recos if r["level"] in ("critique", "attention")][:2]
+        if _top:
+            _lv = {"critique": _tdb["loss"], "attention": _tdb["orange"]}
+            st.markdown(
+                f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 2px'>"
+                f"<span style='font-size:10.5px;letter-spacing:1px;text-transform:uppercase;font-weight:800;"
+                f"color:{_tdb['muted']}'>À surveiller</span>" + "".join(
+                    f"<span style='font-size:12px;font-weight:700;color:{_lv[r['level']]};background:{_lv[r['level']]}14;"
+                    f"border:1px solid {_lv[r['level']]}40;border-radius:8px;padding:3px 10px'>"
+                    f"{'●' if r['level'] == 'critique' else '▲'} {r['title']}</span>" for r in _top) +
+                f"<span style='font-size:11px;color:{_tdb['muted']}'>détails : onglet Comportement &amp; émotions</span></div>",
+                unsafe_allow_html=True)
 
         # Comparaison par compte : une seule ligne de pastilles (pas une 2e rangée de cartes)
         _sc_dash = _resolve_scope(None)
@@ -1980,8 +2353,8 @@ if st.session_state.page == "dashboard":
         # ════════════════════════════════════════════════════════════════════
         # DÉTAIL PAR CATÉGORIE : un onglet par thème
         # ════════════════════════════════════════════════════════════════════
-        (tab_perf, tab_risk, tab_assets, tab_psy, tab_cal, tab_last) = st.tabs([
-            "Performance", "Risque & Volume", "Actifs & Stratégies",
+        (tab_perf, tab_bh, tab_risk, tab_assets, tab_psy, tab_cal, tab_last) = st.tabs([
+            "Performance", "Comportement & émotions", "Risque & Volume", "Actifs & Stratégies",
             "Psychologie", "Calendrier", "Derniers trades"])
         with tab_perf:
             pf1, pf2 = st.columns(2)
@@ -2044,6 +2417,148 @@ if st.session_state.page == "dashboard":
                 fig_tl.update_xaxes(**_xaxis_pos(n_pos))
                 st.plotly_chart(fig_tl, use_container_width=True, config=_chart_cfg)
 
+        with tab_bh:
+            if _bh.get("n", 0) < 5:
+                st.info("Pas assez de trades sur la sélection pour une analyse comportementale (5 minimum).")
+            else:
+                _T = _theme
+                _lvc = {"critique": _T["loss"], "attention": _T["orange"], "info": _T["accent"], "positif": _T["win"]}
+                st.caption(f"{_bh['n']} trades analysés · comptes : {selection_label()} · filtres du dashboard appliqués. "
+                           "Les enchaînements sont calculés compte par compte ; les délais sont des médianes.")
+                if _bh.get("time_share", 100) < 50:
+                    st.warning("Moins de la moitié de ces trades ont une heure d'ouverture : les délais sont calculés "
+                               "sur la date seule et restent approximatifs.")
+                G = _bh["gaps"]
+                kk = st.columns(6)
+                _kp = [("fa-arrows-left-right", "Entre 2 pertes", G["LL"], _T["loss"]),
+                       ("fa-arrows-left-right", "Entre 2 gains", G["WW"], _T["win"]),
+                       ("fa-arrow-trend-up", "Perte → gain", G["LW"], _T["accent"]),
+                       ("fa-arrow-trend-down", "Gain → perte", G["WL"], _T["orange"])]
+                for col, (ic, lab, st_, cc) in zip(kk[:4], _kp):
+                    with col:
+                        kpi(f'<i class="fa-solid {ic}"></i>', lab, fmt_gap(st_["median"]),
+                            f"moy. {fmt_gap(st_['mean'])} · {st_['n']} cas", cc)
+                with kk[4]:
+                    _ra, _rw = _bh["resume_after_loss"], _bh["resume_after_win"]
+                    kpi('<i class="fa-solid fa-stopwatch"></i>', "Reprise après perte", fmt_gap(_ra["median"]),
+                        f"après un gain : {fmt_gap(_rw['median'])}",
+                        _T["loss"] if (_ra["median"] or 0) < (_rw["median"] or 0) * 0.5 else _T["alt"])
+                with kk[5]:
+                    kpi('<i class="fa-solid fa-layer-group"></i>', "Séries max",
+                        f"{_bh['max_win_streak']} G / {_bh['max_loss_streak']} P",
+                        f"{_bh['trades_per_day_med']:.0f} trades/jour (médiane)", _T["alt"])
+
+                b1, b2 = st.columns([3, 2], gap="medium")
+                with b1:
+                    _card("Recommandations", "tirées des métriques ci-dessous")
+                    for r in _recos:
+                        c = _lvc[r["level"]]
+                        st.markdown(
+                            f"<div style='background:{_T['card']};border:1px solid {_T['border']};border-left:4px solid {c};"
+                            f"border-radius:10px;padding:9px 13px;margin-bottom:8px'>"
+                            f"<div style='display:flex;gap:8px;align-items:center'>"
+                            f"<span style='font-size:9.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;"
+                            f"color:{c};background:{c}16;border-radius:5px;padding:1px 6px'>{r['level']}</span>"
+                            f"<b style='font-size:13px;color:{_T['text']}'>{r['title']}</b></div>"
+                            f"<div style='font-size:12px;color:{_T['muted']};margin:4px 0 3px'>{r['detail']}</div>"
+                            f"<div style='font-size:12.5px;color:{_T['text']}'><b style='color:{c}'>→</b> {r['action']}</div></div>",
+                            unsafe_allow_html=True)
+                with b2:
+                    _lvl, _lk, _ltxt = emotion_level(_bh)
+                    _lc = _T[_lk]
+                    _card("Niveau émotionnel", "émotions déclarées + déduites")
+                    st.markdown(
+                        f"<div style='background:{_T['card']};border:1px solid {_T['border']};border-radius:12px;padding:12px 14px'>"
+                        f"<div style='display:flex;align-items:baseline;gap:10px'><span style='font-size:24px;font-weight:800;"
+                        f"color:{_lc}'>{_lvl}</span><span style='font-size:12px;color:{_T['muted']}'>"
+                        f"{_bh['reactive_share']:.0f} % de trades en état réactif · {_bh['tilt_episodes']} épisode(s) de tilt</span></div>"
+                        f"<div style='height:7px;border-radius:4px;background:{_T['bg2']};margin:8px 0 6px;overflow:hidden'>"
+                        f"<div style='width:{min(100, _bh['reactive_share']):.0f}%;height:100%;background:linear-gradient(90deg,"
+                        f"{_T['orange']},{_T['loss']})'></div></div>"
+                        f"<div style='font-size:12px;color:{_T['text']}'>{_ltxt}</div>"
+                        f"<div style='font-size:11px;color:{_T['muted']};margin-top:6px'>{_bh['n_inferred']} émotion(s) déduite(s) "
+                        f"du comportement à l'entrée (case vide ou « Neutre » par défaut de l'import MT5).</div></div>",
+                        unsafe_allow_html=True)
+                    _bm = _bh["by_mood"].sort_values("mean")
+                    fig_bm = category_figure(_bm["mood_final"].tolist(), _bm["mean"].round(2).tolist(),
+                        [_T["win"] if v >= 0 else _T["loss"] for v in _bm["mean"]], _T, _cs, kind=_cs["ranking"],
+                        orientation="h", texts=[f"{fmt(v)} · {int(n)} tr. · {w:.0f}%" for v, n, w in
+                                                 zip(_bm["mean"], _bm["count"], _bm["wr"])],
+                        hovertemplate="<b>%{y}</b><br>Espérance : %{x:+,.2f}$<extra></extra>")
+                    fig_bm.add_vline(x=0, line_color=_grid, line_width=1)
+                    _mx = float(max(abs(_bm["mean"].min()), abs(_bm["mean"].max()), 1))
+                    fig_bm.update_xaxes(range=[min(0, _bm["mean"].min()) - _mx * 1.15, max(0, _bm["mean"].max()) + _mx * 1.15])
+                    fig_bm.update_traces(cliponaxis=False)
+                    fig_bm.update_layout(**_base_layout(height=max(190, 34 * len(_bm) + 40), margin=dict(l=90, r=20, t=10, b=26)))
+                    _style_axes(fig_bm, xprefix="$")
+                    st.plotly_chart(fig_bm, use_container_width=True, config=_chart_cfg)
+
+                c1, c2 = st.columns(2, gap="medium")
+                with c1:
+                    _card("Réussite selon le contexte", f"ligne = moyenne générale ({_bh['base']['wr']:.0f} %)")
+                    _cx = [c for c in _bh["context"] if c["n"] > 0]
+                    fig_cx = category_figure([c["label"] for c in _cx][::-1], [round(c["wr"], 1) for c in _cx][::-1],
+                        [(_T["win"] if c["wr"] >= _bh["base"]["wr"] else _T["loss"]) for c in _cx][::-1], _T, _cs,
+                        kind=_cs["ranking"], orientation="h",
+                        texts=[f"{c['wr']:.0f} % · {c['n']} tr. · {fmt(c['exp'])}" for c in _cx][::-1],
+                        hovertemplate="<b>%{y}</b><br>Taux de réussite : %{x:.1f} %<extra></extra>")
+                    fig_cx.add_vline(x=_bh["base"]["wr"], line_dash="dot", line_color=_T["muted"], line_width=1)
+                    fig_cx.update_layout(**_base_layout(height=290, margin=dict(l=150, r=120, t=10, b=26)))
+                    _style_axes(fig_cx); fig_cx.update_xaxes(ticksuffix="%", range=[0, 100])
+                    st.plotly_chart(fig_cx, use_container_width=True, config=_chart_cfg)
+                with c2:
+                    _card("Espérance selon le rang du trade dans la journée", "par compte")
+                    _rk = _bh["by_rank"]
+                    fig_rk = category_figure([r["label"] for r in _rk], [round(r["exp"], 2) for r in _rk],
+                        [_T["win"] if r["exp"] >= 0 else _T["loss"] for r in _rk], _T, _cs,
+                        kind=("lollipop" if _cs["monthly"] == "lollipop" else "bar"), orientation="v",
+                        customdata=[[r["n"], r["wr"]] for r in _rk],
+                        hovertemplate="<b>%{x} trade du jour</b><br>Espérance : %{y:+,.2f}$<br>"
+                                      "%{customdata[0]} trades · %{customdata[1]:.0f} % de réussite<extra></extra>")
+                    fig_rk.add_hline(y=0, line_color=_grid, line_width=1)
+                    fig_rk.update_layout(**_base_layout(height=290))
+                    _style_axes(fig_rk, yprefix="$")
+                    st.plotly_chart(fig_rk, use_container_width=True, config=_chart_cfg)
+
+                _dd = _bh["d"]
+                _inf = _dd[_dd["mood_src"] == "déduite"]
+                with st.expander(f"Émotions déduites automatiquement · {len(_inf)} trade(s)"):
+                    if _inf.empty:
+                        st.caption("Toutes les émotions de la sélection sont renseignées.")
+                    else:
+                        _tab = _inf.sort_values("_t", ascending=False)[["_t", "trade_mode", "symbol", "pnl", "mood_inferred", "mood_reason"]].head(300)
+                        _tab = _tab.rename(columns={"_t": "Ouverture", "trade_mode": "Compte", "symbol": "Actif", "pnl": "P&L",
+                                                    "mood_inferred": "Émotion déduite", "mood_reason": "Raison (comportement à l'entrée)"})
+                        st.dataframe(_tab, use_container_width=True, hide_index=True, height=260,
+                                     column_config={"Ouverture": st.column_config.DatetimeColumn(format="DD/MM/YY HH:mm"),
+                                                    "P&L": st.column_config.NumberColumn(format="%.2f $")})
+                        st.caption("L'émotion est déduite uniquement du comportement au moment de l'entrée (reprise rapide "
+                                   "après une perte, série en cours, taille de position, nombre de trades dans la journée), "
+                                   "jamais du résultat du trade lui-même.")
+                    if is_admin():
+                        a1, a2 = st.columns(2)
+                        with a1:
+                            if not _inf.empty and st.button(f"Inscrire ces {len(_inf)} émotions dans le journal",
+                                                            key="bh_save_moods", use_container_width=True):
+                                _m = dict(zip(_inf["id"], _inf["mood_inferred"]))
+                                for _t in st.session_state.trades:
+                                    if _t.get("id") in _m:
+                                        if not _t.get("mood_auto"):
+                                            _t["mood_prev"] = _t.get("mood", "")
+                                        _t["mood"] = _m[_t["id"]]; _t["mood_auto"] = True
+                                (st.success if db_save(st.session_state.trades) else st.warning)(
+                                    f"{len(_m)} émotion(s) inscrite(s), marquées « automatiques ». Modifier un trade "
+                                    "à la main remplace son émotion par la tienne.")
+                        with a2:
+                            _n_auto = sum(1 for _t in st.session_state.trades if _t.get("mood_auto"))
+                            if _n_auto and st.button(f"Annuler les {_n_auto} émotions inscrites automatiquement",
+                                                     key="bh_undo_moods", use_container_width=True):
+                                for _t in st.session_state.trades:
+                                    if _t.get("mood_auto"):
+                                        _t["mood"] = _t.pop("mood_prev", "")
+                                        _t.pop("mood_auto", None)
+                                (st.success if db_save(st.session_state.trades) else st.warning)("Émotions d'origine restaurées.")
+                                st.rerun()
         with tab_risk:
             r3c1, r3c2 = st.columns(2)
 
