@@ -160,30 +160,56 @@ LOGIN_THEME   = "Navy Corporate"   # design unique de la page de connexion
 # ── FONDS D'ÉCRAN (photos libres de droits, licence Unsplash) ─────────────────
 # Rempli avec des photos dont la licence gratuite a été vérifiée. "Aucun" = pas d'image.
 _UNS = "https://images.unsplash.com/photo-"
-BACKGROUNDS = {
-    "Aucun": None,
-    "Écran de trading":        {"url": _UNS + "1560221328-12fe60f83ab8", "credit": "Nicholas Cappello"},
-    "Salle multi-écrans":      {"url": _UNS + "1744782211816-c5224434614f", "credit": "Jakub Żerdzicki"},
-    "Chandeliers haussiers":   {"url": _UNS + "1634542984003-e0fb8e200e91", "credit": "rc.xyz NFT gallery"},
-    "Charging Bull (NYC)":     {"url": _UNS + "1764735904830-28f8826828ca", "credit": "Korng Sok"},
-    "Wall Street":             {"url": _UNS + "1468254095679-bbcba94a7066", "credit": "Patrick Weissenberger"},
-    "Bourse de New York":      {"url": _UNS + "1625351814208-155cfe221d12", "credit": "tommao wang"},
-    "Bitcoin":                 {"url": _UNS + "1518544801976-3e159e50e5bb", "credit": "André François McKenzie"},
-}
+try:
+    from backgrounds_data import BG_DATA      # images fournies, intégrées en base64 (backgrounds_data.py)
+except Exception:
+    BG_DATA = {}
+# mode "cover" : image plein écran ; mode "logo" : filigrane centré
+BACKGROUNDS = {"Aucun": None}
+if BG_DATA:
+    BACKGROUNDS.update({
+        "Reporting & dashboard": {"data": "reporting", "mode": "cover"},
+        "Forex trading":         {"data": "forex", "mode": "cover"},
+        "Poste de trading":      {"data": "poste", "mode": "cover"},
+        "CTC Finance":           {"data": "ctc", "data_light": "ctc_clair", "mode": "logo"},
+        "Stat Vision":           {"data": "statvision", "mode": "logo"},
+    })
+BACKGROUNDS.update({
+    "Salle multi-écrans":  {"url": _UNS + "1744782211816-c5224434614f", "credit": "Jakub Żerdzicki", "mode": "cover"},
+    "Wall Street":         {"url": _UNS + "1468254095679-bbcba94a7066", "credit": "Patrick Weissenberger", "mode": "cover"},
+    "Bourse de New York":  {"url": _UNS + "1625351814208-155cfe221d12", "credit": "tommao wang", "mode": "cover"},
+    "Bitcoin":             {"url": _UNS + "1518544801976-3e159e50e5bb", "credit": "André François McKenzie", "mode": "cover"},
+})
 BG_NAMES = list(BACKGROUNDS.keys())
 
+def bg_active():
+    return BACKGROUNDS.get(st.session_state.get("bg_name", "Aucun")) is not None
+
 def background_css(t, name):
-    """Calque photo + voile aux couleurs du design (texte lisible en clair comme en sombre)."""
+    """Calque image + voile léger aux couleurs du design."""
     bg = BACKGROUNDS.get(name)
     if not bg:
         return ""
-    ov = 0.86 if _is_light(t) else 0.78
-    url = bg["url"] + "?auto=format&fit=crop&w=2400&q=75"
+    light = _is_light(t)
+    if "data" in bg:
+        key = bg.get("data_light", bg["data"]) if light else bg["data"]
+        if key not in BG_DATA:
+            return ""
+        mime, b64 = BG_DATA[key]
+        src = f"data:{mime};base64,{b64}"
+    else:
+        src = bg["url"] + "?auto=format&fit=crop&w=2400&q=75"
+    if bg.get("mode") == "logo":
+        ov = 0.30 if light else 0.32
+        layer = f"url('{src}') center 58% / min(58vw, 680px) auto no-repeat fixed"
+    else:
+        ov = 0.58 if light else 0.48
+        layer = f"url('{src}') center / cover no-repeat fixed"
+    credit = (f"<div style='position:fixed;right:12px;bottom:6px;z-index:5;font-size:10px;color:{t['muted']};"
+              f"opacity:.75;pointer-events:none'>Photo : {bg['credit']} · Unsplash</div>") if bg.get("credit") else ""
     return (f"<style>.stApp {{ background:"
             f"linear-gradient(160deg, {_hexa(t['bg'], ov)} 0%, {_hexa(t['bg2'], ov)} 55%, {_hexa(t['bg'], ov)} 100%),"
-            f"url('{url}') center / cover no-repeat fixed, {t['bg']} !important; }}</style>"
-            f"<div style='position:fixed;right:12px;bottom:6px;z-index:5;font-size:10px;color:{t['muted']};"
-            f"opacity:.75;pointer-events:none'>Photo : {bg['credit']} · Unsplash</div>")
+            f"{layer}, {t['bg']} !important; }}</style>{credit}")
 
 def theme_label(n):
     return ("Clair · " if _is_light(THEMES[n]) else "Sombre · ") + n
@@ -256,6 +282,8 @@ def _hexa(h, a):
 def chart_layout(t, cs, height=260, showlegend=False, **kwargs):
     """Layout Plotly selon design (couleurs) + profil graphique (police, survol, coins...)."""
     bg = "rgba(0,0,0,0)" if cs["transparent"] else t["card"]
+    if bg_active():
+        bg = _hexa(t["card"], 0.94)   # fond d'écran actif : graphiques sur fond plein, lisibles
     lay = dict(
         paper_bgcolor=bg, plot_bgcolor=bg,
         font=dict(color=t["muted"], family=cs["font"], size=12),
