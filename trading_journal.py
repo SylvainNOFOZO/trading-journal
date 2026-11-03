@@ -157,6 +157,34 @@ THEME_NAMES = ([n for n, t in THEMES.items() if _is_light(t)]
 DEFAULT_THEME = "Navy Corporate"   # design par défaut : clair, bleu marine et sarcelle
 LOGIN_THEME   = "Navy Corporate"   # design unique de la page de connexion
 
+# ── FONDS D'ÉCRAN (photos libres de droits, licence Unsplash) ─────────────────
+# Rempli avec des photos dont la licence gratuite a été vérifiée. "Aucun" = pas d'image.
+_UNS = "https://images.unsplash.com/photo-"
+BACKGROUNDS = {
+    "Aucun": None,
+    "Écran de trading":        {"url": _UNS + "1560221328-12fe60f83ab8", "credit": "Nicholas Cappello"},
+    "Salle multi-écrans":      {"url": _UNS + "1744782211816-c5224434614f", "credit": "Jakub Żerdzicki"},
+    "Chandeliers haussiers":   {"url": _UNS + "1634542984003-e0fb8e200e91", "credit": "rc.xyz NFT gallery"},
+    "Charging Bull (NYC)":     {"url": _UNS + "1764735904830-28f8826828ca", "credit": "Korng Sok"},
+    "Wall Street":             {"url": _UNS + "1468254095679-bbcba94a7066", "credit": "Patrick Weissenberger"},
+    "Bourse de New York":      {"url": _UNS + "1625351814208-155cfe221d12", "credit": "tommao wang"},
+    "Bitcoin":                 {"url": _UNS + "1518544801976-3e159e50e5bb", "credit": "André François McKenzie"},
+}
+BG_NAMES = list(BACKGROUNDS.keys())
+
+def background_css(t, name):
+    """Calque photo + voile aux couleurs du design (texte lisible en clair comme en sombre)."""
+    bg = BACKGROUNDS.get(name)
+    if not bg:
+        return ""
+    ov = 0.86 if _is_light(t) else 0.78
+    url = bg["url"] + "?auto=format&fit=crop&w=2400&q=75"
+    return (f"<style>.stApp {{ background:"
+            f"linear-gradient(160deg, {_hexa(t['bg'], ov)} 0%, {_hexa(t['bg2'], ov)} 55%, {_hexa(t['bg'], ov)} 100%),"
+            f"url('{url}') center / cover no-repeat fixed, {t['bg']} !important; }}</style>"
+            f"<div style='position:fixed;right:12px;bottom:6px;z-index:5;font-size:10px;color:{t['muted']};"
+            f"opacity:.75;pointer-events:none'>Photo : {bg['credit']} · Unsplash</div>")
+
 def theme_label(n):
     return ("Clair · " if _is_light(THEMES[n]) else "Sombre · ") + n
 
@@ -1458,6 +1486,11 @@ if not login_gate():
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 # ── INJECTION CSS (avant le header pour que le thème s'applique) ─────────────────
 st.markdown(build_css(get_theme()), unsafe_allow_html=True)
+if "bg_name" not in st.session_state:
+    st.session_state.bg_name = "Aucun"
+if st.session_state.bg_name not in BACKGROUNDS:
+    st.session_state.bg_name = "Aucun"
+st.markdown(background_css(get_theme(), st.session_state.bg_name), unsafe_allow_html=True)
 
 # ── EN-TÊTE MASQUABLE (panneau animé + navigation en onglets thémés) ─────────────
 _thd = get_theme()
@@ -1583,7 +1616,7 @@ _brand = (f"<div style='display:flex;align-items:center;gap:10px'>"
 
 if st.session_state.hdr_open:
     with st.container(key="tj_hdr"):
-        _r = st.columns([2.1, 1.55, 1.45, 2.5, 0.42, 0.42, 0.42], vertical_alignment="center", gap="small")
+        _r = st.columns([1.75, 1.75, 1.45, 1.75, 0.4, 0.4, 0.4], vertical_alignment="center", gap="small")
         with _r[0]:
             st.markdown(_brand, unsafe_allow_html=True)
         with _r[1]:
@@ -1606,6 +1639,33 @@ if st.session_state.hdr_open:
             if _sel_cs != _cur_cs:
                 st.session_state.chart_style_override = _sel_cs; st.rerun()
         with _r[3]:
+            _sel_bg = st.selectbox("Fond", BG_NAMES,
+                index=BG_NAMES.index(st.session_state.bg_name) if st.session_state.bg_name in BG_NAMES else 0,
+                format_func=lambda n: "Fond · aucun" if n == "Aucun" else f"Fond · {n}",
+                key="bg_selector", label_visibility="collapsed",
+                help="Image de fond (photos libres de droits). « Aucun » pour un fond uni.")
+            if _sel_bg != st.session_state.bg_name:
+                st.session_state.bg_name = _sel_bg; st.rerun()
+        with _r[4]:
+            if st.button("", icon=":material/sync:", key="hdr_sync", help="Synchroniser", use_container_width=True):
+                force_reload(); st.rerun()
+        with _r[5]:
+            if st.button("", icon=":material/logout:", key="hdr_logout", help="Déconnexion", use_container_width=True):
+                logout()
+        with _r[6]:
+            st.button("", icon=":material/keyboard_arrow_up:", key="hdr_toggle", help="Masquer le panneau",
+                      on_click=_hdr_toggle, use_container_width=True)
+        _c1, _c2 = st.columns([3, 2.2], vertical_alignment="center", gap="small")
+        with _c1:
+            st.markdown(
+                f"<div class='tj-cap'>"
+                f"<span style='font-size:10.5px;color:{_t['muted']};text-transform:uppercase;letter-spacing:1.2px;"
+                f"font-weight:700'>Capital · {selection_label()}</span>"
+                f"<span style='font-size:20px;font-weight:800;color:{col_pnl};font-family:JetBrains Mono,monospace'>"
+                f"{fmt(total)}</span>"
+                f"<span style='font-size:11.5px;color:{_t['muted']}'>{len(df_side)} trades · {wr:.0f}% win</span></div>",
+                unsafe_allow_html=True)
+        with _c2:
             if len(_allowed) <= 1:
                 st.markdown(f"<div style='font-size:12px;color:{_t['muted']}'>Compte : "
                             f"<b style='color:{_t['text']}'>{(_allowed[0] if _allowed else '—')}</b></div>",
@@ -1616,23 +1676,6 @@ if st.session_state.hdr_open:
                     placeholder="Tous les comptes", label_visibility="collapsed", key="mode_multiselect")
                 if _new_sel != _cur_sel:
                     st.session_state.mode_selection = _new_sel; st.rerun()
-        with _r[4]:
-            if st.button("", icon=":material/sync:", key="hdr_sync", help="Synchroniser", use_container_width=True):
-                force_reload(); st.rerun()
-        with _r[5]:
-            if st.button("", icon=":material/logout:", key="hdr_logout", help="Déconnexion", use_container_width=True):
-                logout()
-        with _r[6]:
-            st.button("", icon=":material/keyboard_arrow_up:", key="hdr_toggle", help="Masquer le panneau",
-                      on_click=_hdr_toggle, use_container_width=True)
-        st.markdown(
-            f"<div class='tj-cap'>"
-            f"<span style='font-size:10.5px;color:{_t['muted']};text-transform:uppercase;letter-spacing:1.2px;"
-            f"font-weight:700'>Capital · {selection_label()}</span>"
-            f"<span style='font-size:20px;font-weight:800;color:{col_pnl};font-family:JetBrains Mono,monospace'>"
-            f"{fmt(total)}</span>"
-            f"<span style='font-size:11.5px;color:{_t['muted']}'>{len(df_side)} trades · {wr:.0f}% win</span></div>",
-            unsafe_allow_html=True)
         with st.container(horizontal=True, key="tj_nav", gap="small"):
             _render_nav("tjnav")
 else:
