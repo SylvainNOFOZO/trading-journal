@@ -154,10 +154,10 @@ def _is_light(t):
 # Designs clairs d'abord (fond non noir par défaut), puis les sombres, au choix
 THEME_NAMES = ([n for n, t in THEMES.items() if _is_light(t)]
                + [n for n, t in THEMES.items() if not _is_light(t)])
-DEFAULT_THEME = "Navy Corporate"   # design par défaut : clair, bleu marine et sarcelle
+DEFAULT_THEME = "Émeraude Sombre"  # design par défaut du dashboard
 LOGIN_THEME   = "Navy Corporate"   # design unique de la page de connexion
 DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
-DEFAULT_BG      = "Stat Vision"        # fond d'écran par défaut
+DEFAULT_BG      = "Bitcoin"            # fond d'écran par défaut
 
 # ── FONDS D'ÉCRAN (photos libres de droits, licence Unsplash) ─────────────────
 # Rempli avec des photos dont la licence gratuite a été vérifiée. "Aucun" = pas d'image.
@@ -1471,56 +1471,85 @@ def upcoming_major_events(ccys, impacts, horizon_h=168, past_min=15):
             g["ccys"].append(c)
     return [groups[k] for k in sorted(groups)]
 
+def _cd_next(groups, now_ms=None):
+    """Prochaine annonce encore pertinente (jusqu'à 10 min après l'heure)."""
+    import time as _tm
+    now_ms = now_ms if now_ms is not None else _tm.time() * 1000
+    return next((g for g in groups or [] if g["t"] > now_ms - 10 * 60 * 1000), None)
+
+def _cd_open():
+    """Clic sur la sphère : ouvre l'annonce dans Analyse & News."""
+    g = _cd_next(st.session_state.get("_cd_groups"))
+    if g:
+        st.session_state.focus_event = {"titles": list(g["titles"]), "t": g["t"]}
+        st.session_state.page = "analyse"
+
 def render_countdown(groups, window_h, t):
-    """Chronomètre en direct (JavaScript, sans rechargement de page)."""
+    """Sphère flottante : compte à rebours de la prochaine annonce majeure (JS, sans rechargement).
+    Un clic ouvre la fiche de l'annonce dans Analyse & News (bouton Streamlit caché)."""
     import streamlit.components.v1 as _components
-    if not groups:
+    if not _cd_next(groups):
         return
+    st.session_state["_cd_groups"] = groups[:15]
     data = json.dumps(groups[:15], ensure_ascii=True).replace("</", "<\\/")
+    st.markdown(
+        "<style>.st-key-cd_sphere{position:fixed!important;right:20px;bottom:22px;z-index:9990;"
+        "width:96px!important;height:96px;pointer-events:none}"
+        ".st-key-cd_sphere iframe{pointer-events:auto;border-radius:50%}"
+        ".st-key-cd_sphere [data-testid=stElementContainer]{width:96px!important}"
+        ".st-key-cd_go{position:fixed!important;left:-10000px;top:0;width:1px;height:1px;overflow:hidden}"
+        "</style>", unsafe_allow_html=True)
+    with st.container(key="cd_go"):
+        st.button("ouvrir l'annonce", key="cd_go_btn", on_click=_cd_open)
     html_c = """
-<div id="tjc"></div>
+<div id="sp" title=""><svg viewBox="0 0 100 100"><circle class="tr" cx="50" cy="50" r="45"/>
+<circle id="ring" class="rg" cx="50" cy="50" r="45"/></svg>
+<div class="in"><div id="cc" class="cc"></div><div id="tm" class="tm"></div><div id="lb" class="lb"></div></div></div>
 <style>
- body{margin:0;background:transparent;font-family:Inter,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
- #tjc{box-sizing:border-box;height:40px;display:flex;align-items:center;gap:12px;padding:0 14px;border-radius:10px;
-      background:__CARD__;border:1px solid __BORDER__;border-left:4px solid var(--c);color:__TEXT__;font-size:13px;
-      white-space:nowrap;overflow:hidden}
- #tjc.idle{border-left-color:__BORDER__;color:__MUTED__;font-size:12px}
- .dot{width:9px;height:9px;border-radius:50%;background:var(--c);flex-shrink:0}
- .pulse .dot{animation:p 1s infinite} .pulse{box-shadow:0 0 0 1px var(--c)}
- @keyframes p{0%{box-shadow:0 0 0 0 var(--c)}70%{box-shadow:0 0 0 9px transparent}100%{box-shadow:0 0 0 0 transparent}}
- .lab{font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:800;color:var(--c)}
- .tm{font-family:"JetBrains Mono",Consolas,monospace;font-size:18px;font-weight:800;color:var(--c);min-width:92px}
- .ccy{font-weight:800;border:1px solid __BORDER__;border-radius:6px;padding:1px 7px;font-size:12px}
- .ti{font-weight:700;overflow:hidden;text-overflow:ellipsis} .lc{margin-left:auto;color:__MUTED__;font-size:12px}
+ html,body{margin:0;background:transparent;overflow:hidden;font-family:Inter,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+ #sp{position:relative;width:88px;height:88px;margin:4px;border-radius:50%;cursor:pointer;
+     background:radial-gradient(circle at 32% 28%,__CARD__ 0%,__BG__ 100%);
+     box-shadow:0 6px 20px rgba(0,0,0,.35),inset 0 0 0 1px __BORDER__;transition:transform .2s}
+ #sp:hover{transform:scale(1.06)}
+ #sp.pulse{animation:p 1.1s infinite}
+ @keyframes p{0%{box-shadow:0 0 0 0 var(--c),0 6px 20px rgba(0,0,0,.35)}70%{box-shadow:0 0 0 12px transparent,0 6px 20px rgba(0,0,0,.35)}100%{box-shadow:0 0 0 0 transparent,0 6px 20px rgba(0,0,0,.35)}}
+ svg{position:absolute;inset:0;transform:rotate(-90deg)}
+ .tr{fill:none;stroke:__BORDER__;stroke-width:5}
+ .rg{fill:none;stroke:var(--c);stroke-width:5;stroke-linecap:round;stroke-dasharray:282.7;transition:stroke-dashoffset 1s linear}
+ .in{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+ .cc{font-size:10px;font-weight:800;letter-spacing:.6px;color:__TEXT__}
+ .tm{font-family:"JetBrains Mono",Consolas,monospace;font-size:16px;font-weight:800;color:var(--c);line-height:1.15}
+ .lb{font-size:8.5px;text-transform:uppercase;letter-spacing:.7px;font-weight:700;color:__MUTED__}
 </style>
 <script>
-const G=__DATA__, WIN=__WIN__, C={acc:"__ACCENT__",ora:"__ORANGE__",loss:"__LOSS__"};
+const G=__DATA__, WIN=__WIN__, C={acc:"__ACCENT__",ora:"__ORANGE__",loss:"__LOSS__",mut:"__MUTED__"};
 const p=n=>String(n).padStart(2,"0");
-function clock(ms){const s=Math.floor(Math.max(0,ms)/1000);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return(h>0?p(h)+":":"")+p(m)+":"+p(x);}
-function human(ms){const m=Math.round(ms/60000);if(m<60)return m+" min";const h=Math.floor(m/60);if(h<24)return h+" h "+p(m%60);return Math.floor(h/24)+" j "+(h%24)+" h";}
-function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function short(ms){const s=Math.floor(Math.abs(ms)/1000),h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;
+  if(h>=48)return Math.floor(h/24)+"j";if(h>=1)return h+"h"+p(m);return p(m)+":"+p(x);}
+const sp=document.getElementById("sp"), ring=document.getElementById("ring");
+sp.addEventListener("click",()=>{try{const b=window.parent.document.querySelector('.st-key-cd_go button');if(b)b.click();}catch(e){}});
 function tick(){
-  const now=Date.now(), el=document.getElementById("tjc");
-  const g=G.find(x=>x.t>now-10*60*1000);
-  if(!g){el.className="idle";el.style.setProperty("--c","__MUTED__");
-         el.innerHTML="Aucune annonce majeure à venir sur la période suivie";return;}
-  const rem=g.t-now, ti=esc(g.titles[0])+(g.titles.length>1?" +"+(g.titles.length-1):""), cc=esc(g.ccys.join(" · "));
-  if(rem>WIN){el.className="idle";el.style.setProperty("--c","__MUTED__");
-    el.innerHTML='<span class="dot"></span>Prochaine annonce majeure : <span class="ccy">'+cc+'</span><span class="ti">'+ti+'</span><span class="lc">'+esc(g.local)+' (GMT+1) · dans '+human(rem)+'</span>';return;}
-  let c=C.acc, lab="Annonce dans", tm=clock(rem), pulse=false;
-  if(rem<=0){c=C.loss;lab="En cours";tm="+"+clock(-rem);pulse=true;}
-  else if(rem<=5*60000){c=C.loss;pulse=true;} else if(rem<=30*60000){c=C.ora;}
-  el.className=pulse?"pulse":""; el.style.setProperty("--c",c);
-  el.innerHTML='<span class="dot"></span><span class="lab">'+lab+'</span><span class="tm">'+tm+'</span><span class="ccy">'+cc+'</span><span class="ti">'+ti+'</span><span class="lc">'+esc(g.local)+' (GMT+1)</span>';
+  const now=Date.now(), g=G.find(x=>x.t>now-10*60*1000);
+  if(!g){sp.style.display="none";return;}
+  const rem=g.t-now; let c=C.mut, lab="dans", frac=0, pulse=false;
+  if(rem<=0){c=C.loss;lab="en cours";frac=1;pulse=true;}
+  else if(rem<=WIN){frac=1-rem/WIN; c=rem<=5*60000?C.loss:(rem<=30*60000?C.ora:C.acc); pulse=rem<=5*60000;}
+  sp.style.setProperty("--c",c); sp.className=pulse?"pulse":"";
+  ring.style.strokeDashoffset=(282.7*(1-Math.max(0.03,frac))).toFixed(1);
+  document.getElementById("cc").textContent=g.ccys.slice(0,2).join("·");
+  document.getElementById("tm").textContent=(rem<=0?"+":"")+short(rem);
+  document.getElementById("lb").textContent=lab;
+  sp.title=g.titles.join(" / ")+"\\n"+g.local+" (GMT+1)\\nCliquer pour ouvrir l'annonce";
 }
 tick(); setInterval(tick,1000);
 </script>"""
     for k, v in {"__DATA__": data, "__WIN__": str(int(window_h * 3600 * 1000)),
-                 "__CARD__": t["card"], "__BORDER__": t["border"], "__TEXT__": t["text"],
+                 "__CARD__": t["card"], "__BG__": t["bg"], "__BORDER__": t["border"], "__TEXT__": t["text"],
                  "__MUTED__": t["muted"], "__ACCENT__": t["accent"], "__ORANGE__": t["orange"],
                  "__LOSS__": t["loss"]}.items():
         html_c = html_c.replace(k, v)
-    _components.html(html_c, height=44)
+    with st.container(key="cd_sphere"):
+        _components.html(html_c, height=96, width=96)
 
 
 # Porte d'authentification : rien ne s'affiche tant qu'on n'est pas connecté
@@ -2475,8 +2504,10 @@ if st.session_state.page == "dashboard":
             _recos = all_recommendations(_bh, _risk) if _bh.get("n") else risk_recommendations(_risk)
         except Exception:
             _recos = []
+        if "reco_show" not in st.session_state:
+            st.session_state.reco_show = False
         _top = [r for r in _recos if r["level"] in ("critique", "attention")][:2]
-        if _top:
+        if _top and st.session_state.reco_show:
             _lv = {"critique": _tdb["loss"], "attention": _tdb["orange"]}
             st.markdown(
                 f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 2px'>"
@@ -2673,6 +2704,12 @@ if st.session_state.page == "dashboard":
                     f"<span style='font-size:11.5px;color:{_T['muted']};align-self:center'>Calculé sur "
                     f"{_bh.get('n') or _risk.get('n', 0)} trades · comptes : {selection_label()} · filtres du dashboard appliqués</span></div>",
                     unsafe_allow_html=True)
+                st.toggle("Afficher le détail des recommandations", key="_reco_tg",
+                          value=st.session_state.reco_show,
+                          on_change=lambda: st.session_state.update(reco_show=st.session_state["_reco_tg"]),
+                          help="Masqué par défaut pour garder le dashboard compact. Affiché, il active aussi "
+                               "le bandeau « À surveiller » sous les KPI.")
+            if _recos and st.session_state.reco_show:
                 rc1, rc2 = st.columns([3, 2], gap="medium")
                 with rc1:
                     _card("Priorités", "à corriger en premier")
@@ -4571,6 +4608,202 @@ elif st.session_state.page == "analyse":
         st.info("Sélectionnez au moins un actif.")
         st.stop()
 
+    _imp_badge = {"High": ("Fort", _ta["loss"]), "Medium": ("Moyen", _ta["orange"]),
+                  "Low": ("Faible", _ta["muted"])}
+
+    def _stat_cell(lbl, val, big=False, color=None, bg=None):
+        color = color or _ta["text"]
+        vfont = "20px" if big else "14px"
+        bgc = f"background:{bg};" if bg else ""
+        return (f"<div style='flex:1;text-align:center;padding:6px 4px;border-radius:8px;{bgc}'>"
+                f"<div style='font-size:9px;letter-spacing:.5px;text-transform:uppercase;"
+                f"color:{_ta['muted']};font-weight:700'>{lbl}</div>"
+                f"<div style='font-size:{vfont};font-weight:800;color:{color};"
+                f"font-family:JetBrains Mono,monospace;line-height:1.3'>{val if val is not None else '—'}</div></div>")
+
+    def _dir_chip(aset, d):
+        if d > 0:   cc, ic = _ta["win"], "▲"
+        elif d < 0: cc, ic = _ta["loss"], "▼"
+        else:       cc, ic = _ta["muted"], "•"
+        return (f"<span style='display:inline-block;font-size:11px;font-weight:700;color:{cc};"
+                f"background:{cc}1A;border:1px solid {cc}40;border-radius:6px;padding:1px 7px;"
+                f"margin:2px 4px 2px 0'>{ic} {_html.escape(aset.split(' (')[0])}</span>")
+
+    _DIRLBL = {1: "Hausse", -1: "Baisse", 0: "Neutre"}
+
+    def _kb_details(e, opened=False):
+        """Fiche dépliable : description de l'indicateur, lecture du marché, scénarios, liens."""
+        esc = lambda x: _html.escape(str(x), quote=False)
+        d = _kb.describe(e["title"], e["country"]) if _kb else None
+        lab = (f"font-size:10px;letter-spacing:.6px;text-transform:uppercase;font-weight:800;"
+               f"color:{_ta['muted']};margin:10px 0 3px")
+        txt = f"font-size:12.5px;line-height:1.55;color:{_ta['text']}"
+        if d is None:
+            body = (f"<div style='{txt}'>Fiche détaillée indisponible (fichier <code>econ_kb.py</code> "
+                    f"absent du dépôt). L'impact dépend de l'écart entre le chiffre publié et le consensus.</div>")
+        else:
+            body = (f"<div style='{lab}'>Ce que c'est</div><div style='{txt}'>{esc(d['what'])}</div>"
+                    f"<div style='display:flex;gap:18px;flex-wrap:wrap;font-size:11.5px;color:{_ta['muted']};margin-top:4px'>"
+                    f"<span><b style='color:{_ta['text']}'>Publié par</b> : {esc(d['pub'])}</span>"
+                    f"<span><b style='color:{_ta['text']}'>Fréquence</b> : {esc(d['freq'])}</span></div>"
+                    f"<div style='{lab}'>Pourquoi le marché le suit</div><div style='{txt}'>{esc(d['why'])}</div>"
+                    f"<div style='{lab}'>Lecture habituelle</div>"
+                    f"<div style='{txt}'><b style='color:{_ta['win']}'>Au-dessus du consensus</b> : {esc(d['up'])}<br>"
+                    f"<b style='color:{_ta['loss']}'>En dessous du consensus</b> : {esc(d['down'])}</div>")
+            if e["has_actual"] and e["delta"] is not None and e["forecast"]:
+                above = e["delta"] > 0; same = e["delta"] == 0
+                verdict = ("conforme au consensus, réaction en général limitée." if same else
+                           (("au-dessus" if above else "en dessous") + " du consensus. Lecture habituelle : "
+                            + (d["up"] if above else d["down"]).split(" : ", 1)[-1]))
+                vcol = _ta["muted"] if same else (_ta["win"] if e["es"] > 0 else _ta["loss"] if e["es"] < 0 else _ta["accent"])
+                body += (f"<div style='margin-top:8px;padding:8px 10px;border-radius:8px;background:{vcol}14;"
+                         f"border:1px solid {vcol}40;{txt}'><b style='color:{vcol}'>Résultat publié</b> : "
+                         f"{esc(e['actual'])} pour {esc(e['forecast'])} attendu, {esc(verdict)}</div>")
+        if e.get("scen"):
+            rows = "".join(
+                f"<tr><td style='padding:3px 10px 3px 0;color:{_ta['text']};font-size:12px'>{esc(a.split(' (')[0])}</td>"
+                f"<td style='padding:3px 10px'>{_dir_chip(_DIRLBL[u], u)}</td>"
+                f"<td style='padding:3px 10px'>{_dir_chip(_DIRLBL[dn], dn)}</td></tr>"
+                for a, (u, dn) in e["scen"].items())
+            body += (f"<div style='{lab}'>Scénarios pour vos actifs</div>"
+                     f"<table style='border-collapse:collapse'><tr>"
+                     f"<th style='text-align:left;font-size:10px;color:{_ta['muted']};padding:0 10px 2px 0'>Actif</th>"
+                     f"<th style='font-size:10px;color:{_ta['win']};padding:0 10px 2px'>Si au-dessus</th>"
+                     f"<th style='font-size:10px;color:{_ta['loss']};padding:0 10px 2px'>Si en dessous</th></tr>{rows}</table>")
+        if d is not None and d["links"]:
+            body += (f"<div style='{lab}'>Lire pour aller plus loin</div><div>" + "".join(
+                f"<a href='{u}' target='_blank' rel='noopener noreferrer' style='display:inline-block;"
+                f"font-size:12px;font-weight:700;color:{_ta['accent']};text-decoration:none;"
+                f"border:1px solid {_ta['accent']}55;border-radius:7px;padding:3px 10px;margin:2px 6px 2px 0'>"
+                f"Lire : {esc(l)} ↗</a>" for l, u in d["links"]) + "</div>")
+        return (f"<details{' open' if opened else ''} style='margin-top:8px;border-top:1px dashed {_ta['border']};padding-top:6px'>"
+                f"<summary style='cursor:pointer;font-size:12px;font-weight:700;color:{_ta['accent']};"
+                f"list-style-position:inside'>Comprendre cette annonce et son impact</summary>"
+                f"<div style='padding:4px 2px 2px'>{body}</div></details>")
+
+    def _build_entry(ev):
+        """Annonce brute -> entrée enrichie (chiffres, surprise, impact par actif)."""
+        title = str(ev["title"]); country = str(ev["country"])
+        actual, forecast, previous = ev["actual"], ev["forecast"], ev["previous"]
+        has_actual = str(actual).strip() not in ("", "nan", "None")
+        cat = _category(title)
+        a, f = _to_num(actual), _to_num(forecast)
+        # surprise économique (vs consensus)
+        pol = _growth_polarity(title)
+        es = 0
+        if a is not None and f is not None and pol != 0 and a != f:
+            es = 1 if ((a > f and pol > 0) or (a < f and pol < 0)) else -1
+        # delta affichable
+        delta = (a - f) if (a is not None and f is not None) else None
+        tlabel, tdt = _fmt_local(ev["date"])
+        # impact par actif concerné
+        impacts = {}
+        for aset in sel_assets:
+            cfg = ASSETS[aset]
+            if country not in cfg["ccy"]:
+                continue
+            adir = _impact(cfg, country, cat, es) if (has_actual and es != 0) else 0
+            impacts[aset] = adir
+        # scénarios : effet estimé si le chiffre sort au-dessus / en dessous du consensus
+        scen = {}
+        if pol != 0 and cat:
+            for aset in sel_assets:
+                cfg = ASSETS[aset]
+                if country in cfg["ccy"]:
+                    scen[aset] = (_impact(cfg, country, cat, pol), _impact(cfg, country, cat, -pol))
+        return {
+            "scen": scen,
+            "title": title, "country": country, "impact": str(ev.get("impact", "")),
+            "actual": str(actual).strip() if has_actual else None,
+            "forecast": str(forecast).strip() if str(forecast).strip() not in ("", "nan", "None") else None,
+            "previous": str(previous).strip() if str(previous).strip() not in ("", "nan", "None") else None,
+            "has_actual": has_actual, "cat": cat, "es": es, "delta": delta,
+            "impacts": impacts, "date": tlabel, "dt": tdt,
+        }
+
+    def _render_card(e, focus=False):
+        """Carte d'une annonce (focus = mise en avant depuis le chronomètre)."""
+        # couleur de bord selon la surprise
+        if e["has_actual"] and e["es"] != 0:
+            edge = _ta["win"] if e["es"] > 0 else _ta["loss"]
+            act_col = edge
+            act_bg = edge + "1A"
+            if e["es"] > 0:
+                surp_txt, surp_col = "⬆ Supérieur au consensus", _ta["win"]
+            else:
+                surp_txt, surp_col = "⬇ Inférieur au consensus", _ta["loss"]
+        elif e["has_actual"]:
+            edge = _ta["muted"]; act_col = _ta["text"]; act_bg = _ta["muted"] + "14"
+            surp_txt, surp_col = "➡ Conforme / neutre", _ta["muted"]
+        else:
+            edge = _ta["accent"]; act_col = _ta["muted"]; act_bg = "transparent"
+            surp_txt, surp_col = "À venir", _ta["accent"]
+
+        imp_lbl, imp_col = _imp_badge.get(e["impact"], ("", _ta["muted"]))
+        cat_txt = e["cat"] or "—"
+        status = "PUBLIÉ" if e["has_actual"] else "À VENIR"
+        status_col = edge
+
+        # delta chiffré
+        delta_html = ""
+        if e["delta"] is not None and e["has_actual"]:
+            dsign = "+" if e["delta"] >= 0 else ""
+            dtxt = f"{dsign}{e['delta']:.2f}".rstrip("0").rstrip(".")
+            delta_html = (f"<span style='font-size:11px;color:{surp_col};font-weight:700;"
+                          f"margin-left:8px'>Δ {dtxt} vs prévu</span>")
+
+        # chips d'impact par actif
+        chips = ""
+        for aset, adir in e["impacts"].items():
+            if adir > 0:
+                cc, ic, tt = _ta["win"], "▲", "haussier"
+            elif adir < 0:
+                cc, ic, tt = _ta["loss"], "▼", "baissier"
+            else:
+                cc, ic, tt = _ta["muted"], "•", "neutre"
+            short = aset.split(" (")[0]
+            chips += (f"<span style='display:inline-flex;align-items:center;gap:4px;"
+                      f"font-size:11px;font-weight:700;color:{cc};background:{cc}1A;"
+                      f"border:1px solid {cc}44;border-radius:7px;padding:2px 9px;margin:3px 4px 0 0'>"
+                      f"{ic} {short}</span>")
+        if not chips:
+            _noimp = "En attente du chiffre" if not e["has_actual"] else "Pas d'impact directionnel estimé"
+            chips = (f"<span style='font-size:11px;color:{_ta['muted']}'>{_noimp}</span>")
+
+        st.markdown(
+            f"<div style='background:{_ta['card']};border:1px solid {_ta['accent'] if focus else _ta['border']};"
+            f"border-left:4px solid {edge};border-radius:12px;padding:12px 16px;margin-bottom:10px;"
+            f"{'box-shadow:0 0 0 2px ' + _ta['accent'] + '55,0 6px 22px ' + _ta['accent'] + '33' if focus else ''}'>"
+            # ligne du haut
+            f"<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px'>"
+            f"<span style='font-size:11px;font-weight:800;color:{status_col};"
+            f"background:{status_col}1A;border-radius:6px;padding:2px 8px'>{status}</span>"
+            f"<span style='font-size:12px;font-weight:800;color:{_ta['text']};"
+            f"border:1px solid {_ta['border']};border-radius:6px;padding:1px 7px'>{e['country']}</span>"
+            f"<span style='font-size:10px;font-weight:700;color:{imp_col}'>● {imp_lbl}</span>"
+            f"<span style='font-size:10px;color:{_ta['muted']}'>{cat_txt}</span>"
+            f"<span style='font-size:11px;color:{_ta['muted']};margin-left:auto;"
+            f"font-family:JetBrains Mono,monospace'>{e['date']}</span></div>"
+            # titre
+            f"<div style='font-size:14px;font-weight:700;color:{_ta['text']};margin-bottom:8px'>"
+            f"{e['title']}</div>"
+            # cellules prévu / publié / précédent
+            f"<div style='display:flex;gap:8px;margin-bottom:8px'>"
+            f"{_stat_cell('Prévu (consensus)', e['forecast'])}"
+            f"{_stat_cell('Publié', e['actual'], big=True, color=act_col, bg=act_bg)}"
+            f"{_stat_cell('Précédent', e['previous'])}"
+            f"</div>"
+            # bandeau surprise
+            f"<div style='font-size:12px;font-weight:700;color:{surp_col};margin-bottom:6px'>"
+            f"{surp_txt}{delta_html}</div>"
+            # chips impact
+            f"<div style='display:flex;flex-wrap:wrap;align-items:center;gap:0'>"
+            f"<span style='font-size:10px;color:{_ta['muted']};text-transform:uppercase;"
+            f"letter-spacing:.5px;font-weight:700;margin-right:8px'>Impact estimé</span>{chips}</div>"
+            f"{_kb_details(e, opened=focus)}"
+            f"</div>",
+            unsafe_allow_html=True)
+
     events, _src = _fetch_calendar(_scope_map[scope_lbl])
     if not events:
         st.error("Calendrier économique indisponible pour le moment (sources injoignables). "
@@ -4598,6 +4831,41 @@ elif st.session_state.page == "analyse":
     for col in ("country", "impact", "title", "actual", "forecast", "previous", "date"):
         if col not in df.columns: df[col] = ""
 
+
+    # ── Annonce ciblée depuis la sphère du chronomètre ───────────────────────
+    _fe = st.session_state.get("focus_event")
+    if _fe:
+        def _find_focus(evs):
+            for _ev in evs or []:
+                _r = {_k: _ev.get(_v) for _k, _v in (("title", "title"), ("country", "country"),
+                      ("impact", "impact"), ("actual", "actual"), ("forecast", "forecast"),
+                      ("previous", "previous"), ("date", "date"))}
+                if str(_r["title"]) not in _fe.get("titles", []):
+                    continue
+                _d = _parse_utc(_r["date"])
+                if _d is None:
+                    continue
+                from datetime import timezone as _tzf
+                if abs(_d.replace(tzinfo=_tzf.utc).timestamp() * 1000 - _fe["t"]) <= 90_000:
+                    for _k in ("actual", "forecast", "previous"):
+                        if _r[_k] is None: _r[_k] = ""
+                    return _r
+            return None
+        _fr = _find_focus(events) or _find_focus(_fetch_calendar("all")[0])
+        _fh1, _fh2 = st.columns([6, 1])
+        with _fh1:
+            st.markdown(f"<div style='font-size:11px;letter-spacing:1px;text-transform:uppercase;font-weight:800;"
+                        f"color:{_ta['accent']};margin:6px 0 4px'>Prochaine annonce · ouverte depuis le chronomètre</div>",
+                        unsafe_allow_html=True)
+        with _fh2:
+            st.button("Fermer", key="focus_close", icon=":material/close:", use_container_width=True,
+                      on_click=lambda: st.session_state.pop("focus_event", None))
+        if _fr is None:
+            st.info("Annonce introuvable dans le calendrier actuel (déjà passée ou source momentanément indisponible).")
+        else:
+            _render_card(_build_entry(_fr), focus=True)
+        st.markdown("---")
+
     # Union des devises de tous les actifs sélectionnés
     all_ccy = sorted({c for a in sel_assets for c in ASSETS[a]["ccy"]})
     df = df[df["country"].isin(all_ccy)]
@@ -4613,47 +4881,14 @@ elif st.session_state.page == "analyse":
     asset_score = {a: [0.0, 0.0] for a in sel_assets}
 
     for _, ev in df.iterrows():
-        title = str(ev["title"]); country = str(ev["country"])
-        actual, forecast, previous = ev["actual"], ev["forecast"], ev["previous"]
-        has_actual = str(actual).strip() not in ("", "nan", "None")
-        cat = _category(title)
-        a, f = _to_num(actual), _to_num(forecast)
-        # surprise économique (vs consensus)
-        pol = _growth_polarity(title)
-        es = 0
-        if a is not None and f is not None and pol != 0 and a != f:
-            es = 1 if ((a > f and pol > 0) or (a < f and pol < 0)) else -1
-        # delta affichable
-        delta = (a - f) if (a is not None and f is not None) else None
-        tlabel, tdt = _fmt_local(ev["date"])
-        # impact par actif concerné
-        impacts = {}
-        for aset in sel_assets:
-            cfg = ASSETS[aset]
-            if country not in cfg["ccy"]:
-                continue
-            adir = _impact(cfg, country, cat, es) if (has_actual and es != 0) else 0
-            impacts[aset] = adir
-            if has_actual and adir != 0:
-                w = _w.get(str(ev.get("impact", "Low")), 1)
-                asset_score[aset][0] += adir * w
-                asset_score[aset][1] += w
-        # scénarios : effet estimé si le chiffre sort au-dessus / en dessous du consensus
-        scen = {}
-        if pol != 0 and cat:
-            for aset in sel_assets:
-                cfg = ASSETS[aset]
-                if country in cfg["ccy"]:
-                    scen[aset] = (_impact(cfg, country, cat, pol), _impact(cfg, country, cat, -pol))
-        feed.append({
-            "scen": scen,
-            "title": title, "country": country, "impact": str(ev.get("impact", "")),
-            "actual": str(actual).strip() if has_actual else None,
-            "forecast": str(forecast).strip() if str(forecast).strip() not in ("", "nan", "None") else None,
-            "previous": str(previous).strip() if str(previous).strip() not in ("", "nan", "None") else None,
-            "has_actual": has_actual, "cat": cat, "es": es, "delta": delta,
-            "impacts": impacts, "date": tlabel, "dt": tdt,
-        })
+        _e = _build_entry(ev)
+        feed.append(_e)
+        if _e["has_actual"]:
+            _wv = _w.get(_e["impact"], 1)
+            for aset, adir in _e["impacts"].items():
+                if adir != 0:
+                    asset_score[aset][0] += adir * _wv
+                    asset_score[aset][1] += _wv
 
     def _norm(acc):
         return (acc[0] / acc[1] * 100.0) if acc[1] else 0.0
@@ -4719,159 +4954,8 @@ elif st.session_state.page == "analyse":
     MAXN = 45
     shown = ordered[:MAXN]
 
-    _imp_badge = {"High": ("Fort", _ta["loss"]), "Medium": ("Moyen", _ta["orange"]),
-                  "Low": ("Faible", _ta["muted"])}
-
-    def _stat_cell(lbl, val, big=False, color=None, bg=None):
-        color = color or _ta["text"]
-        vfont = "20px" if big else "14px"
-        bgc = f"background:{bg};" if bg else ""
-        return (f"<div style='flex:1;text-align:center;padding:6px 4px;border-radius:8px;{bgc}'>"
-                f"<div style='font-size:9px;letter-spacing:.5px;text-transform:uppercase;"
-                f"color:{_ta['muted']};font-weight:700'>{lbl}</div>"
-                f"<div style='font-size:{vfont};font-weight:800;color:{color};"
-                f"font-family:JetBrains Mono,monospace;line-height:1.3'>{val if val is not None else '—'}</div></div>")
-
-    def _dir_chip(aset, d):
-        if d > 0:   cc, ic = _ta["win"], "▲"
-        elif d < 0: cc, ic = _ta["loss"], "▼"
-        else:       cc, ic = _ta["muted"], "•"
-        return (f"<span style='display:inline-block;font-size:11px;font-weight:700;color:{cc};"
-                f"background:{cc}1A;border:1px solid {cc}40;border-radius:6px;padding:1px 7px;"
-                f"margin:2px 4px 2px 0'>{ic} {_html.escape(aset.split(' (')[0])}</span>")
-
-    _DIRLBL = {1: "Hausse", -1: "Baisse", 0: "Neutre"}
-
-    def _kb_details(e):
-        """Fiche dépliable : description de l'indicateur, lecture du marché, scénarios, liens."""
-        esc = lambda x: _html.escape(str(x), quote=False)
-        d = _kb.describe(e["title"], e["country"]) if _kb else None
-        lab = (f"font-size:10px;letter-spacing:.6px;text-transform:uppercase;font-weight:800;"
-               f"color:{_ta['muted']};margin:10px 0 3px")
-        txt = f"font-size:12.5px;line-height:1.55;color:{_ta['text']}"
-        if d is None:
-            body = (f"<div style='{txt}'>Fiche détaillée indisponible (fichier <code>econ_kb.py</code> "
-                    f"absent du dépôt). L'impact dépend de l'écart entre le chiffre publié et le consensus.</div>")
-        else:
-            body = (f"<div style='{lab}'>Ce que c'est</div><div style='{txt}'>{esc(d['what'])}</div>"
-                    f"<div style='display:flex;gap:18px;flex-wrap:wrap;font-size:11.5px;color:{_ta['muted']};margin-top:4px'>"
-                    f"<span><b style='color:{_ta['text']}'>Publié par</b> : {esc(d['pub'])}</span>"
-                    f"<span><b style='color:{_ta['text']}'>Fréquence</b> : {esc(d['freq'])}</span></div>"
-                    f"<div style='{lab}'>Pourquoi le marché le suit</div><div style='{txt}'>{esc(d['why'])}</div>"
-                    f"<div style='{lab}'>Lecture habituelle</div>"
-                    f"<div style='{txt}'><b style='color:{_ta['win']}'>Au-dessus du consensus</b> : {esc(d['up'])}<br>"
-                    f"<b style='color:{_ta['loss']}'>En dessous du consensus</b> : {esc(d['down'])}</div>")
-            if e["has_actual"] and e["delta"] is not None and e["forecast"]:
-                above = e["delta"] > 0; same = e["delta"] == 0
-                verdict = ("conforme au consensus, réaction en général limitée." if same else
-                           (("au-dessus" if above else "en dessous") + " du consensus. Lecture habituelle : "
-                            + (d["up"] if above else d["down"]).split(" : ", 1)[-1]))
-                vcol = _ta["muted"] if same else (_ta["win"] if e["es"] > 0 else _ta["loss"] if e["es"] < 0 else _ta["accent"])
-                body += (f"<div style='margin-top:8px;padding:8px 10px;border-radius:8px;background:{vcol}14;"
-                         f"border:1px solid {vcol}40;{txt}'><b style='color:{vcol}'>Résultat publié</b> : "
-                         f"{esc(e['actual'])} pour {esc(e['forecast'])} attendu, {esc(verdict)}</div>")
-        if e.get("scen"):
-            rows = "".join(
-                f"<tr><td style='padding:3px 10px 3px 0;color:{_ta['text']};font-size:12px'>{esc(a.split(' (')[0])}</td>"
-                f"<td style='padding:3px 10px'>{_dir_chip(_DIRLBL[u], u)}</td>"
-                f"<td style='padding:3px 10px'>{_dir_chip(_DIRLBL[dn], dn)}</td></tr>"
-                for a, (u, dn) in e["scen"].items())
-            body += (f"<div style='{lab}'>Scénarios pour vos actifs</div>"
-                     f"<table style='border-collapse:collapse'><tr>"
-                     f"<th style='text-align:left;font-size:10px;color:{_ta['muted']};padding:0 10px 2px 0'>Actif</th>"
-                     f"<th style='font-size:10px;color:{_ta['win']};padding:0 10px 2px'>Si au-dessus</th>"
-                     f"<th style='font-size:10px;color:{_ta['loss']};padding:0 10px 2px'>Si en dessous</th></tr>{rows}</table>")
-        if d is not None and d["links"]:
-            body += (f"<div style='{lab}'>Lire pour aller plus loin</div><div>" + "".join(
-                f"<a href='{u}' target='_blank' rel='noopener noreferrer' style='display:inline-block;"
-                f"font-size:12px;font-weight:700;color:{_ta['accent']};text-decoration:none;"
-                f"border:1px solid {_ta['accent']}55;border-radius:7px;padding:3px 10px;margin:2px 6px 2px 0'>"
-                f"Lire : {esc(l)} ↗</a>" for l, u in d["links"]) + "</div>")
-        return (f"<details style='margin-top:8px;border-top:1px dashed {_ta['border']};padding-top:6px'>"
-                f"<summary style='cursor:pointer;font-size:12px;font-weight:700;color:{_ta['accent']};"
-                f"list-style-position:inside'>Comprendre cette annonce et son impact</summary>"
-                f"<div style='padding:4px 2px 2px'>{body}</div></details>")
-
     for e in shown:
-        # couleur de bord selon la surprise
-        if e["has_actual"] and e["es"] != 0:
-            edge = _ta["win"] if e["es"] > 0 else _ta["loss"]
-            act_col = edge
-            act_bg = edge + "1A"
-            if e["es"] > 0:
-                surp_txt, surp_col = "⬆ Supérieur au consensus", _ta["win"]
-            else:
-                surp_txt, surp_col = "⬇ Inférieur au consensus", _ta["loss"]
-        elif e["has_actual"]:
-            edge = _ta["muted"]; act_col = _ta["text"]; act_bg = _ta["muted"] + "14"
-            surp_txt, surp_col = "➡ Conforme / neutre", _ta["muted"]
-        else:
-            edge = _ta["accent"]; act_col = _ta["muted"]; act_bg = "transparent"
-            surp_txt, surp_col = "À venir", _ta["accent"]
-
-        imp_lbl, imp_col = _imp_badge.get(e["impact"], ("", _ta["muted"]))
-        cat_txt = e["cat"] or "—"
-        status = "PUBLIÉ" if e["has_actual"] else "À VENIR"
-        status_col = edge
-
-        # delta chiffré
-        delta_html = ""
-        if e["delta"] is not None and e["has_actual"]:
-            dsign = "+" if e["delta"] >= 0 else ""
-            dtxt = f"{dsign}{e['delta']:.2f}".rstrip("0").rstrip(".")
-            delta_html = (f"<span style='font-size:11px;color:{surp_col};font-weight:700;"
-                          f"margin-left:8px'>Δ {dtxt} vs prévu</span>")
-
-        # chips d'impact par actif
-        chips = ""
-        for aset, adir in e["impacts"].items():
-            if adir > 0:
-                cc, ic, tt = _ta["win"], "▲", "haussier"
-            elif adir < 0:
-                cc, ic, tt = _ta["loss"], "▼", "baissier"
-            else:
-                cc, ic, tt = _ta["muted"], "•", "neutre"
-            short = aset.split(" (")[0]
-            chips += (f"<span style='display:inline-flex;align-items:center;gap:4px;"
-                      f"font-size:11px;font-weight:700;color:{cc};background:{cc}1A;"
-                      f"border:1px solid {cc}44;border-radius:7px;padding:2px 9px;margin:3px 4px 0 0'>"
-                      f"{ic} {short}</span>")
-        if not chips:
-            _noimp = "En attente du chiffre" if not e["has_actual"] else "Pas d'impact directionnel estimé"
-            chips = (f"<span style='font-size:11px;color:{_ta['muted']}'>{_noimp}</span>")
-
-        st.markdown(
-            f"<div style='background:{_ta['card']};border:1px solid {_ta['border']};"
-            f"border-left:4px solid {edge};border-radius:12px;padding:12px 16px;margin-bottom:10px'>"
-            # ligne du haut
-            f"<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px'>"
-            f"<span style='font-size:11px;font-weight:800;color:{status_col};"
-            f"background:{status_col}1A;border-radius:6px;padding:2px 8px'>{status}</span>"
-            f"<span style='font-size:12px;font-weight:800;color:{_ta['text']};"
-            f"border:1px solid {_ta['border']};border-radius:6px;padding:1px 7px'>{e['country']}</span>"
-            f"<span style='font-size:10px;font-weight:700;color:{imp_col}'>● {imp_lbl}</span>"
-            f"<span style='font-size:10px;color:{_ta['muted']}'>{cat_txt}</span>"
-            f"<span style='font-size:11px;color:{_ta['muted']};margin-left:auto;"
-            f"font-family:JetBrains Mono,monospace'>{e['date']}</span></div>"
-            # titre
-            f"<div style='font-size:14px;font-weight:700;color:{_ta['text']};margin-bottom:8px'>"
-            f"{e['title']}</div>"
-            # cellules prévu / publié / précédent
-            f"<div style='display:flex;gap:8px;margin-bottom:8px'>"
-            f"{_stat_cell('Prévu (consensus)', e['forecast'])}"
-            f"{_stat_cell('Publié', e['actual'], big=True, color=act_col, bg=act_bg)}"
-            f"{_stat_cell('Précédent', e['previous'])}"
-            f"</div>"
-            # bandeau surprise
-            f"<div style='font-size:12px;font-weight:700;color:{surp_col};margin-bottom:6px'>"
-            f"{surp_txt}{delta_html}</div>"
-            # chips impact
-            f"<div style='display:flex;flex-wrap:wrap;align-items:center;gap:0'>"
-            f"<span style='font-size:10px;color:{_ta['muted']};text-transform:uppercase;"
-            f"letter-spacing:.5px;font-weight:700;margin-right:8px'>Impact estimé</span>{chips}</div>"
-            f"{_kb_details(e)}"
-            f"</div>",
-            unsafe_allow_html=True)
+        _render_card(e)
 
     if len(ordered) > MAXN:
         st.caption(f"{len(ordered)} publications au total · {MAXN} affichées (publiées en premier). "
