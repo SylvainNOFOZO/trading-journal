@@ -486,6 +486,18 @@ div[data-baseweb="select"] > div {{
 .stButton > button:hover {{ filter:brightness(1.08); color:{t['btn_text']} !important; box-shadow:0 4px 14px {t['accent']}55; }}
 .stButton > button p, .stButton > button [data-testid="stMarkdownContainer"] p,
 .stButton > button [data-testid="stIconMaterial"] {{ color:{t['btn_text']} !important; }}
+/* Bouton de téléchargement et zone de dépôt de fichier : thémés */
+[data-testid="stDownloadButton"] > button {{ background:{t['card']} !important; color:{t['accent']} !important;
+    border:1px solid {t['accent']}66 !important; border-radius:10px; font-weight:700; }}
+[data-testid="stDownloadButton"] > button p {{ color:{t['accent']} !important; }}
+[data-testid="stDownloadButton"] > button:hover {{ background:{t['accent']}1a !important; }}
+[data-testid="stFileUploaderDropzone"] {{ background:{t['card']} !important; border:1px dashed {t['border']} !important;
+    color:{t['text']} !important; border-radius:10px; }}
+[data-testid="stFileUploaderDropzone"] span, [data-testid="stFileUploaderDropzone"] small,
+[data-testid="stFileUploaderFile"] div, [data-testid="stFileUploaderFile"] small {{ color:{t['text']} !important; }}
+[data-testid="stFileUploaderFile"] {{ background:{t['bg']} !important; border:1px solid {t['border']}; border-radius:8px; }}
+[data-testid="stFileUploaderDropzone"] button {{ background:{t['accent']}1a !important; color:{t['accent']} !important;
+    border:1px solid {t['accent']}55 !important; }}
 /* Boutons de formulaire (Se connecter, Enregistrer...) : même style que les boutons du design */
 [data-testid="stFormSubmitButton"] > button {{ background:linear-gradient(135deg,{t['accent']},{t['alt']}) !important;
     color:{t['btn_text']} !important; font-weight:800; border:none !important; border-radius:10px;
@@ -554,6 +566,53 @@ label[data-testid="stRadioOption"] > div > div:first-child {{ border-color:{t['b
 label[data-testid="stRadioOption"][data-selected="true"] > div > div:first-child {{
     background:{t['accent']} !important; border-color:{t['accent']} !important; }}
 .grad-accent {{ background:linear-gradient(135deg,{t['accent']},{t['alt']});-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:800; }}
+/* ══ FORMES : chaque bloc prend une forme adaptée à ce qu'il porte ══════════════ */
+/* KPI montant : feuille (angles opposés) · KPI ratio : capsule avec jauge · KPI risque : angles coupés */
+.kpi {{ border-radius:22px 6px 22px 6px; }}
+.kpi.kpi-ratio {{ border-radius:44px 14px 14px 44px; padding-left:18px; }}
+.kpi.kpi-ratio .kpi-bar {{ left:30px; right:18px; border-radius:0 0 4px 4px; }}
+.kpi.kpi-risk {{ border-radius:3px; border:none; background:linear-gradient(135deg,{t['loss']}14,{t['card']} 45%,{t['bg2']});
+    clip-path:polygon(0 0,calc(100% - 20px) 0,100% 20px,100% 100%,20px 100%,0 calc(100% - 20px)); }}
+.kpi.kpi-risk .kpi-bar {{ right:20px; }}
+.kpi-ring {{ float:right; width:38px; height:38px; border-radius:50%; margin:-2px -2px 0 6px;
+    -webkit-mask:radial-gradient(circle,transparent 11px,#000 12px); mask:radial-gradient(circle,transparent 11px,#000 12px); }}
+/* Graphiques : une rangée forme un bloc continu (bords extérieurs très arrondis, joints serrés) */
+[data-testid="stPlotlyChart"] {{ background:{t['card']}; border:1px solid {t['border']}; overflow:hidden;
+    border-radius:26px 26px 8px 8px; }}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stPlotlyChart"] {{ border-radius:30px 8px 8px 30px; }}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child [data-testid="stPlotlyChart"] {{ border-radius:8px 30px 30px 8px; }}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:not(:first-child):not(:last-child) [data-testid="stPlotlyChart"] {{ border-radius:10px; }}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:only-child [data-testid="stPlotlyChart"] {{ border-radius:26px 26px 8px 8px; }}
+/* Onglets : segments en pastille */
+.stTabs [data-baseweb="tab"], [data-testid="stTab"] {{ border-radius:999px !important; margin-right:4px; }}
+.stTabs [aria-selected="true"], [data-testid="stTab"][data-selected="true"] {{ box-shadow:inset 0 0 0 1px {t['accent']}66 !important;
+    background:{t['accent']}1c !important; }}
+[data-testid="stTab"] > div[data-rac] {{ display:none !important; }}
+/* Zones repliables : coins alternés · messages : bulle (coin d'origine pointu) */
+div[data-testid="stExpander"] details {{ border-radius:18px 4px 18px 4px !important; }}
+div[data-testid="stExpander"] details summary, div[data-testid="stExpander"] details[open] summary {{ background:transparent !important; color:{t['text']} !important; border-radius:18px 4px 0 0; }}
+div[data-testid="stExpander"] details summary:hover {{ background:{t['accent']}0d !important; }}
+[data-testid="stAlert"] > div {{ border-radius:16px 16px 16px 4px !important; }}
+.grad-card {{ border-radius:26px 6px 26px 6px; }}
+.mode-banner-real, .mode-banner-sec, .mode-banner-inst, .mode-banner-demo, .mode-banner-all {{ border-radius:999px !important; }}
+[data-testid="stDataFrame"], [data-testid="stTable"] {{ border-radius:14px 14px 4px 4px; overflow:hidden; }}
+/* Boutons : pastilles · filtres à cocher : pastilles discrètes qui s'ouvrent en menu */
+.stButton > button, [data-testid="stFormSubmitButton"] > button, [data-testid="stDownloadButton"] > button {{ border-radius:999px !important; }}
+[data-testid="stPopover"] > div > button, [data-testid="stPopover"] button {{ background:{t['card']} !important;
+    color:{t['text']} !important; border:1px solid {t['border']} !important; border-radius:999px !important;
+    font-size:12.5px !important; font-weight:600; min-height:34px; padding:2px 14px !important; }}
+[data-testid="stPopover"] button p, [data-testid="stPopover"] button span {{ color:{t['text']} !important; }}
+[data-testid="stPopover"] button:hover {{ border-color:{t['accent']} !important; background:{t['accent']}12 !important; }}
+[data-testid="stPopoverBody"] {{ background:{t['card']} !important; border:1px solid {t['border']} !important;
+    border-radius:6px 20px 20px 20px !important; box-shadow:0 14px 40px rgba(0,0,0,.28) !important; }}
+[data-testid="stPopoverBody"] .stButton > button {{ background:{t['accent']}14 !important; color:{t['accent']} !important;
+    box-shadow:none; font-size:12px; padding:3px 8px; }}
+[data-testid="stPopoverBody"] .stButton > button p {{ color:{t['accent']} !important; }}
+[data-testid="stCheckbox"] label span:first-child {{ border-radius:6px !important; }}
+[data-testid="stCheckbox"] label[data-checked="true"] span:first-child, [data-testid="stCheckbox"] input:checked + div,
+[data-testid="stCheckbox"] [data-selected="true"] > span:first-child {{ background:{t['accent']} !important; border-color:{t['accent']} !important; }}
+.st-key-dash_filters, .st-key-jr_filters, .st-key-news_filters {{ flex-wrap:wrap; }}
+.st-key-dash_filters > div, .st-key-jr_filters > div, .st-key-news_filters > div {{ flex:1 1 150px; min-width:130px; }}
 </style>
 """
 # Comptes par défaut (utilisés au tout premier lancement, puis gérés par l'admin)
@@ -1024,10 +1083,91 @@ def get_df(mode_filter=None):
         df = df[df["trade_mode"].isin(scope)]
     return df
 
-def kpi(icon, label, value, sub, color):
-    st.markdown(f"""<div class="kpi">
+
+# ── FILTRES À COCHER (menu repliable : on coche, on clique ailleurs, il se referme) ──
+def _ck_sync(state_key, prefix, options):
+    st.session_state[state_key] = [o for o in options if st.session_state.get(f"{prefix}__{o}")]
+
+def _ck_all(state_key, prefix, options, value):
+    for o in options:
+        st.session_state[f"{prefix}__{o}"] = value
+    st.session_state[state_key] = list(options) if value else []
+
+def check_filter(title, options, state_key, prefix, all_label="Tous", fmt=str, icon=None):
+    """Liste de cases à cocher dans un menu repliable. Rien de coché = tout est pris.
+    Renvoie la liste cochée (filtrée sur les options existantes)."""
+    options = list(options)
+    sel = [o for o in st.session_state.get(state_key, []) if o in options]
+    st.session_state[state_key] = sel
+    if not sel:
+        summ = all_label
+    elif len(sel) == len(options):
+        summ = "tout"
+    elif len(sel) <= 2:
+        summ = ", ".join(fmt(o) for o in sel)
+    else:
+        summ = f"{len(sel)} sélectionnés"
+    with st.popover(f"{title} · {summ}", icon=icon, use_container_width=True):
+        if not options:
+            st.caption("Aucune valeur disponible.")
+            return sel
+        b1, b2 = st.columns(2)
+        with b1:
+            st.button("Tout", key=f"{prefix}__all", icon=":material/done_all:", use_container_width=True,
+                      on_click=_ck_all, args=(state_key, prefix, options, True))
+        with b2:
+            st.button("Aucun", key=f"{prefix}__none", icon=":material/remove_done:", use_container_width=True,
+                      on_click=_ck_all, args=(state_key, prefix, options, False))
+        ncol = 3 if len(options) > 14 else (2 if len(options) > 6 else 1)
+        cols = st.columns(ncol)
+        for i, o in enumerate(options):
+            k = f"{prefix}__{o}"
+            st.session_state[k] = o in sel          # la liste mémorisée fait foi
+            with cols[i % ncol]:
+                st.checkbox(fmt(o), key=k, on_change=_ck_sync, args=(state_key, prefix, options))
+    return st.session_state[state_key]
+
+def period_filter(title, d_min, d_max, prefix):
+    """Période : choix rapide à cocher, dates libres seulement en mode personnalisé."""
+    from datetime import timedelta as _tdp
+    presets = ["Tout", "7 derniers jours", "30 derniers jours", "3 derniers mois", "Cette année", "Personnalisée"]
+    cur = st.session_state.get(f"{prefix}_preset", "Tout")
+    with st.popover(f"{title} · {cur}", icon=":material/date_range:", use_container_width=True):
+        cur = st.radio(title, presets, key=f"{prefix}_preset", label_visibility="collapsed")
+        if cur == "Personnalisée":
+            d1, d2 = st.columns(2)
+            with d1: f = st.date_input("Depuis", value=d_min, key=f"{prefix}_from")
+            with d2: t = st.date_input("Jusqu'au", value=d_max, key=f"{prefix}_to")
+    today = date.today()
+    if cur == "Personnalisée":
+        return st.session_state.get(f"{prefix}_from", d_min), st.session_state.get(f"{prefix}_to", d_max)
+    start = {"7 derniers jours": today - _tdp(days=6), "30 derniers jours": today - _tdp(days=29),
+             "3 derniers mois": today - _tdp(days=91), "Cette année": date(today.year, 1, 1)}.get(cur, d_min)
+    return min(start, d_max) if cur == "Tout" else start, max(d_max, today)
+
+def kpi(icon, label, value, sub, color, kind=None):
+    """Carte KPI dont la forme suit l'information : montant (feuille), ratio (capsule + jauge), risque (angles coupés)."""
+    import re as _rek
+    lab = str(label).lower()
+    if kind is None:
+        if any(w in lab for w in ("drawdown", "perte max", "risque", "perdants", "pire")):
+            kind = "risk"
+        elif any(w in lab for w in ("rate", "factor", "r:r", "ratio", "%", "taux", "réussite")) or str(value).strip().endswith(("%", "R")):
+            kind = "ratio"
+        else:
+            kind = "money"
+    deco = f'<div class="kpi-icon" style="color:{color}">{icon}</div>'
+    _m = _rek.match(r"^\s*([\d.,]+)\s*%\s*$", str(value))
+    if kind == "ratio" and _m:
+        try:
+            pv = max(0.0, min(100.0, float(_m.group(1).replace(",", "."))))
+            deco = (f'<div class="kpi-ring" style="background:conic-gradient({color} {pv:.0f}%,'
+                    f'var(--tj-border) 0)"></div>')
+        except Exception:
+            pass
+    st.markdown(f"""<div class="kpi kpi-{kind}">
         <div class="kpi-bar" style="background:{color}"></div>
-        <div class="kpi-icon" style="color:{color}">{icon}</div>
+        {deco}
         <div class="kpi-label">{label}</div>
         <div class="kpi-value" style="color:{color}">{value}</div>
         <div class="kpi-sub">{sub}</div></div>""", unsafe_allow_html=True)
@@ -1281,8 +1421,7 @@ def _ff_impact(ev):
     if "yel" in blob or "low" in blob: return "Low"
     return "Low"
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def _fetch_calendar(scope="all"):
+def _fetch_calendar_raw(scope="all"):
     """Renvoie (events, source). events normalisés avec 'actual' si la source le fournit.
     Ordre des sources : TradingView (Actual) -> ForexFactory (Actual) -> faireconomy (prévisions)."""
     import json as _json
@@ -1403,6 +1542,53 @@ def _fetch_calendar(scope="all"):
     except Exception:
         return [], "aucune"
 
+
+@st.cache_data(ttl=1800, show_spinner=False, max_entries=12)
+def _fetch_calendar_cached(scope, bucket):
+    """Cache par tranche de temps : 30 min au calme, 1 min autour d'une annonce (voir calendar_hot)."""
+    import time as _tmc
+    ev, src = _fetch_calendar_raw(scope)
+    return ev, src, _tmc.time()
+
+def _calendar_hot(events, now_utc=None):
+    """Instant (epoch) jusqu'auquel rafraîchir à la minute : annonce dans moins de 20 min,
+    ou publiée depuis moins de 90 min sans chiffre encore récupéré."""
+    from datetime import timezone as _tzh
+    now = now_utc or datetime.utcnow()
+    until = 0.0
+    for ev in events or []:
+        if str(ev.get("impact", "")) not in ("High", "Medium"):
+            continue
+        dt = _parse_utc(ev.get("date"))
+        if dt is None:
+            continue
+        dmin = (dt - now).total_seconds() / 60
+        no_actual = str(ev.get("actual", "")).strip() in ("", "nan", "None")
+        if (0 < dmin <= 20) or (no_actual and -90 <= dmin <= 0):
+            until = max(until, dt.replace(tzinfo=_tzh.utc).timestamp() + 90 * 60)
+    return until
+
+def _fetch_calendar(scope="all"):
+    """Calendrier économique : (events, source). Rafraîchi à la minute autour des annonces."""
+    import time as _tmc
+    now = _tmc.time()
+    hot_key = f"_cal_hot_{scope}"
+    hot = st.session_state.get(hot_key, 0) > now if hasattr(st, "session_state") else False
+    bucket = int(now // 60) if hot else int(now // 1800)
+    ev, src, ts = _fetch_calendar_cached(scope, bucket)
+    # ne jamais revenir à une version plus ancienne que celle déjà affichée (cache 30 min resté figé)
+    _last = st.session_state.get(f"_cal_data_{scope}")
+    if _last and _last[2] > ts:
+        ev, src, ts = _last
+    else:
+        st.session_state[f"_cal_data_{scope}"] = (ev, src, ts)
+    try:
+        st.session_state[hot_key] = _calendar_hot(ev) if "sans chiffre publié" not in src else 0
+        st.session_state[f"_cal_ts_{scope}"] = ts
+    except Exception:
+        pass
+    return ev, src
+
 def _to_num(x):
     if x is None: return None
     s = str(x).strip().replace("%", "").replace(",", "")
@@ -1493,7 +1679,7 @@ def render_countdown(groups, window_h, t):
     st.session_state["_cd_groups"] = groups[:15]
     data = json.dumps(groups[:15], ensure_ascii=True).replace("</", "<\\/")
     st.markdown(
-        "<style>.st-key-cd_sphere{position:fixed!important;right:20px;bottom:22px;z-index:9990;"
+        "<style>.st-key-cd_sphere{position:fixed!important;right:20px;bottom:120px;z-index:9990;"
         "width:96px!important;height:96px;pointer-events:none}"
         ".st-key-cd_sphere iframe{pointer-events:auto;border-radius:50%}"
         ".st-key-cd_sphere [data-testid=stElementContainer]{width:96px!important}"
@@ -1630,7 +1816,7 @@ st.markdown(f"""<style>
 @keyframes tjSweep {{ 0% {{background-position:200% 0}} 100% {{background-position:0 0}} }}
 @keyframes tjPop {{ 0% {{opacity:0; transform:scale(.6)}} 100% {{opacity:1; transform:none}} }}
 .st-key-tj_hdr {{
-  position:relative; overflow:hidden; border-radius:18px; padding:14px 18px 12px;
+  position:relative; overflow:hidden; border-radius:30px 30px 30px 8px; padding:14px 18px 12px;
   background:linear-gradient(145deg,{_t['card']},{_t['bg2']}); border:1px solid {_t['border']};
   box-shadow:0 1px 2px rgba(0,0,0,.06), 0 14px 34px rgba(0,0,0,.10);
   animation:tjDrop .55s cubic-bezier(.22,1,.36,1) both; }}
@@ -1745,11 +1931,8 @@ if st.session_state.hdr_open:
                             f"<b style='color:{_t['text']}'>{(_allowed[0] if _allowed else '—')}</b></div>",
                             unsafe_allow_html=True)
             else:
-                _cur_sel = list(st.session_state.mode_selection)
-                _new_sel = st.multiselect("Afficher", _allowed, default=_cur_sel,
-                    placeholder="Tous les comptes", label_visibility="collapsed", key="mode_multiselect")
-                if _new_sel != _cur_sel:
-                    st.session_state.mode_selection = _new_sel; st.rerun()
+                check_filter("Comptes", _allowed, "mode_selection", "hacc", all_label="tous les comptes",
+                             icon=":material/account_balance_wallet:")
         with st.container(horizontal=True, key="tj_nav", gap="small"):
             _render_nav("tjnav")
 else:
@@ -2433,17 +2616,11 @@ if st.session_state.page == "dashboard":
             f"{datetime.now().strftime('%d/%m/%Y')} · {selection_label()}</span></div>",
             unsafe_allow_html=True)
     with _dh2:
-        _nf = sum([st.session_state.get("d_sym", "Tous") != "Tous",
-                   st.session_state.get("d_mood", "Toutes") != "Toutes",
-                   st.session_state.get("d_strat", "Toutes") != "Toutes"])
-        with st.expander("Filtres" + (f" · {_nf} actif(s)" if _nf else " · actif, émotion, stratégie, période")):
-            fc1,fc2,fc3 = st.columns(3)
-            with fc1: f_sym   = st.selectbox("Actif",     ["Tous"]+syms_avail,    key="d_sym")
-            with fc2: f_mood  = st.selectbox("Émotion",   ["Toutes"]+moods_avail, key="d_mood")
-            with fc3: f_strat = st.selectbox("Stratégie", ["Toutes"]+strat_avail, key="d_strat")
-            fc4,fc5 = st.columns(2)
-            with fc4: f_date_from = st.date_input("Depuis",   value=d_min, key="d_from")
-            with fc5: f_date_to   = st.date_input("Jusqu'au", value=d_max, key="d_to")
+        with st.container(horizontal=True, key="dash_filters", gap="small"):
+            f_sym   = check_filter("Actifs", syms_avail, "dsel_sym", "dfs", icon=":material/candlestick_chart:")
+            f_mood  = check_filter("Émotions", moods_avail, "dsel_mood", "dfm", all_label="Toutes", icon=":material/mood:")
+            f_strat = check_filter("Stratégies", strat_avail, "dsel_strat", "dfst", all_label="Toutes", icon=":material/strategy:")
+            f_date_from, f_date_to = period_filter("Période", d_min, d_max, "dper")
 
     df = get_df()                       # trades des comptes sélectionnés dans le filtre du haut
     _df_scope = df.copy()
@@ -2458,9 +2635,9 @@ if st.session_state.page == "dashboard":
                 df["mood_src"] = df["id"].map(_ms).fillna("déclarée")
         except Exception:
             pass
-        if f_sym   != "Tous":   df = df[df["symbol"]   == f_sym]
-        if f_mood  != "Toutes": df = df[df["mood"]     == f_mood]
-        if f_strat != "Toutes": df = df[df["strategy"] == f_strat]
+        if f_sym:   df = df[df["symbol"].isin(f_sym)]
+        if f_mood:  df = df[df["mood"].isin(f_mood)]
+        if f_strat: df = df[df["strategy"].isin(f_strat)]
         df = df[df["date"].between(str(f_date_from), str(f_date_to))]
 
     if df.empty:
@@ -2569,9 +2746,8 @@ if st.session_state.page == "dashboard":
                         if subtitle else "")
             st.markdown(
                 f'<div style="margin:8px 0 6px;display:flex;align-items:center;gap:8px">'
-                f'<span style="width:3px;height:15px;background:{accent};border-radius:2px;'
-                f'display:inline-block"></span>'
-                f'<span style="font-size:14px;font-weight:700;color:{_theme["text"]}">{title}</span>'
+                f'<span style="font-size:13.5px;font-weight:700;color:{_theme["text"]};background:{accent}14;'
+                f'border-left:3px solid {accent};border-radius:3px 999px 999px 3px;padding:3px 14px 3px 10px">{title}</span>'
                 f'{sub_html}</div>',
                 unsafe_allow_html=True)
 
@@ -2678,7 +2854,7 @@ if st.session_state.page == "dashboard":
             lab = {"critique": "critique", "attention": "attention", "info": "à savoir", "positif": "point fort"}[r["level"]]
             st.markdown(
                 f"<div style='background:{T['card']};border:1px solid {T['border']};border-left:4px solid {c};"
-                f"border-radius:10px;padding:9px 13px;margin-bottom:8px'>"
+                f"border-radius:4px 20px 20px 4px;padding:9px 13px;margin-bottom:8px'>"
                 f"<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>"
                 f"<span style='font-size:9.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;"
                 f"color:{c};background:{c}16;border-radius:5px;padding:1px 6px'>{lab}</span>"
@@ -3735,22 +3911,21 @@ elif st.session_state.page == "journal":
         # ══════════════════════════════════════════════════════════════════════
         st.markdown("---")
 
-        fa1, fa2, fa3, fa4, fa5 = st.columns(5)
         dates_avail = sorted(df_all["date"].dropna().unique().tolist())
         d_min = date.fromisoformat(dates_avail[0])  if dates_avail else date(2024,1,1)
         d_max = date.fromisoformat(dates_avail[-1]) if dates_avail else date.today()
-
-        with fa1: f_from = st.date_input("Du",        value=d_min, key="j_from")
-        with fa2: f_to   = st.date_input("Au",        value=d_max, key="j_to")
-        with fa3: f_sym  = st.selectbox("Actif",      ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="j_sym")
-        with fa4: f_mode = st.multiselect("Comptes",     allowed_accounts(), default=[], placeholder="Tous", key="j_mode")
-        with fa5: f_dir  = st.selectbox("Direction",  ["Tous","LONG","SHORT"], key="j_dir")
+        with st.container(horizontal=True, key="jr_filters", gap="small"):
+            f_from, f_to = period_filter("Période", d_min, d_max, "jper")
+            f_sym  = check_filter("Actifs", sorted(df_all["symbol"].unique().tolist()), "jsel_sym", "jfs",
+                                  icon=":material/candlestick_chart:")
+            f_mode = check_filter("Comptes", allowed_accounts(), "jsel_mode", "jfm", icon=":material/account_balance_wallet:")
+            f_dir  = check_filter("Direction", ["LONG", "SHORT"], "jsel_dir", "jfd", icon=":material/swap_vert:")
 
         df = df_all.copy()
         df = df[df["date"].between(str(f_from), str(f_to))]
-        if f_sym  != "Tous": df = df[df["symbol"]    == f_sym]
+        if f_sym:  df = df[df["symbol"].isin(f_sym)]
         if f_mode: df = df[df["trade_mode"].isin(f_mode)]
-        if f_dir  != "Tous": df = df[df["direction"] == f_dir]
+        if f_dir:  df = df[df["direction"].isin(f_dir)]
         df = df.sort_values("date", ascending=False)
 
         # Résumé
@@ -3977,7 +4152,8 @@ elif st.session_state.page == "import":
     # ── Mode du compte ────────────────────────────────────────────────────────
     ic1, ic2 = st.columns([2, 3])
     with ic1:
-        imp_mode = st.radio("Type de compte", TRADE_MODES, horizontal=True)
+        imp_mode = st.radio("Type de compte", TRADE_MODES, horizontal=True, key="imp_mode",
+                            index=TRADE_MODES.index(DEFAULT_ACCOUNT) if DEFAULT_ACCOUNT in TRADE_MODES else 0)
     with ic2:
         _ic = account_color(imp_mode)
         st.markdown(
@@ -4589,20 +4765,21 @@ elif st.session_state.page == "analyse":
         return 0
 
     # ── Contrôles ────────────────────────────────────────────────────────────
-    cc1, cc2, cc3 = st.columns([3, 1.2, 1.4])
-    with cc1:
-        sel_assets = st.multiselect(
-            "Actifs (choix multiple)", list(ASSETS.keys()),
-            default=["US100 (Nasdaq)", "DXY (Dollar US)", "XAUUSD (Or)"],
-            key="sc_assets")
-    with cc2:
-        _scope_map = {"3 semaines": "all", "Semaine passée": "lastweek",
-                      "En cours": "thisweek", "À venir": "nextweek"}
-        scope_lbl = st.selectbox("Période", list(_scope_map.keys()), index=0, key="sc_scope")
-    with cc3:
-        imp_sel = st.multiselect("Impact", ["High", "Medium", "Low"], default=["High", "Medium"],
-            format_func=lambda x: {"High": "Fort", "Medium": "Moyen", "Low": "Faible"}[x],
-            key="sc_imp")
+    if "nsel_assets" not in st.session_state:
+        st.session_state.nsel_assets = ["US100 (Nasdaq)", "DXY (Dollar US)", "XAUUSD (Or)"]
+    if "nsel_imp" not in st.session_state:
+        st.session_state.nsel_imp = ["High", "Medium"]
+    _scope_map = {"3 semaines": "all", "Semaine passée": "lastweek",
+                  "En cours": "thisweek", "À venir": "nextweek"}
+    with st.container(horizontal=True, key="news_filters", gap="small"):
+        sel_assets = check_filter("Actifs", list(ASSETS.keys()), "nsel_assets", "nfa", all_label="aucun",
+                                  fmt=lambda a: a.split(" (")[0], icon=":material/candlestick_chart:")
+        with st.popover(f"Période · {st.session_state.get('sc_scope', '3 semaines')}", icon=":material/date_range:",
+                        use_container_width=True):
+            scope_lbl = st.radio("Période", list(_scope_map.keys()), key="sc_scope", label_visibility="collapsed")
+        imp_sel = check_filter("Impact", ["High", "Medium", "Low"], "nsel_imp", "nfi", all_label="tous",
+                               fmt=lambda x: {"High": "Fort", "Medium": "Moyen", "Low": "Faible"}[x],
+                               icon=":material/priority_high:")
 
     if not sel_assets:
         st.info("Sélectionnez au moins un actif.")
@@ -4772,7 +4949,7 @@ elif st.session_state.page == "analyse":
 
         st.markdown(
             f"<div style='background:{_ta['card']};border:1px solid {_ta['accent'] if focus else _ta['border']};"
-            f"border-left:4px solid {edge};border-radius:12px;padding:12px 16px;margin-bottom:10px;"
+            f"border-left:4px solid {edge};border-radius:6px 24px 6px 24px;padding:12px 16px;margin-bottom:10px;"
             f"{'box-shadow:0 0 0 2px ' + _ta['accent'] + '55,0 6px 22px ' + _ta['accent'] + '33' if focus else ''}'>"
             # ligne du haut
             f"<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px'>"
@@ -4810,6 +4987,28 @@ elif st.session_state.page == "analyse":
                  "Réessayez plus tard.")
         st.stop()
     _has_actual_src = "sans chiffre publié" not in _src
+    # Fraîcheur + rafraîchissement automatique autour des annonces
+    import time as _tmn
+    _sk = _scope_map[scope_lbl]
+    _ts = st.session_state.get(f"_cal_ts_{_sk}")
+    _hot = st.session_state.get(f"_cal_hot_{_sk}", 0) > _tmn.time()
+    _age = int((_tmn.time() - _ts) // 60) if _ts else None
+    _fr1, _fr2 = st.columns([5, 1.2], vertical_alignment="center")
+    with _fr1:
+        st.caption((f"Données mises à jour il y a {_age} min" if _age else "Données à jour")
+                   + (" · annonce en cours : actualisation automatique chaque minute jusqu'à la publication du chiffre"
+                      if _hot else " · actualisation toutes les 30 min, chaque minute autour d'une annonce"))
+    with _fr2:
+        if st.button("Actualiser", key="cal_refresh", icon=":material/refresh:", use_container_width=True):
+            _fetch_calendar_cached.clear(); st.rerun()
+    if _hot:
+        import streamlit.components.v1 as _cmp
+        st.markdown("<style>.st-key-cal_auto{position:fixed!important;left:-10000px;top:0;width:1px;height:1px;"
+                    "overflow:hidden}</style>", unsafe_allow_html=True)
+        with st.container(key="cal_auto"):
+            st.button("auto", key="cal_auto_btn")
+            _cmp.html("<script>setTimeout(()=>{try{const b=window.parent.document.querySelector("
+                      "'.st-key-cal_auto button');if(b)b.click();}catch(e){}},60000);</script>", height=0)
     if _has_actual_src:
         st.caption(f"✅ Source : {_src} — chiffres publiés (Actual) disponibles.")
     else:
