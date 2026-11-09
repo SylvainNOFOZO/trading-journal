@@ -154,7 +154,7 @@ def _is_light(t):
 # Designs clairs d'abord (fond non noir par défaut), puis les sombres, au choix
 THEME_NAMES = ([n for n, t in THEMES.items() if _is_light(t)]
                + [n for n, t in THEMES.items() if not _is_light(t)])
-DEFAULT_THEME = "Violet Lavande"  # design par défaut du dashboard
+DEFAULT_THEME = "Émeraude Sombre"  # design par défaut du dashboard
 LOGIN_THEME   = "Navy Corporate"   # design unique de la page de connexion
 DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
 DEFAULT_BG      = "Bitcoin"            # fond d'écran par défaut
@@ -2693,7 +2693,7 @@ def macro_category(title):
 # ── Accès aux sources (non mis en cache : appelés par les paquets mis en cache) ──
 def _fred_raw(sid, start="2012-01-01"):
     r = requests.get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}&cosd={start}",
-                     headers=_UA, timeout=20)
+                     headers=_UA, timeout=12)
     r.raise_for_status()
     d = pd.read_csv(io.StringIO(r.text))
     d = d.iloc[:, :2]; d.columns = ["date", "value"]
@@ -2780,24 +2780,67 @@ def macro_bis_rates(start):
     return _bis_policy_raw(start)
 
 
-def macro_load():
-    """Charge toutes les sources. Renvoie {fred, yahoo, bis, missing: {source: [ids]}}."""
-    out = {"fred": {}, "yahoo": {}, "bis": {}, "missing": {}}
+MX_TTL = {"fred": 6 * 3600, "yahoo": 30 * 60, "bis": 12 * 3600, "rates": 6 * 3600}
+MX_RETRY = 10 * 60          # une source en échec n'est retentée qu'après 10 min
+MX_SRC_LABEL = {"fred": "FRED", "yahoo": "Yahoo Finance", "bis": "BIS (taux directeurs)", "rates": "Décisions de taux"}
+
+
+@st.cache_resource(show_spinner=False)
+def _mx_store():
+    """Mémoire partagée par toutes les sessions du serveur : les données ne sont chargées qu'une fois."""
+    import threading
+    return {"fred": {}, "yahoo": {}, "bis": {}, "rates": [], "ts": {}, "fail_ts": {}, "missing": {},
+            "running": False, "lock": threading.Lock(), "started": 0.0}
+
+
+def _mx_worker(store, jobs):
+    import time as _t
     try:
-        out["fred"], ko = macro_fred_bundle(tuple(MX_FRED))
-        if ko: out["missing"]["FRED"] = ko
-    except Exception:
-        out["missing"]["FRED"] = ["toutes les séries"]
-    try:
-        out["yahoo"], ko = macro_yahoo_bundle(tuple(MX_YAHOO))
-        if ko: out["missing"]["Yahoo Finance"] = ko
-    except Exception:
-        out["missing"]["Yahoo Finance"] = ["tous les cours"]
-    try:
-        out["bis"] = macro_bis_rates((date.today() - timedelta(days=800)).isoformat())
-    except Exception:
-        out["missing"]["BIS (taux directeurs)"] = ["toutes les banques centrales"]
-    return out
+        for kind in jobs:
+            try:
+                if kind == "fred":
+                    ok, ko = _parallel(_fred_raw, list(MX_FRED), workers=12)
+                elif kind == "yahoo":
+                    ok, ko = _parallel(_yahoo_raw, list(MX_YAHOO), workers=12)
+                elif kind == "bis":
+                    ok, ko = _bis_policy_raw((date.today() - timedelta(days=800)).isoformat()), []
+                else:
+                    evs, _src = _fetch_calendar_raw("rates")
+                    ok = [e for e in (evs or []) if any(k in str(e.get("title", "")).lower() for k in _MX_RATE_RX)]
+                    ko = []
+                if ok:
+                    if kind == "rates":
+                        store["rates"] = ok
+                    else:
+                        merged = dict(store[kind]); merged.update(ok); store[kind] = merged
+                    store["ts"][kind] = _t.time()
+                    store["missing"][kind] = list(ko)
+                else:
+                    store["fail_ts"][kind] = _t.time()
+                    store["missing"][kind] = ["tout"]
+            except Exception:
+                store["fail_ts"][kind] = _t.time()
+                store["missing"][kind] = ["tout"]
+    finally:
+        store["running"] = False
+
+
+def macro_get(force=False):
+    """Données macro disponibles tout de suite ; le rafraîchissement se fait en tâche de fond."""
+    import threading, time as _t
+    store = _mx_store(); now = _t.time()
+    jobs = [k for k, ttl in MX_TTL.items()
+            if force or ((now - store["ts"].get(k, 0) > ttl) and (now - store["fail_ts"].get(k, 0) > MX_RETRY))]
+    with store["lock"]:
+        if store["running"] and now - store["started"] > 300:      # tâche bloquée : on la relance
+            store["running"] = False
+        if jobs and not store["running"]:
+            store["running"] = True; store["started"] = now
+            threading.Thread(target=_mx_worker, args=(store, jobs), daemon=True).start()
+    missing = {MX_SRC_LABEL[k]: v for k, v in store["missing"].items() if v}
+    return {"fred": store["fred"], "yahoo": store["yahoo"], "bis": store["bis"], "rates": store["rates"],
+            "missing": missing, "loading": store["running"],
+            "empty": not (store["fred"] or store["yahoo"] or store["bis"])}
 
 
 # ── Transformations et statistiques ───────────────────────────────────────────
@@ -5301,25 +5344,15 @@ elif st.session_state.page == "analyse":
             return -es
         return 0
 
-    # ── Contrôles ────────────────────────────────────────────────────────────
+    # Filtres de l'onglet News (lus ici pour les fonctions de carte ; affichés dans l'onglet)
     if "nsel_assets" not in st.session_state:
         st.session_state.nsel_assets = ["US100 (Nasdaq)", "DXY (Dollar US)", "XAUUSD (Or)"]
     if "nsel_imp" not in st.session_state:
         st.session_state.nsel_imp = ["High", "Medium"]
     _scope_map = {"3 semaines": "all", "Semaine passée": "lastweek",
                   "En cours": "thisweek", "À venir": "nextweek"}
-    with st.container(horizontal=True, key="news_filters", gap="small"):
-        sel_assets = check_filter("Actifs", list(ASSETS.keys()), "nsel_assets", "nfa", all_label="aucun",
-                                  fmt=lambda a: a.split(" (")[0], icon=":material/candlestick_chart:")
-        with st.popover(f"Période · {st.session_state.get('sc_scope', '3 semaines')}", icon=":material/date_range:",
-                        use_container_width=True):
-            scope_lbl = st.radio("Période", list(_scope_map.keys()), key="sc_scope", label_visibility="collapsed")
-        imp_sel = check_filter("Impact", ["High", "Medium", "Low"], "nsel_imp", "nfi", all_label="tous",
-                               fmt=lambda x: {"High": "Fort", "Medium": "Moyen", "Low": "Faible"}[x],
-                               icon=":material/priority_high:")
-
-    if not sel_assets:
-        sel_assets = ["US100 (Nasdaq)", "DXY (Dollar US)", "XAUUSD (Or)"]
+    sel_assets = list(st.session_state.nsel_assets) or ["US100 (Nasdaq)", "DXY (Dollar US)", "XAUUSD (Or)"]
+    imp_sel = list(st.session_state.nsel_imp)
 
     _imp_badge = {"High": ("Fort", _ta["loss"]), "Medium": ("Moyen", _ta["orange"]),
                   "Low": ("Faible", _ta["muted"])}
@@ -5517,56 +5550,6 @@ elif st.session_state.page == "analyse":
             f"</div>",
             unsafe_allow_html=True)
 
-    events, _src = _fetch_calendar(_scope_map[scope_lbl])
-    if not events:
-        events = []
-        st.warning("Calendrier économique indisponible pour le moment (sources injoignables). "
-                   "Les autres onglets restent alimentés par FRED, BIS et Yahoo Finance.")
-    _has_actual_src = "sans chiffre publié" not in _src
-    # Fraîcheur + rafraîchissement automatique autour des annonces
-    import time as _tmn
-    _sk = _scope_map[scope_lbl]
-    _ts = st.session_state.get(f"_cal_ts_{_sk}")
-    _hot = st.session_state.get(f"_cal_hot_{_sk}", 0) > _tmn.time()
-    _age = int((_tmn.time() - _ts) // 60) if _ts else None
-    _fr1, _fr2 = st.columns([5, 1.2], vertical_alignment="center")
-    with _fr1:
-        st.caption((f"Données mises à jour il y a {_age} min" if _age else "Données à jour")
-                   + (" · annonce en cours : actualisation automatique chaque minute jusqu'à la publication du chiffre"
-                      if _hot else " · actualisation toutes les 30 min, chaque minute autour d'une annonce"))
-    with _fr2:
-        if st.button("Actualiser", key="cal_refresh", icon=":material/refresh:", use_container_width=True):
-            _fetch_calendar_cached.clear(); st.rerun()
-    if _hot:
-        import streamlit.components.v1 as _cmp
-        st.markdown("<style>.st-key-cal_auto{position:fixed!important;left:-10000px;top:0;width:1px;height:1px;"
-                    "overflow:hidden}</style>", unsafe_allow_html=True)
-        with st.container(key="cal_auto"):
-            st.button("auto", key="cal_auto_btn")
-            _cmp.html("<script>setTimeout(()=>{try{const b=window.parent.document.querySelector("
-                      "'.st-key-cal_auto button');if(b)b.click();}catch(e){}},60000);</script>", height=0)
-    if _has_actual_src:
-        st.caption(f"✅ Source : {_src} — chiffres publiés (Actual) disponibles.")
-    else:
-        st.warning(f"⚠️ Sources avec Actual (TradingView / ForexFactory) injoignables depuis "
-                   f"le serveur. Repli sur {_src} : seules les prévisions sont affichées.")
-
-    df = pd.DataFrame(events)
-    ren = {}
-    for col in df.columns:
-        cl = str(col).strip().lower()
-        if cl in ("country", "currency"): ren[col] = "country"
-        elif cl in ("impact", "importance"): ren[col] = "impact"
-        elif cl in ("title", "event", "name"): ren[col] = "title"
-        elif cl == "actual": ren[col] = "actual"
-        elif cl in ("forecast", "estimate"): ren[col] = "forecast"
-        elif cl in ("previous", "prior"): ren[col] = "previous"
-        elif cl in ("date", "datetime"): ren[col] = "date"
-    df = df.rename(columns=ren)
-    for col in ("country", "impact", "title", "actual", "forecast", "previous", "date"):
-        if col not in df.columns: df[col] = ""
-
-
     # ── Annonce ciblée depuis la sphère du chronomètre ───────────────────────
     _fe = st.session_state.get("focus_event")
     if _fe:
@@ -5586,7 +5569,7 @@ elif st.session_state.page == "analyse":
                         if _r[_k] is None: _r[_k] = ""
                     return _r
             return None
-        _fr = _find_focus(events) or _find_focus(_fetch_calendar("all")[0])
+        _fr = _find_focus(_fetch_calendar("all")[0])
         _fh1, _fh2 = st.columns([6, 1])
         with _fh1:
             st.markdown(f"<div style='font-size:11px;letter-spacing:1px;text-transform:uppercase;font-weight:800;"
@@ -5600,6 +5583,71 @@ elif st.session_state.page == "analyse":
         else:
             _render_card(_build_entry(_fr), focus=True)
         st.markdown("---")
+
+    @st.fragment
+    def _news_fragment():
+        """Onglet News : un filtre ne relance que cet onglet, pas le chargement des données macro."""
+        global sel_assets, imp_sel, _src
+        with st.container(horizontal=True, key="news_filters", gap="small"):
+            sel_assets = check_filter("Actifs", list(ASSETS.keys()), "nsel_assets", "nfa", all_label="aucun",
+                                      fmt=lambda a: a.split(" (")[0], icon=":material/candlestick_chart:")
+            with st.popover(f"Période · {st.session_state.get('sc_scope', '3 semaines')}", icon=":material/date_range:",
+                            use_container_width=True):
+                scope_lbl = st.radio("Période", list(_scope_map.keys()), key="sc_scope", label_visibility="collapsed")
+            imp_sel = check_filter("Impact", ["High", "Medium", "Low"], "nsel_imp", "nfi", all_label="tous",
+                                   fmt=lambda x: {"High": "Fort", "Medium": "Moyen", "Low": "Faible"}[x],
+                                   icon=":material/priority_high:")
+        if not sel_assets:
+            sel_assets = ["US100 (Nasdaq)", "DXY (Dollar US)", "XAUUSD (Or)"]
+        events, _src = _fetch_calendar(_scope_map[scope_lbl])
+        if not events:
+            events = []
+            st.warning("Calendrier économique indisponible pour le moment (sources injoignables). "
+                       "Les autres onglets restent alimentés par FRED, BIS et Yahoo Finance.")
+        _has_actual_src = "sans chiffre publié" not in _src
+        # Fraîcheur + rafraîchissement automatique autour des annonces
+        import time as _tmn
+        _sk = _scope_map[scope_lbl]
+        _ts = st.session_state.get(f"_cal_ts_{_sk}")
+        _hot = st.session_state.get(f"_cal_hot_{_sk}", 0) > _tmn.time()
+        _age = int((_tmn.time() - _ts) // 60) if _ts else None
+        _fr1, _fr2 = st.columns([5, 1.2], vertical_alignment="center")
+        with _fr1:
+            st.caption((f"Données mises à jour il y a {_age} min" if _age else "Données à jour")
+                       + (" · annonce en cours : actualisation automatique chaque minute jusqu'à la publication du chiffre"
+                          if _hot else " · actualisation toutes les 30 min, chaque minute autour d'une annonce"))
+        with _fr2:
+            if st.button("Actualiser", key="cal_refresh", icon=":material/refresh:", use_container_width=True):
+                _fetch_calendar_cached.clear(); st.rerun(scope="fragment")
+        if _hot:
+            import streamlit.components.v1 as _cmp
+            st.markdown("<style>.st-key-cal_auto{position:fixed!important;left:-10000px;top:0;width:1px;height:1px;"
+                        "overflow:hidden}</style>", unsafe_allow_html=True)
+            with st.container(key="cal_auto"):
+                st.button("auto", key="cal_auto_btn")
+                _cmp.html("<script>setTimeout(()=>{try{const b=window.parent.document.querySelector("
+                          "'.st-key-cal_auto button');if(b)b.click();}catch(e){}},60000);</script>", height=0)
+        if _has_actual_src:
+            st.caption(f"✅ Source : {_src} — chiffres publiés (Actual) disponibles.")
+        else:
+            st.warning(f"⚠️ Sources avec Actual (TradingView / ForexFactory) injoignables depuis "
+                       f"le serveur. Repli sur {_src} : seules les prévisions sont affichées.")
+
+        df = pd.DataFrame(events)
+        ren = {}
+        for col in df.columns:
+            cl = str(col).strip().lower()
+            if cl in ("country", "currency"): ren[col] = "country"
+            elif cl in ("impact", "importance"): ren[col] = "impact"
+            elif cl in ("title", "event", "name"): ren[col] = "title"
+            elif cl == "actual": ren[col] = "actual"
+            elif cl in ("forecast", "estimate"): ren[col] = "forecast"
+            elif cl in ("previous", "prior"): ren[col] = "previous"
+            elif cl in ("date", "datetime"): ren[col] = "date"
+        df = df.rename(columns=ren)
+        for col in ("country", "impact", "title", "actual", "forecast", "previous", "date"):
+            if col not in df.columns: df[col] = ""
+        _calendar_tab(df)
 
     def _calendar_tab(df):
         """Fil des publications : consensus vs résultat et impact par actif."""
@@ -5712,15 +5760,21 @@ elif st.session_state.page == "analyse":
     # TABLEAU DE BORD MACRO : données, biais, puis zones
     # ══════════════════════════════════════════════════════════════════════════
     _cs_m = get_chart_style()
-    with st.spinner("Chargement des données macro (FRED, BIS, marchés)…"):
-        _mx = macro_load()
+    _mx = macro_get()
+    if _mx["loading"]:
+        @st.fragment(run_every=4)
+        def _mx_wait():
+            if not _mx_store()["running"]:
+                st.rerun(scope="app")
+            st.caption("⏳ Données macro en cours de chargement en arrière-plan (FRED, BIS, Yahoo Finance). "
+                       "Tu peux utiliser la page, elle se complète toute seule.")
+        _mx_wait()
     try:
         _ev3w = mx_events_frame(_fetch_calendar("all")[0])
     except Exception:
         _ev3w = pd.DataFrame()
     try:
-        _evr = mx_events_frame([e for e in _fetch_calendar("rates")[0]
-                                if any(k in str(e.get("title", "")).lower() for k in _MX_RATE_RX)])
+        _evr = mx_events_frame(_mx["rates"])
     except Exception:
         _evr = pd.DataFrame()
     _ev_all = pd.concat([x for x in (_ev3w, _evr) if not x.empty]).drop_duplicates(
@@ -5798,11 +5852,10 @@ elif st.session_state.page == "analyse":
         + _tile("Spread HY - IG", _hyig, "pb", 0, False, how="bp",
                 shape="3px 20px 3px 20px")
         + "</div>", unsafe_allow_html=True)
-    if _mx["missing"]:
+    if _mx["missing"] and not _mx["loading"]:
         st.caption("Données partielles · " + " · ".join(
-            f"{k} : {len(v) if v and v[0] not in ('toutes les séries', 'tous les cours', 'toutes les banques centrales') else 'indisponible'}"
-            + (" série(s) manquante(s)" if v and v[0] not in ('toutes les séries', 'tous les cours', 'toutes les banques centrales') else "")
-            for k, v in _mx["missing"].items()))
+            (f"{k} : indisponible" if v == ["tout"] else f"{k} : {len(v)} série(s) manquante(s)")
+            for k, v in _mx["missing"].items()) + " · nouvel essai automatique dans 10 min")
 
     (tab_syn, tab_cal, tab_mon, tab_inf, tab_gro, tab_liq, tab_met) = st.tabs([
         "Synthèse & biais", "Calendrier & surprises", "Politique monétaire", "Inflation & Emploi",
@@ -6034,7 +6087,7 @@ elif st.session_state.page == "analyse":
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="mx_surp")
         else:
             st.caption("Pas encore de publications avec consensus sur 30 jours.")
-        _calendar_tab(df)
+        _news_fragment()
 
     # ── ONGLET 3 : POLITIQUE MONÉTAIRE ────────────────────────────────────────
     with tab_mon:
@@ -6177,6 +6230,15 @@ elif st.session_state.page == "analyse":
 
     # ── ONGLET 7 : MÉTHODE & SOURCES ──────────────────────────────────────────
     with tab_met:
+        _st_ts = [v for v in _mx_store()["ts"].values()]
+        _m1, _m2 = st.columns([4, 1.3], vertical_alignment="center")
+        with _m1:
+            st.caption("Dernier chargement des données macro : " + (
+                datetime.fromtimestamp(max(_st_ts)).strftime("%d/%m %H:%M") if _st_ts else "en cours")
+                + " · FRED toutes les 6 h, cours toutes les 30 min, taux directeurs toutes les 12 h.")
+        with _m2:
+            if st.button("Recharger les données", icon=":material/refresh:", key="mx_force", use_container_width=True):
+                macro_get(force=True); st.rerun()
         st.markdown(MX_METHOD_MD)
 
 
