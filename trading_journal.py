@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import json, os, base64, requests, io, hashlib, secrets as _secrets
 import calendar as _calmod
 import html as _html
@@ -154,7 +154,7 @@ def _is_light(t):
 # Designs clairs d'abord (fond non noir par défaut), puis les sombres, au choix
 THEME_NAMES = ([n for n, t in THEMES.items() if _is_light(t)]
                + [n for n, t in THEMES.items() if not _is_light(t)])
-DEFAULT_THEME = "Violet Lavande"  # design par défaut du dashboard
+DEFAULT_THEME = "Émeraude Sombre"  # design par défaut du dashboard
 LOGIN_THEME   = "Navy Corporate"   # design unique de la page de connexion
 DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
 DEFAULT_BG      = "Bitcoin"            # fond d'écran par défaut
@@ -611,8 +611,19 @@ div[data-testid="stExpander"] details summary:hover {{ background:{t['accent']}0
 [data-testid="stCheckbox"] label span:first-child {{ border-radius:6px !important; }}
 [data-testid="stCheckbox"] label[data-checked="true"] span:first-child, [data-testid="stCheckbox"] input:checked + div,
 [data-testid="stCheckbox"] [data-selected="true"] > span:first-child {{ background:{t['accent']} !important; border-color:{t['accent']} !important; }}
-.st-key-dash_filters, .st-key-jr_filters, .st-key-news_filters {{ flex-wrap:wrap; }}
-.st-key-dash_filters > div, .st-key-jr_filters > div, .st-key-news_filters > div {{ flex:1 1 150px; min-width:130px; }}
+/* Fenêtres (export) : aux couleurs du design */
+[data-testid="stDialog"] div:has(> [role="dialog"]), [data-testid="stDialog"] [role="dialog"] div {{ background-color:transparent; }}
+[data-testid="stDialog"] div:has(> [role="dialog"]) {{ background:{t['card']} !important; border:1px solid {t['border']} !important;
+    border-radius:8px 30px 30px 30px !important; }}
+div[role="dialog"] {{ background:transparent !important; color:{t['text']} !important; border:1px solid {t['border']} !important;
+    border-radius:8px 30px 30px 30px !important; }}
+div[role="dialog"] h1, div[role="dialog"] h2, div[role="dialog"] h3, div[role="dialog"] p, div[role="dialog"] label,
+div[role="dialog"] span, div[role="dialog"] [data-testid="stMarkdownContainer"] {{ color:{t['text']}; }}
+div[role="dialog"] [data-testid="stCaptionContainer"] p {{ color:{t['muted']} !important; }}
+div[role="dialog"] input {{ color:{t['text']} !important; }}
+div[role="dialog"] button[aria-label="Close"] svg {{ color:{t['muted']}; fill:{t['muted']}; }}
+.st-key-dash_filters, .st-key-jq_filters, .st-key-ex_filters, .st-key-news_filters {{ flex-wrap:wrap; }}
+.st-key-dash_filters > div, .st-key-jq_filters > div, .st-key-ex_filters > div, .st-key-news_filters > div {{ flex:1 1 150px; min-width:130px; }}
 </style>
 """
 # Comptes par défaut (utilisés au tout premier lancement, puis gérés par l'admin)
@@ -2596,6 +2607,105 @@ def risk_recommendations(rk, min_n=5):
              "Ne déplace jamais un stop pour l'éloigner, et coupe toute position qui dépasse le risque prévu.")
     return R
 
+
+# ── RECHERCHE ET EXPORT DE TRADES ─────────────────────────────────────────────
+def trade_filters(prefix, df_all):
+    """Filtres à cocher communs au journal et à l'export. Renvoie la requête (dict)."""
+    dates_ = sorted(df_all["date"].dropna().astype(str).unique().tolist()) if not df_all.empty else []
+    d_min = date.fromisoformat(dates_[0][:10]) if dates_ else date(2024, 1, 1)
+    d_max = date.fromisoformat(dates_[-1][:10]) if dates_ else date.today()
+    with st.container(horizontal=True, key=f"{prefix}_filters", gap="small"):
+        f_from, f_to = period_filter("Période", d_min, d_max, f"{prefix}per")
+        f_sym = check_filter("Actifs", sorted(df_all["symbol"].dropna().astype(str).unique().tolist()),
+                             f"{prefix}_sym", f"{prefix}fs", icon=":material/candlestick_chart:")
+        f_mode = check_filter("Comptes", allowed_accounts(), f"{prefix}_mode", f"{prefix}fm",
+                              icon=":material/account_balance_wallet:")
+        f_dir = check_filter("Direction", ["LONG", "SHORT"], f"{prefix}_dir", f"{prefix}fd", icon=":material/swap_vert:")
+        f_strat = check_filter("Stratégies", sorted(df_all["strategy"].dropna().astype(str).unique().tolist())
+                               if "strategy" in df_all.columns else [], f"{prefix}_strat", f"{prefix}fst",
+                               all_label="Toutes", icon=":material/strategy:")
+        f_res = check_filter("Résultat", ["Gagnants", "Perdants"], f"{prefix}_res", f"{prefix}fr", icon=":material/balance:")
+    f_txt = st.text_input("Recherche", key=f"{prefix}_txt", label_visibility="collapsed",
+                          placeholder="Recherche libre : notes, stratégie, émotion, identifiant MT5…")
+    return {"from": f_from, "to": f_to, "sym": list(f_sym), "mode": list(f_mode), "dir": list(f_dir),
+            "strat": list(f_strat), "res": list(f_res), "txt": (f_txt or "").strip()}
+
+def apply_trade_filters(df, q):
+    if df.empty or not q:
+        return df
+    d = df
+    if q.get("from"): d = d[d["date"].astype(str) >= str(q["from"])]
+    if q.get("to"):   d = d[d["date"].astype(str) <= str(q["to"])]
+    if q.get("sym"):  d = d[d["symbol"].isin(q["sym"])]
+    if q.get("mode"): d = d[d["trade_mode"].isin(q["mode"])]
+    if q.get("dir"):  d = d[d["direction"].isin(q["dir"])]
+    if q.get("strat") and "strategy" in d.columns: d = d[d["strategy"].isin(q["strat"])]
+    if q.get("res") and len(q["res"]) == 1:
+        d = d[d["pnl"] > 0] if q["res"][0] == "Gagnants" else d[d["pnl"] <= 0]
+    if q.get("txt"):
+        cols = [c for c in ("notes", "strategy", "mood", "mt5_id", "symbol") if c in d.columns]
+        hay = d[cols].astype(str).agg(" ".join, axis=1).str.lower()
+        d = d[hay.str.contains(q["txt"].lower(), regex=False, na=False)]
+    return d
+
+def describe_query(q):
+    if q.get("last"):
+        return f"{q['last']} derniers trades"
+    parts = []
+    if q.get("from") or q.get("to"):
+        f, t = q.get("from"), q.get("to")
+        parts.append(f"du {f:%d/%m/%Y} au {t:%d/%m/%Y}" if f and t and f != t else (f"le {f:%d/%m/%Y}" if f else ""))
+    for k in ("sym", "mode", "dir", "strat", "res"):
+        if q.get(k):
+            parts.append(", ".join(map(str, q[k][:3])) + ("…" if len(q[k]) > 3 else ""))
+    if q.get("txt"):
+        parts.append(f"« {q['txt']} »")
+    return " · ".join(p for p in parts if p) or "tous les trades"
+
+_EXPORT_COLS = [("date", "Date"), ("time", "Heure"), ("close_datetime", "Clôture"), ("symbol", "Actif"),
+                ("direction", "Direction"), ("trade_mode", "Compte"), ("volume", "Volume"), ("entry", "Entrée"),
+                ("exit", "Sortie"), ("sl", "SL"), ("tp", "TP"), ("pnl", "P&L"), ("rr", "R:R"),
+                ("strategy", "Stratégie"), ("mood", "Émotion"), ("exit_reason", "Motif de clôture"),
+                ("mae", "MAE"), ("mfe", "MFE"), ("mt5_id", "ID MT5"), ("notes", "Notes")]
+
+def export_frame(df):
+    cols = [(c, l) for c, l in _EXPORT_COLS if c in df.columns]
+    out = df[[c for c, _ in cols]].rename(columns=dict(cols))
+    return out.sort_values([c for c in ("Date", "Heure") if c in out.columns])
+
+@st.dialog("Exporter des trades", width="large")
+def export_dialog():
+    df_all = get_df("Tous")
+    st.caption("Coche les filtres : rien de coché = tout est pris. Le fichier ne contient que les trades retenus.")
+    q = trade_filters("ex", df_all)
+    d = apply_trade_filters(df_all, q)
+    tot = d["pnl"].sum() if not d.empty else 0.0
+    st.markdown(f"**{len(d)}** trade(s) retenu(s) · P&L {fmt(tot)} · {describe_query(q)}")
+    if d.empty:
+        st.info("Aucun trade pour ces filtres.")
+        return
+    fmt_x = st.radio("Format", ["Excel (.xlsx)", "CSV (Excel FR, séparateur ;)"], horizontal=True, key="ex_fmt")
+    xf = export_frame(d)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    if fmt_x.startswith("Excel"):
+        try:
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                xf.to_excel(w, index=False, sheet_name="Trades")
+                ws = w.sheets["Trades"]
+                for i, col in enumerate(xf.columns, 1):
+                    ws.column_dimensions[ws.cell(1, i).column_letter].width = max(10, min(40, len(str(col)) + 4))
+                ws.freeze_panes = "A2"
+            st.download_button("Télécharger le fichier Excel", buf.getvalue(), file_name=f"trades_{stamp}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               type="primary", icon=":material/download:", use_container_width=True)
+            return
+        except Exception:
+            st.warning("Excel indisponible sur ce serveur (module openpyxl absent) : export CSV proposé.")
+    csv = xf.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
+    st.download_button("Télécharger le fichier CSV", csv, file_name=f"trades_{stamp}.csv", mime="text/csv",
+                       type="primary", icon=":material/download:", use_container_width=True)
+
 if st.session_state.page == "dashboard":
     _tdb = get_theme()
     df_all_f    = get_df("Tous")
@@ -3668,319 +3778,213 @@ if st.session_state.page == "dashboard":
 
 
 elif st.session_state.page == "journal":
-    st.markdown("# Journal des Trades")
-    mode_banner()
-
+    _tj = get_theme()
     df_all = get_df("Tous")
+    _n_all = len(df_all)
+
+    _jh1, _jh2 = st.columns([4, 1.2], vertical_alignment="center")
+    with _jh1:
+        st.markdown(
+            f"<div style='display:flex;align-items:baseline;gap:12px'>"
+            f"<span style='font-size:22px;font-weight:800;color:{_tj['text']}'>Journal des Trades</span>"
+            f"<span style='font-size:12px;color:{_tj['muted']}'>{_n_all:,} trades enregistrés · comptes autorisés</span></div>"
+            .replace(",", " "), unsafe_allow_html=True)
+    with _jh2:
+        if st.button("Exporter", icon=":material/download:", key="jr_export_open", use_container_width=True,
+                     disabled=df_all.empty):
+            export_dialog()
 
     if df_all.empty:
         st.info("Aucun trade. Ajoutez-en un avec **Nouveau Trade** ou importez depuis MT5.")
-    else:
-        # ══════════════════════════════════════════════════════════════════════
-        # ACTIONS EN HAUT — modifier / supprimer (ADMIN uniquement)
-        # ══════════════════════════════════════════════════════════════════════
-        if is_admin():
-          with st.expander("Modifier ou supprimer des trades", expanded=True):
-            tab1, tab2 = st.tabs(["  Un trade", "  Plusieurs trades"])
+        st.stop()
 
-            # ── Onglet : UN TRADE ─────────────────────────────────────────────
+    # ══ REQUÊTE : rien n'est chargé tant qu'aucune recherche n'est lancée ═════════
+    _q_live = trade_filters("jq", df_all)
+    _b = st.columns([1.3, 1, 1, 1, 2.2])
+    with _b[0]:
+        if st.button("Rechercher", type="primary", icon=":material/search:", key="jq_go", use_container_width=True):
+            st.session_state.jq = dict(_q_live); st.session_state.jq_page = 0
+    _today = date.today()
+    _quick = [("Aujourd'hui", {"from": _today, "to": _today}),
+              ("7 derniers jours", {"from": _today - timedelta(days=6), "to": _today}),
+              ("50 derniers", {"last": 50})]
+    for _i, (_lbl, _qq) in enumerate(_quick):
+        with _b[_i + 1]:
+            if st.button(_lbl, key=f"jq_quick_{_i}", use_container_width=True):
+                st.session_state.jq = _qq; st.session_state.jq_page = 0
+    with _b[4]:
+        if st.session_state.get("jq") is not None:
+            if st.button("Effacer la recherche", icon=":material/close:", key="jq_clear", use_container_width=True):
+                st.session_state.jq = None; st.rerun()
+
+    _q = st.session_state.get("jq")
+    if _q is None:
+        st.markdown(
+            f"<div style='margin-top:14px;padding:18px 20px;border:1px dashed {_tj['border']};"
+            f"border-radius:6px 22px 22px 22px;color:{_tj['muted']};font-size:13px'>"
+            f"Choisis des filtres puis <b style='color:{_tj['accent']}'>Rechercher</b>, ou utilise un raccourci. "
+            f"Les trades ne sont affichés qu'à la demande pour que la page reste rapide, même avec des milliers de trades.</div>",
+            unsafe_allow_html=True)
+        st.stop()
+
+    df = apply_trade_filters(df_all, _q).sort_values(["date", "time"] if "time" in df_all.columns else "date",
+                                                     ascending=False)
+    if _q.get("last"):
+        df = df.head(int(_q["last"]))
+
+    if df.empty:
+        st.info("Aucun trade ne correspond à cette recherche.")
+        st.stop()
+
+    _tot = df["pnl"].sum(); _wr = (df["pnl"] > 0).mean() * 100
+    _cf = _tj["win"] if _tot >= 0 else _tj["loss"]
+    st.markdown(
+        f"<div style='display:flex;gap:22px;align-items:center;flex-wrap:wrap;padding:8px 16px;margin:10px 0;"
+        f"background:{_tj['card']};border:1px solid {_tj['border']};border-radius:999px;font-size:13px;color:{_tj['muted']}'>"
+        f"<span><b style='color:{_tj['text']}'>{len(df)}</b> trade(s) trouvés</span>"
+        f"<span>P&L : <b style='color:{_cf}'>{fmt(_tot)}</b></span>"
+        f"<span>Win rate : <b style='color:{_tj['text']}'>{_wr:.0f}%</b></span>"
+        f"<span style='margin-left:auto'>{describe_query(_q)}</span></div>", unsafe_allow_html=True)
+
+    # ── Pagination ────────────────────────────────────────────────────────────
+    _psz = int(st.session_state.get("jq_psz", 50))
+    _npg = max(1, -(-len(df) // _psz))
+    _pg = min(int(st.session_state.get("jq_page", 0)), _npg - 1)
+    df_page = df.iloc[_pg * _psz:(_pg + 1) * _psz]
+
+    rows_html = ""
+    for _, t in df_page.iterrows():
+        c = _tj["win"] if t["pnl"] >= 0 else _tj["loss"]
+        dc = "b-win" if t["direction"] == "LONG" else "b-loss"
+        rr_v = t.get("rr")
+        rr_ok = rr_v is not None and not (isinstance(rr_v, float) and pd.isna(rr_v))
+        rr_c = _tj["win"] if (rr_v or 0) >= 2 else _tj["orange"] if (rr_v or 0) >= 1 else _tj["loss"]
+        rows_html += f"""<tr>
+            <td style="color:var(--tj-muted);font-family:monospace;white-space:nowrap">{t["date"]} {str(t.get("time") or "")[:5]}</td>
+            <td>{badge(t["symbol"],"b-sym")}</td>
+            <td>{badge(t["direction"],dc)}</td>
+            <td>{mode_badge(t.get("trade_mode","Réel Indépendant"))}</td>
+            <td style="font-family:monospace">{t.get("entry","—")}</td>
+            <td style="font-family:monospace">{t.get("exit","—")}</td>
+            <td style="font-family:monospace;font-weight:800;color:{c};white-space:nowrap">{fmt(t["pnl"])}</td>
+            <td style="font-family:monospace;color:{rr_c}">{rr_v if rr_ok and rr_v else "—"}</td>
+            <td>{badge(t.get("strategy",""),"b-str")}</td>
+            <td style="text-align:center">{mood_html(t.get("mood",""))}</td>
+            <td style="color:var(--tj-muted);font-size:12px;max-width:160px">{_html.escape(str(t.get("notes","") or "")[:45])}</td>
+        </tr>"""
+    st.markdown(
+        f"""<div style="overflow-x:auto"><table class="tj-table">
+        <thead><tr>
+            <th>Date</th><th>Actif</th><th>Dir.</th><th>Mode</th>
+            <th>Entrée</th><th>Sortie</th><th>P&L $</th><th>R:R</th>
+            <th>Stratégie</th><th>Mood</th><th>Notes</th>
+        </tr></thead><tbody>{rows_html}</tbody></table></div>""",
+        unsafe_allow_html=True)
+
+    _p = st.columns([1, 1, 2.5, 1.3], vertical_alignment="center")
+    with _p[0]:
+        if st.button("Précédent", icon=":material/chevron_left:", key="jq_prev", disabled=_pg == 0, use_container_width=True):
+            st.session_state.jq_page = _pg - 1; st.rerun()
+    with _p[1]:
+        if st.button("Suivant", icon=":material/chevron_right:", key="jq_next", disabled=_pg >= _npg - 1, use_container_width=True):
+            st.session_state.jq_page = _pg + 1; st.rerun()
+    with _p[2]:
+        st.caption(f"Page {_pg + 1} / {_npg} · trades {_pg * _psz + 1} à {min(len(df), (_pg + 1) * _psz)} sur {len(df)}")
+    with _p[3]:
+        _ns = st.selectbox("Par page", [25, 50, 100], index=[25, 50, 100].index(_psz), key="jq_psz_sel",
+                           label_visibility="collapsed", format_func=lambda n: f"{n} par page")
+        if _ns != _psz:
+            st.session_state.jq_psz = _ns; st.session_state.jq_page = 0; st.rerun()
+
+    # ══ MODIFIER / SUPPRIMER (admin) : uniquement sur les résultats de la recherche ═══
+    if is_admin():
+        with st.expander(f"Modifier ou supprimer · {len(df)} trade(s) de la recherche"):
+            tab1, tab2 = st.tabs(["Un trade", "Plusieurs trades (page affichée)"])
             with tab1:
-                df_all_s = df_all.sort_values("date", ascending=False)
-                labels_one = [
-                    f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel Indépendant')}  ·  {r['direction']}  ·  {fmt(r['pnl'])}"
-                    for _, r in df_all_s.iterrows()
-                ]
-                ids_one = df_all_s["id"].tolist()
-
-                sel_lbl   = st.selectbox("Sélectionner un trade",
-                                         labels_one, label_visibility="collapsed")
-                sel_id    = ids_one[labels_one.index(sel_lbl)]
-                sel_trade = next((t for t in st.session_state.trades
-                                  if t["id"] == sel_id), None)
-
-                if sel_trade:
-                    pnl_s = sel_trade.get("pnl", 0)
-                    col_s = "#00d4aa" if pnl_s >= 0 else "#ff4d6d"
-                    st.markdown(
-                        f'''<div style="background:var(--tj-bg2);border:1px solid var(--tj-border);
-                            border-radius:10px;padding:10px 16px;margin:6px 0;
-                            display:flex;gap:20px;align-items:center;flex-wrap:wrap">
-                            <span style="color:var(--tj-muted);font-family:monospace">{sel_trade.get("date","")}</span>
-                            <span style="font-weight:700">{sel_trade.get("symbol","")}</span>
-                            <span style="color:#7c6aff">{sel_trade.get("direction","")}</span>
-                            <span style="color:{col_s};font-weight:800;font-family:monospace">{fmt(pnl_s)}</span>
-                            <span style="color:var(--tj-muted);font-size:12px">{sel_trade.get("strategy","")}</span>
-                            <span style="color:var(--tj-muted);font-size:12px">{str(sel_trade.get("notes",""))[:50]}</span>
-                        </div>''', unsafe_allow_html=True)
-
+                _cap = df.head(500)
+                labels_one = [f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel Indépendant')}  ·  "
+                              f"{r['direction']}  ·  {fmt(r['pnl'])}" for _, r in _cap.iterrows()]
+                ids_one = _cap["id"].tolist()
+                if len(df) > 500:
+                    st.caption("500 premiers résultats proposés : affine la recherche pour atteindre les autres.")
+                sel_lbl = st.selectbox("Sélectionner un trade", labels_one, label_visibility="collapsed", key="jq_one")
+                sel_id = ids_one[labels_one.index(sel_lbl)]
+                sel_trade = next((t for t in st.session_state.trades if t["id"] == sel_id), None)
                 ce, cd, _ = st.columns([1, 1, 5])
                 with ce:
-                    if st.button("Modifier", icon=":material/edit:",
-                                 use_container_width=True, key="btn_edit_one"):
-                        st.session_state.edit_id = sel_id
-                        st.session_state.page = "add"
-                        st.rerun()
+                    if st.button("Modifier", icon=":material/edit:", use_container_width=True, key="btn_edit_one"):
+                        st.session_state.edit_id = sel_id; st.session_state.page = "add"; st.rerun()
                 with cd:
-                    if st.button("Supprimer", icon=":material/delete:",
-                                 use_container_width=True, key="btn_del_one"):
+                    if st.button("Supprimer", icon=":material/delete:", use_container_width=True, key="btn_del_one"):
                         st.session_state["confirm_del"] = sel_id
-
-                if st.session_state.get("confirm_del") == sel_id:
-                    st.warning(
-                        f"Confirmer la suppression de **{sel_trade.get('date','')} · "
-                        f"{sel_trade.get('symbol','')} · {fmt(sel_trade.get('pnl',0))}** ?"
-                    )
+                if sel_trade and st.session_state.get("confirm_del") == sel_id:
+                    st.warning(f"Confirmer la suppression de **{sel_trade.get('date','')} · "
+                               f"{sel_trade.get('symbol','')} · {fmt(sel_trade.get('pnl',0))}** ?")
                     cc1, cc2, _ = st.columns([1, 1, 5])
                     with cc1:
-                        if st.button("Oui, supprimer", icon=":material/check:",
-                                     use_container_width=True, key="btn_confirm_del"):
-                            st.session_state.trades = [
-                                t for t in st.session_state.trades if t["id"] != sel_id
-                            ]
+                        if st.button("Oui, supprimer", icon=":material/check:", use_container_width=True, key="btn_confirm_del"):
+                            st.session_state.trades = [t for t in st.session_state.trades if t["id"] != sel_id]
                             ok = cloud_save(st.session_state.trades)
                             st.session_state.pop("confirm_del", None)
-                            st.success("Supprimé." if ok else "Erreur sauvegarde.")
-                            st.rerun()
+                            st.success("Supprimé." if ok else "Erreur sauvegarde."); st.rerun()
                     with cc2:
-                        if st.button("Annuler", icon=":material/close:",
-                                     use_container_width=True, key="btn_cancel_del"):
-                            st.session_state.pop("confirm_del", None)
-                            st.rerun()
+                        if st.button("Annuler", icon=":material/close:", use_container_width=True, key="btn_cancel_del"):
+                            st.session_state.pop("confirm_del", None); st.rerun()
 
-                # ── CAPTURES D'ÉCRAN DU TRADE ─────────────────────────────
-                st.markdown("---")
+                # Captures d'écran du trade sélectionné
                 st.markdown("##### Captures d'écran du setup")
                 _sid = str(sel_id)
                 _shots = st.session_state.trade_screenshots
                 _cur = _shots.get(_sid, [])
-                up = st.file_uploader(
-                    "Ajouter des captures (PNG/JPG)", type=["png", "jpg", "jpeg"],
-                    accept_multiple_files=True, key=f"up_{_sid}",
-                    label_visibility="collapsed")
-                if up:
-                    if st.button("Enregistrer les captures", icon=":material/save:",
-                                 key=f"save_shot_{_sid}", type="primary"):
-                        added = 0
-                        for f in up:
-                            try:
-                                data_uri = compress_image(f.getvalue())
-                                _cur.append({"name": f.name, "data": data_uri,
-                                             "ts": datetime.now().isoformat(timespec="seconds")})
-                                added += 1
-                            except Exception as e:
-                                st.warning(f"Échec {f.name} : {e}")
-                        _shots[_sid] = _cur
-                        st.session_state.trade_screenshots = _shots
-                        ok = screenshots_save(_shots)
-                        st.success(f"{added} capture(s) enregistrée(s)."
-                                   if ok else f"{added} ajoutée(s) en session (sync à vérifier).")
-                        st.rerun()
+                up = st.file_uploader("Ajouter des captures (PNG/JPG)", type=["png", "jpg", "jpeg"],
+                                      accept_multiple_files=True, key=f"up_{_sid}", label_visibility="collapsed")
+                if up and st.button("Enregistrer les captures", icon=":material/save:", key=f"save_shot_{_sid}", type="primary"):
+                    added = 0
+                    for f in up:
+                        try:
+                            _cur.append({"name": f.name, "data": compress_image(f.getvalue()),
+                                         "ts": datetime.now().isoformat(timespec="seconds")})
+                            added += 1
+                        except Exception as e:
+                            st.warning(f"Échec {f.name} : {e}")
+                    _shots[_sid] = _cur
+                    st.session_state.trade_screenshots = _shots
+                    ok = screenshots_save(_shots)
+                    st.success(f"{added} capture(s) enregistrée(s)." if ok else f"{added} ajoutée(s) en session (sync à vérifier).")
+                    st.rerun()
                 if _cur:
-                    st.caption(f"{len(_cur)} capture(s) sur ce trade")
                     gcols = st.columns(3)
                     for _i, sh in enumerate(list(_cur)):
                         with gcols[_i % 3]:
-                            st.image(sh["data"], use_container_width=True,
-                                     caption=sh.get("name", ""))
-                            if st.button("Supprimer", icon=":material/delete:",
-                                         key=f"delshot_{_sid}_{_i}", use_container_width=True):
+                            st.image(sh["data"], use_container_width=True, caption=sh.get("name", ""))
+                            if st.button("Supprimer", icon=":material/delete:", key=f"delshot_{_sid}_{_i}", use_container_width=True):
                                 _cur.pop(_i)
                                 if _cur: _shots[_sid] = _cur
                                 else: _shots.pop(_sid, None)
                                 st.session_state.trade_screenshots = _shots
-                                screenshots_save(_shots)
-                                st.rerun()
+                                screenshots_save(_shots); st.rerun()
                 else:
                     st.caption("Aucune capture pour ce trade.")
 
-            # ── Onglet : PLUSIEURS TRADES ────────────────────────────────────
             with tab2:
-                df_multi = df_all.sort_values("date", ascending=False)
-
-                # ── 1. FILTRES ─────────────────────────────────────────────
-                mf1, mf2, mf3, mf4, mf5 = st.columns(5)
-                dates_m = sorted(df_all["date"].dropna().unique().tolist())
-                d_min_m = date.fromisoformat(dates_m[0])  if dates_m else date(2024,1,1)
-                d_max_m = date.fromisoformat(dates_m[-1]) if dates_m else date.today()
-                with mf1: mf_from = st.date_input("Du",    value=d_min_m, key="mf_from")
-                with mf2: mf_to   = st.date_input("Au",    value=d_max_m, key="mf_to")
-                with mf3: mf_sym  = st.selectbox("Actif",  ["Tous"]+sorted(df_all["symbol"].unique().tolist()), key="mf_sym")
-                with mf4: mf_mode = st.multiselect("Comptes", allowed_accounts(), default=[], placeholder="Tous", key="mf_mode")
-                with mf5: mf_dir  = st.selectbox("Dir.",   ["Tous","LONG","SHORT"], key="mf_dir")
-
-                df_multi = df_multi[df_multi["date"].between(str(mf_from), str(mf_to))]
-                if mf_sym  != "Tous": df_multi = df_multi[df_multi["symbol"]   == mf_sym]
-                if mf_mode: df_multi = df_multi[df_multi["trade_mode"].isin(mf_mode)]
-                if mf_dir  != "Tous": df_multi = df_multi[df_multi["direction"] == mf_dir]
-                filtered_ids = df_multi["id"].tolist()
-
-                # ── 2. SÉLECTION RAPIDE ────────────────────────────────────
-                sc1, sc2, sc3 = st.columns([1, 1, 4])
-                with sc1:
-                    if st.button("Tout sélectionner", use_container_width=True,
-                                 key="sel_all", icon=":material/select_all:"):
-                        for _tid in filtered_ids:
-                            st.session_state[f"chk_{_tid}"] = True
-                        st.rerun()
-                with sc2:
-                    if st.button("Tout désélectionner", use_container_width=True,
-                                 key="desel_all", icon=":material/deselect:"):
-                        for _tid in filtered_ids:
-                            st.session_state[f"chk_{_tid}"] = False
-                        st.rerun()
-
-                # ── 3. BOUTON SUPPRIMER + CONFIRMATION (AVANT les checkboxes) ──
-                selected_ids = {
-                    tid for tid in filtered_ids
-                    if st.session_state.get(f"chk_{tid}", False)
-                }
-                n_sel = len(selected_ids)
-
-                if n_sel > 0:
-                    sel_data = [t for t in st.session_state.trades if t["id"] in selected_ids]
-                    pnl_sel  = sum(t.get("pnl", 0) for t in sel_data)
-                    col_psel = "#00d4aa" if pnl_sel >= 0 else "#ff4d6d"
-
-                    # Bandeau résumé + bouton supprimer
-                    st.markdown(
-                        f'''<div style="background:#ff4d6d12;border:1px solid #ff4d6d55;
-                            border-radius:10px;padding:10px 16px;margin:8px 0;
-                            display:flex;gap:24px;align-items:center;flex-wrap:wrap">
-                            <span style="color:#ff4d6d;font-weight:700">
-                                <i class="fa-solid fa-triangle-exclamation"></i>
-                                &nbsp;{n_sel} trade{"s" if n_sel>1 else ""} sélectionné{"s" if n_sel>1 else ""}
-                            </span>
-                            <span style="color:var(--tj-muted)">
-                                P&L sélection : <b style="color:{col_psel}">{fmt(pnl_sel)}</b>
-                            </span>
-                        </div>''', unsafe_allow_html=True)
-
-                    bd1, bd2, _ = st.columns([1.5, 1, 4])
-                    with bd1:
-                        if st.button(
-                            f"Supprimer {n_sel} trade{'s' if n_sel>1 else ''}",
-                            icon=":material/delete_sweep:",
-                            use_container_width=True, key="btn_del_multi"
-                        ):
-                            st.session_state["confirm_multi"] = True
-
-                    # Confirmation immédiatement sous le bouton
-                    if st.session_state.get("confirm_multi"):
-                        st.error(
-                            f"Supprimer définitivement **{n_sel} trade{'s' if n_sel>1 else ''}** "
-                            f"(P&L total : {fmt(pnl_sel)}) ?"
-                        )
-                        cm1, cm2, _ = st.columns([1, 1, 5])
-                        with cm1:
-                            if st.button("Confirmer la suppression",
-                                         icon=":material/check:",
-                                         use_container_width=True, key="btn_multi_yes"):
-                                st.session_state.trades = [
-                                    t for t in st.session_state.trades
-                                    if t["id"] not in selected_ids
-                                ]
-                                ok = cloud_save(st.session_state.trades)
-                                for _tid in selected_ids:
-                                    st.session_state.pop(f"chk_{_tid}", None)
-                                st.session_state.pop("confirm_multi", None)
-                                st.success(f"{n_sel} trade(s) supprimé(s)." if ok else "Erreur sauvegarde.")
-                                st.rerun()
-                        with cm2:
-                            if st.button("Annuler", icon=":material/close:",
-                                         use_container_width=True, key="btn_multi_no"):
-                                st.session_state.pop("confirm_multi", None)
-                                st.rerun()
-
-                    st.markdown("---")
-
+                _ed = df_page[["id", "date", "symbol", "trade_mode", "direction", "pnl"]].copy()
+                _ed.insert(0, "Suppr.", False)
+                _out = st.data_editor(
+                    _ed, key=f"jq_editor_{_pg}_{_psz}", hide_index=True, use_container_width=True,
+                    disabled=["id", "date", "symbol", "trade_mode", "direction", "pnl"],
+                    column_config={"id": None, "Suppr.": st.column_config.CheckboxColumn("Suppr.", width="small"),
+                                   "date": "Date", "symbol": "Actif", "trade_mode": "Compte", "direction": "Dir.",
+                                   "pnl": st.column_config.NumberColumn("P&L $", format="%.2f")})
+                _sel = set(_out.loc[_out["Suppr."], "id"].tolist())
+                if _sel:
+                    _psel = df[df["id"].isin(_sel)]["pnl"].sum()
+                    st.warning(f"{len(_sel)} trade(s) cochés · P&L {fmt(_psel)}. Suppression définitive.")
+                    if st.button(f"Supprimer {len(_sel)} trade(s)", icon=":material/delete_sweep:", key="btn_del_multi"):
+                        st.session_state.trades = [t for t in st.session_state.trades if t["id"] not in _sel]
+                        ok = cloud_save(st.session_state.trades)
+                        st.success(f"{len(_sel)} trade(s) supprimé(s)." if ok else "Erreur sauvegarde."); st.rerun()
                 else:
-                    st.caption(f"{len(filtered_ids)} trades · Cochez ceux à supprimer")
-
-                # ── 4. LISTE DES CHECKBOXES ────────────────────────────────
-                for _, row in df_multi.iterrows():
-                    tid = row["id"]
-                    c_pnl = "#00d4aa" if row["pnl"] >= 0 else "#ff4d6d"
-                    st.checkbox(
-                        f"{row['date']}  ·  {row['symbol']}  ·  "
-                        f"{row.get('trade_mode','Réel Indépendant')}  ·  {row['direction']}  ·  {fmt(row['pnl'])}",
-                        key=f"chk_{tid}"
-                    )
-
-        # ══════════════════════════════════════════════════════════════════════
-        # FILTRES + TABLEAU
-        # ══════════════════════════════════════════════════════════════════════
-        st.markdown("---")
-
-        dates_avail = sorted(df_all["date"].dropna().unique().tolist())
-        d_min = date.fromisoformat(dates_avail[0])  if dates_avail else date(2024,1,1)
-        d_max = date.fromisoformat(dates_avail[-1]) if dates_avail else date.today()
-        with st.container(horizontal=True, key="jr_filters", gap="small"):
-            f_from, f_to = period_filter("Période", d_min, d_max, "jper")
-            f_sym  = check_filter("Actifs", sorted(df_all["symbol"].unique().tolist()), "jsel_sym", "jfs",
-                                  icon=":material/candlestick_chart:")
-            f_mode = check_filter("Comptes", allowed_accounts(), "jsel_mode", "jfm", icon=":material/account_balance_wallet:")
-            f_dir  = check_filter("Direction", ["LONG", "SHORT"], "jsel_dir", "jfd", icon=":material/swap_vert:")
-
-        df = df_all.copy()
-        df = df[df["date"].between(str(f_from), str(f_to))]
-        if f_sym:  df = df[df["symbol"].isin(f_sym)]
-        if f_mode: df = df[df["trade_mode"].isin(f_mode)]
-        if f_dir:  df = df[df["direction"].isin(f_dir)]
-        df = df.sort_values("date", ascending=False)
-
-        # Résumé
-        if not df.empty:
-            total_f = df["pnl"].sum()
-            wins_f  = len(df[df["pnl"] > 0])
-            col_f   = "#00d4aa" if total_f >= 0 else "#ff4d6d"
-            st.markdown(
-                f'''<div style="display:flex;gap:24px;align-items:center;
-                    padding:8px 14px;background:var(--tj-bg2);border-radius:8px;
-                    border:1px solid var(--tj-border);margin:10px 0;font-size:13px">
-                    <span style="color:var(--tj-muted)">
-                        <b style="color:#e8ecf4">{len(df)}</b> trades
-                    </span>
-                    <span style="color:var(--tj-muted)">
-                        P&L : <b style="color:{col_f}">{fmt(total_f)}</b>
-                    </span>
-                    <span style="color:var(--tj-muted)">
-                        Win rate : <b style="color:#00d4aa">
-                        {len(df[df["pnl"]>0])/len(df)*100:.0f}%</b>
-                    </span>
-                </div>''', unsafe_allow_html=True)
-
-        if df.empty:
-            st.info("Aucun trade pour ces filtres.")
-        else:
-            rows_html = ""
-            for _, t in df.iterrows():
-                c    = "#00d4aa" if t["pnl"]>=0 else "#ff4d6d"
-                dc   = "b-win" if t["direction"]=="LONG" else "b-loss"
-                rr_v = t["rr"]
-                rr_c = "#00d4aa" if (rr_v or 0)>=2 else "#ff9f43" if (rr_v or 0)>=1 else "#ff4d6d"
-                _tm2 = t.get("trade_mode","Réel Indépendant")
-
-                rows_html += f"""<tr>
-                    <td style="color:var(--tj-muted);font-family:monospace;white-space:nowrap">{t["date"]}</td>
-                    <td>{badge(t["symbol"],"b-sym")}</td>
-                    <td>{badge(t["direction"],dc)}</td>
-                    <td>{mode_badge(t.get("trade_mode","Réel Indépendant"))}</td>
-                    <td style="font-family:monospace">{t.get("entry","—")}</td>
-                    <td style="font-family:monospace">{t.get("exit","—")}</td>
-                    <td style="font-family:monospace;font-weight:800;color:{c};white-space:nowrap">{fmt(t["pnl"])}</td>
-                    <td style="font-family:monospace;color:{rr_c}">{rr_v if rr_v else "—"}</td>
-                    <td>{badge(t["strategy"],"b-str")}</td>
-                    <td style="text-align:center">{mood_html(t["mood"])}</td>
-                    <td style="color:var(--tj-muted);font-size:12px;max-width:160px">{str(t.get("notes",""))[:45]}</td>
-                </tr>"""
-            st.markdown(
-                f"""<div style="overflow-x:auto"><table class="tj-table">
-                <thead><tr>
-                    <th>Date</th><th>Actif</th><th>Dir.</th><th>Mode</th>
-                    <th>Entrée</th><th>Sortie</th><th>P&L $</th><th>R:R</th>
-                    <th>Stratégie</th><th>Mood</th><th>Notes</th>
-                </tr></thead><tbody>{rows_html}</tbody></table></div>""",
-                unsafe_allow_html=True)
+                    st.caption("Coche les trades de la page affichée à supprimer.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : ADD / EDIT
