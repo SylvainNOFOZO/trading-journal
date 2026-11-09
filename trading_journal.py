@@ -1441,6 +1441,7 @@ def _fetch_calendar_raw(scope="all"):
     if scope == "lastweek":   dfrom, dto = today - _tdd(days=9), today
     elif scope == "thisweek": dfrom, dto = today - _tdd(days=3), today + _tdd(days=4)
     elif scope == "nextweek": dfrom, dto = today + _tdd(days=1), today + _tdd(days=9)
+    elif scope == "rates":    dfrom, dto = today - _tdd(days=400), today + _tdd(days=70)
     else:                     dfrom, dto = today - _tdd(days=16), today + _tdd(days=9)
 
     # ── Source 1 : TradingView (calendrier avec Actual) ──────────────────
@@ -1585,8 +1586,13 @@ def _fetch_calendar(scope="all"):
     now = _tmc.time()
     hot_key = f"_cal_hot_{scope}"
     hot = st.session_state.get(hot_key, 0) > now if hasattr(st, "session_state") else False
-    bucket = int(now // 60) if hot else int(now // 1800)
+    retry = st.session_state.get(f"_cal_empty_{scope}", 0) > now     # dernier essai vide : on retente vite
+    bucket = int(now // 60) if hot else (int(now // 120) if retry else int(now // 1800))
     ev, src, ts = _fetch_calendar_cached(scope, bucket)
+    try:
+        st.session_state[f"_cal_empty_{scope}"] = (now + 1800) if not ev else 0
+    except Exception:
+        pass
     # ne jamais revenir à une version plus ancienne que celle déjà affichée (cache 30 min resté figé)
     _last = st.session_state.get(f"_cal_data_{scope}")
     if _last and _last[2] > ts:
@@ -2606,6 +2612,531 @@ def risk_recommendations(rk, min_n=5):
              f"Ta plus grosse perte ({money(rk['loss_max'])}) vaut {num(mr, 1)} fois ta perte moyenne.",
              "Ne déplace jamais un stop pour l'éloigner, et coupe toute position qui dépasse le risque prévu.")
     return R
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MOTEUR MACRO : données (FRED, BIS, Yahoo Finance, calendrier) + règles de biais
+# Sources gratuites sans clé. Chaque source est indépendante : si l'une tombe,
+# les autres continuent et l'écran indique ce qui manque.
+# ══════════════════════════════════════════════════════════════════════════════
+MX_CCYS = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"]
+MX_CB = {  # banque centrale, code BIS, séries FRED de secours
+    "USD": ("Fed", "US", "DFEDTARU"), "EUR": ("BCE", "XM", "ECBDFR"), "GBP": ("BoE", "GB", "BOERUKM"),
+    "JPY": ("BoJ", "JP", None), "CHF": ("BNS", "CH", None), "CAD": ("BoC", "CA", None),
+    "AUD": ("RBA", "AU", None), "NZD": ("RBNZ", "NZ", None),
+}
+# Séries FRED : id -> (libellé, unité, transformation affichée)
+#   yoy = glissement annuel %, mom = variation mensuelle, diff = variation absolue, lvl = niveau
+MX_FRED = {
+    # Politique monétaire & taux
+    "DFEDTARU": ("Taux Fed (borne haute)", "%", "lvl"), "ECBDFR": ("Taux de dépôt BCE", "%", "lvl"),
+    "BOERUKM": ("Taux BoE", "%", "lvl"), "DFF": ("Fed funds effectif", "%", "lvl"),
+    "DGS2": ("US 2 ans", "%", "lvl"), "DGS10": ("US 10 ans", "%", "lvl"),
+    "WALCL": ("Bilan de la Fed", "Md$", "lvl"), "ECBASSETSW": ("Bilan de la BCE", "Md€", "lvl"),
+    "T5YIE": ("Inflation anticipée 5 ans", "%", "lvl"),
+    # Inflation & emploi
+    "CPIAUCSL": ("CPI US", "% a/a", "yoy"), "CPILFESL": ("Core CPI US", "% a/a", "yoy"),
+    "PCEPI": ("PCE US", "% a/a", "yoy"), "PCEPILFE": ("Core PCE US", "% a/a", "yoy"),
+    "PAYEMS": ("NFP (créations d'emplois)", "k", "diff"), "UNRATE": ("Taux de chômage US", "%", "lvl"),
+    "CES0500000003": ("Salaire horaire moyen", "% a/a", "yoy"), "ICSA": ("Inscriptions au chômage", "k", "lvl"),
+    # Croissance
+    "A191RL1Q225SBEA": ("PIB US (t/t annualisé)", "%", "lvl"), "RSAFS": ("Ventes au détail US", "% m/m", "mom"),
+    "INDPRO": ("Production industrielle US", "% a/a", "yoy"), "UMCSENT": ("Confiance consommateur (Michigan)", "pts", "lvl"),
+    # Liquidité & sentiment
+    "T10Y2Y": ("Courbe US 10 ans - 2 ans", "pb", "bp"), "T10Y3M": ("Courbe US 10 ans - 3 mois", "pb", "bp"),
+    "VIXCLS": ("VIX", "pts", "lvl"), "BAMLH0A0HYM2": ("Spread High Yield", "pb", "bp"),
+    "BAMLC0A0CM": ("Spread Investment Grade", "pb", "bp"), "M2SL": ("Masse monétaire M2", "% a/a", "yoy"),
+    "NFCI": ("Conditions financières (Chicago Fed)", "idx", "lvl"), "DTWEXBGS": ("Dollar large (Fed)", "idx", "lvl"),
+}
+MX_YAHOO = {
+    "DX-Y.NYB": "DXY", "^VIX": "VIX", "^GSPC": "S&P 500", "^NDX": "Nasdaq 100", "GC=F": "Or",
+    "CL=F": "WTI", "BTC-USD": "Bitcoin", "ZQ=F": "Fed funds futures", "^TNX": "US 10 ans",
+    "EURUSD=X": "EURUSD", "GBPUSD=X": "GBPUSD", "USDJPY=X": "USDJPY", "USDCHF=X": "USDCHF",
+    "USDCAD=X": "USDCAD", "AUDUSD=X": "AUDUSD", "NZDUSD=X": "NZDUSD",
+}
+MX_FX = {"EUR": ("EURUSD=X", 1), "GBP": ("GBPUSD=X", 1), "JPY": ("USDJPY=X", -1), "CHF": ("USDCHF=X", -1),
+         "CAD": ("USDCAD=X", -1), "AUD": ("AUDUSD=X", 1), "NZD": ("NZDUSD=X", 1)}
+MX_IMPACT_W = {"High": 1.0, "Medium": 0.5, "Low": 0.2}
+_MX_RATE_RX = ("interest rate decision", "rate decision", "policy rate", "cash rate", "bank rate",
+               "funds rate", "overnight rate", "refinancing rate", "deposit facility rate", "deposit rate")
+
+
+def macro_polarity(title):
+    """+1 : un chiffre plus haut = économie plus forte / plus chaude ; -1 : l'inverse ; 0 : neutre."""
+    t = str(title).lower()
+    if any(k in t for k in ("unemployment rate", "unemployment change", "jobless", "claims", "claimant", "continuing")):
+        return -1
+    if any(k in t for k in ("cpi", "inflation", "ppi", "pce", "gdp", "retail", "nonfarm", "non-farm", "payroll",
+                            "employment change", "adp", "jolts", "pmi", "ism", "confidence", "sentiment", "zew",
+                            "ifo", "durable", "industrial", "rate decision", "interest rate", "spending", "earnings",
+                            "wage", "production", "orders", "home sales", "building permits", "housing starts")):
+        return 1
+    return 0
+
+
+def macro_category(title):
+    t = str(title).lower()
+    if any(k in t for k in _MX_RATE_RX) or any(k in t for k in ("fomc", "rate statement")):
+        return "Taux"
+    if any(k in t for k in ("cpi", "ppi", "pce", "inflation", "hicp")):
+        return "Inflation"
+    if any(k in t for k in ("nonfarm", "non-farm", "payroll", "unemployment", "jobless", "claims", "adp", "jolts",
+                            "employment", "wage", "earnings")):
+        return "Emploi"
+    if any(k in t for k in ("gdp", "pmi", "ism", "retail", "confidence", "sentiment", "zew", "ifo", "durable",
+                            "industrial", "spending", "orders", "home", "housing", "building", "production")):
+        return "Croissance"
+    return None
+
+
+# ── Accès aux sources (non mis en cache : appelés par les paquets mis en cache) ──
+def _fred_raw(sid, start="2012-01-01"):
+    r = requests.get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}&cosd={start}",
+                     headers=_UA, timeout=20)
+    r.raise_for_status()
+    d = pd.read_csv(io.StringIO(r.text))
+    d = d.iloc[:, :2]; d.columns = ["date", "value"]
+    d["date"] = pd.to_datetime(d["date"], errors="coerce")
+    d["value"] = pd.to_numeric(d["value"], errors="coerce")
+    s = d.dropna().set_index("date")["value"]
+    if s.empty:
+        raise ValueError("série vide")
+    return s
+
+
+def _yahoo_raw(ticker, rng="2y"):
+    r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+                     params={"range": rng, "interval": "1d"}, headers=_UA, timeout=15)
+    r.raise_for_status()
+    res = r.json()["chart"]["result"][0]
+    s = pd.Series(res["indicators"]["quote"][0]["close"],
+                  index=pd.to_datetime(res["timestamp"], unit="s").normalize(), dtype=float).dropna()
+    s = s[~s.index.duplicated(keep="last")]
+    if s.empty:
+        raise ValueError("série vide")
+    return s
+
+
+def _bis_policy_raw(start):
+    areas = "+".join(v[1] for v in MX_CB.values())
+    r = requests.get(f"https://stats.bis.org/api/v1/data/WS_CBPOL/D.{areas}",
+                     params={"startPeriod": start, "format": "csv"}, headers=_UA, timeout=25)
+    r.raise_for_status()
+    d = pd.read_csv(io.StringIO(r.text))
+    cols = {c.upper(): c for c in d.columns}
+    ra = next(cols[c] for c in cols if "REF_AREA" in c)
+    tp = next(cols[c] for c in cols if "TIME_PERIOD" in c)
+    ov = next(cols[c] for c in cols if "OBS_VALUE" in c)
+    d = d[[ra, tp, ov]].rename(columns={ra: "area", tp: "date", ov: "value"})
+    d["area"] = d["area"].astype(str).str.split(":").str[0].str.strip()
+    d["date"] = pd.to_datetime(d["date"], errors="coerce")
+    d["value"] = pd.to_numeric(d["value"], errors="coerce")
+    out = {}
+    for ccy, (_, area, _) in MX_CB.items():
+        s = d[d["area"] == area].dropna().set_index("date")["value"].sort_index()
+        if not s.empty:
+            out[ccy] = s
+    if not out:
+        raise ValueError("BIS : aucune série")
+    return out
+
+
+def _parallel(fn, keys, workers=8):
+    from concurrent.futures import ThreadPoolExecutor
+    ok, ko = {}, []
+    def _one(k):
+        try:
+            return k, fn(k), None
+        except Exception as e:
+            return k, None, f"{type(e).__name__}"
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for k, v, err in ex.map(_one, keys):
+            if err is None:
+                ok[k] = v
+            else:
+                ko.append(k)
+    return ok, ko
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def macro_fred_bundle(ids):
+    ok, ko = _parallel(_fred_raw, list(ids))
+    if not ok:
+        raise RuntimeError("FRED injoignable")
+    return ok, ko
+
+
+@st.cache_data(ttl=30 * 60, show_spinner=False)
+def macro_yahoo_bundle(tickers):
+    ok, ko = _parallel(_yahoo_raw, list(tickers))
+    if not ok:
+        raise RuntimeError("Yahoo Finance injoignable")
+    return ok, ko
+
+
+@st.cache_data(ttl=12 * 3600, show_spinner=False)
+def macro_bis_rates(start):
+    return _bis_policy_raw(start)
+
+
+def macro_load():
+    """Charge toutes les sources. Renvoie {fred, yahoo, bis, missing: {source: [ids]}}."""
+    out = {"fred": {}, "yahoo": {}, "bis": {}, "missing": {}}
+    try:
+        out["fred"], ko = macro_fred_bundle(tuple(MX_FRED))
+        if ko: out["missing"]["FRED"] = ko
+    except Exception:
+        out["missing"]["FRED"] = ["toutes les séries"]
+    try:
+        out["yahoo"], ko = macro_yahoo_bundle(tuple(MX_YAHOO))
+        if ko: out["missing"]["Yahoo Finance"] = ko
+    except Exception:
+        out["missing"]["Yahoo Finance"] = ["tous les cours"]
+    try:
+        out["bis"] = macro_bis_rates((date.today() - timedelta(days=800)).isoformat())
+    except Exception:
+        out["missing"]["BIS (taux directeurs)"] = ["toutes les banques centrales"]
+    return out
+
+
+# ── Transformations et statistiques ───────────────────────────────────────────
+def mx_transform(s, how):
+    """Série brute -> série affichée (glissement annuel, variation, points de base...)."""
+    if s is None or len(s) == 0:
+        return s
+    s = s.sort_index()
+    if how in ("yoy", "mom"):
+        step = 1
+        if how == "yoy":
+            per = pd.infer_freq(s.index[-8:]) if len(s) >= 8 else None
+            step = 52 if (per or "").startswith("W") else (4 if (per or "").startswith("Q") else 12)
+            if per and per.startswith("D"): step = 252
+        return (s / s.shift(step) - 1).mul(100).dropna()
+    if how == "diff":
+        return s.diff().dropna()
+    if how == "bp":
+        return s.mul(100)
+    return s
+
+
+def mx_last(s):
+    """(valeur actuelle, précédente, date) d'une série."""
+    if s is None or len(s) == 0:
+        return None, None, None
+    v = float(s.iloc[-1]); p = float(s.iloc[-2]) if len(s) > 1 else None
+    return v, p, s.index[-1]
+
+
+def mx_z(s, window=252):
+    """Écart à la moyenne en écarts-types sur la fenêtre (robuste aux séries courtes)."""
+    if s is None or len(s) < 30:
+        return None
+    w = s.iloc[-window:]
+    sd = float(w.std())
+    return None if not sd else float((w.iloc[-1] - w.mean()) / sd)
+
+
+def mx_chg(s, n):
+    if s is None or len(s) <= n:
+        return None
+    return float(s.iloc[-1] / s.iloc[-1 - n] - 1)
+
+
+def mx_z_change(s, n=20, window=252):
+    """z-score de la variation sur n séances par rapport aux variations de l'année."""
+    if s is None or len(s) < window // 2 + n:
+        return None
+    ch = s.diff(n).dropna().iloc[-window:]
+    sd = float(ch.std())
+    return None if not sd else float((ch.iloc[-1] - ch.mean()) / sd)
+
+
+# ── Surprise macroéconomique ──────────────────────────────────────────────────
+def mx_event_surprise(actual, forecast, previous):
+    """Surprise standardisée d'une publication : (Actuel - Consensus) / échelle.
+    Échelle = écart Consensus - Précédent (ampleur du mouvement attendu), avec un plancher de 5 % du
+    consensus : faute d'historique de consensus, c'est l'estimation la plus stable de « l'erreur normale »."""
+    try:
+        a = _to_num(actual); f = _to_num(forecast); p = _to_num(previous)
+    except Exception:
+        return None
+    if a is None or f is None:
+        return None
+    scale = max(abs(f - p) if p is not None else 0.0, abs(f) * 0.05, 1e-9)
+    if scale < 1e-6 and a != f:
+        scale = max(abs(a) * 0.05, 0.1)
+    return max(-3.0, min(3.0, (a - f) / scale))
+
+
+def mx_events_frame(events):
+    """Calendrier brut -> DataFrame normalisé avec date UTC, catégorie, polarité et surprise signée."""
+    if not events:
+        return pd.DataFrame()
+    d = pd.DataFrame(events)
+    for c in ("title", "country", "impact", "actual", "forecast", "previous", "date"):
+        if c not in d.columns:
+            d[c] = ""
+    d["dt"] = d["date"].map(_parse_utc)
+    d = d[d["dt"].notna()].copy()
+    d["cat"] = d["title"].map(macro_category)
+    d["pol"] = d["title"].map(macro_polarity)
+    d["has_actual"] = d["actual"].astype(str).str.strip().isin(["", "nan", "None"]) == False
+    d["z"] = [mx_event_surprise(a, f, p) if h else None
+              for a, f, p, h in zip(d["actual"], d["forecast"], d["previous"], d["has_actual"])]
+    d["zs"] = [(z * pol) if (z is not None and pol) else None for z, pol in zip(d["z"], d["pol"])]
+    d["w"] = d["impact"].map(MX_IMPACT_W).fillna(0.2)
+    return d
+
+
+def mx_surprise_index(ev, ccy, cats=None, horizon_days=30, tau=10.0):
+    """Indice de surprise d'une devise (-100 à +100), façon Citi Economic Surprise Index :
+    moyenne pondérée (importance x décroissance exp(-âge/τ)) des surprises signées des 30 derniers jours."""
+    if ev is None or ev.empty:
+        return None, 0
+    now = datetime.utcnow()
+    d = ev[(ev["country"] == ccy) & ev["zs"].notna()]
+    if cats:
+        d = d[d["cat"].isin(cats)]
+    age = (now - d["dt"]).dt.total_seconds() / 86400
+    d = d[(age >= 0) & (age <= horizon_days)]
+    if d.empty:
+        return None, 0
+    age = (now - d["dt"]).dt.total_seconds() / 86400
+    wt = d["w"] * np.exp(-age / tau)
+    m = float((d["zs"] * wt).sum() / wt.sum())
+    n_eff = float(wt.sum() ** 2 / (wt ** 2).sum())          # nombre effectif de publications
+    m *= n_eff / (n_eff + 2.0)                              # peu de publications = indice modéré
+    return float(np.tanh(m / 1.5) * 100), len(d)
+
+
+# ── Politique monétaire ───────────────────────────────────────────────────────
+def mx_policy(data, ev_rates):
+    """Par devise : taux actuel, variation sur 6 mois, dernière décision, prochaine décision et consensus."""
+    out = {}
+    now = datetime.utcnow()
+    for ccy, (cb, _, fred_id) in MX_CB.items():
+        rec = {"cb": cb, "rate": None, "chg6m": None, "last_move": None, "last_date": None,
+               "next_date": None, "next_cons": None, "src": None, "series": None}
+        s = data["bis"].get(ccy)
+        if s is not None and len(s):
+            rec["src"] = "BIS"
+        elif fred_id and fred_id in data["fred"]:
+            s = data["fred"][fred_id]; rec["src"] = "FRED"
+        if s is not None and len(s):
+            s = s.sort_index(); rec["series"] = s; rec["rate"] = float(s.iloc[-1])
+            past = s[s.index <= s.index[-1] - pd.Timedelta(days=182)]
+            if len(past):
+                rec["chg6m"] = float(s.iloc[-1] - past.iloc[-1])
+            moves = s.diff()
+            moves = moves[moves.abs() > 1e-9]
+            if len(moves):
+                rec["last_move"] = float(moves.iloc[-1]); rec["last_date"] = moves.index[-1]
+        if ev_rates is not None and not ev_rates.empty:
+            d = ev_rates[ev_rates["country"] == ccy].sort_values("dt")
+            done = d[d["has_actual"]]
+            if rec["rate"] is None and len(done):
+                v = _to_num(done.iloc[-1]["actual"])
+                if v is not None:
+                    rec["rate"] = v; rec["src"] = "Calendrier"
+                    pv = _to_num(done.iloc[-1]["previous"])
+                    if pv is not None and abs(v - pv) > 1e-9:
+                        rec["last_move"] = v - pv; rec["last_date"] = done.iloc[-1]["dt"]
+            nxt = d[(d["dt"] >= now) & (~d["has_actual"])]
+            if len(nxt):
+                rec["next_date"] = nxt.iloc[0]["dt"]; rec["next_cons"] = _to_num(nxt.iloc[0]["forecast"])
+        out[ccy] = rec
+    return out
+
+
+def mx_fed_pricing(data):
+    """Anticipations de la Fed : taux implicite des Fed funds futures (100 - prix) et écart 2 ans - Fed."""
+    res = {"implied": None, "effr": None, "bp": None, "spread2y": None}
+    zq = data["yahoo"].get("ZQ=F")
+    effr = data["fred"].get("DFF")
+    if zq is not None and len(zq):
+        res["implied"] = 100 - float(zq.iloc[-1])
+    if effr is not None and len(effr):
+        res["effr"] = float(effr.iloc[-1])
+    if res["implied"] is not None and res["effr"] is not None:
+        res["bp"] = (res["implied"] - res["effr"]) * 100
+    d2, ft = data["fred"].get("DGS2"), data["fred"].get("DFEDTARU")
+    if d2 is not None and ft is not None and len(d2) and len(ft):
+        res["spread2y"] = (float(d2.iloc[-1]) - (float(ft.iloc[-1]) - 0.125)) * 100
+    return res
+
+
+def mx_stance(policy, ev, fed):
+    """Score Hawkish / Dovish par devise (-100 à +100).
+    40 % dynamique des taux (6 mois) · 30 % trajectoire attendue (consensus de la prochaine décision ;
+    pour l'USD : Fed funds futures et écart 2 ans - Fed) · 20 % surprises d'inflation · 10 % croissance/emploi."""
+    out = {}
+    for ccy, p in policy.items():
+        parts, wts, detail = [], [], []
+        if p["chg6m"] is not None:
+            parts.append(np.tanh(p["chg6m"] / 0.5)); wts.append(0.4)
+            detail.append(f"taux {p['chg6m']*100:+.0f} pb sur 6 mois")
+        exp_ = None
+        if p["next_cons"] is not None and p["rate"] is not None:
+            exp_ = (p["next_cons"] - p["rate"]) * 100
+        if ccy == "USD":
+            cands = [x for x in (fed.get("bp"), (fed.get("spread2y") or 0) * 0.5 if fed.get("spread2y") is not None else None,
+                                 exp_) if x is not None]
+            exp_ = float(np.mean(cands)) if cands else None
+        if exp_ is not None:
+            parts.append(np.tanh(exp_ / 25)); wts.append(0.3)
+            detail.append(f"attendu {exp_:+.0f} pb")
+        si, n_i = mx_surprise_index(ev, ccy, cats=["Inflation"], horizon_days=60, tau=20)
+        if si is not None:
+            parts.append(si / 100); wts.append(0.2); detail.append(f"surprises inflation {si:+.0f}")
+        sg, n_g = mx_surprise_index(ev, ccy, cats=["Emploi", "Croissance"], horizon_days=45, tau=15)
+        if sg is not None:
+            parts.append(sg / 100); wts.append(0.1); detail.append(f"surprises activité {sg:+.0f}")
+        if not wts:
+            out[ccy] = (None, "Indisponible", "")
+            continue
+        sc = float(np.dot(parts, wts) / sum(wts) * 100)
+        lab = "Hawkish" if sc >= 25 else ("Dovish" if sc <= -25 else "Neutre")
+        out[ccy] = (sc, lab, " · ".join(detail))
+    return out
+
+
+def mx_risk_regime(data):
+    """Régime Risk-On / Risk-Off (-100 à +100) : moyenne de z-scores sur un an.
+    VIX (niveau, inversé) · spread High Yield (variation 20 j, inversé) · S&P 500 (performance 20 j) ·
+    DXY (performance 20 j, inversé : dollar refuge) · conditions financières NFCI (inversé)."""
+    comps = []
+    def add(name, z, sign, how):
+        if z is not None:
+            comps.append((name, float(np.clip(z * sign, -3, 3)), how))
+    vix = data["yahoo"].get("^VIX")
+    if vix is None: vix = data["fred"].get("VIXCLS")
+    add("VIX", mx_z(vix), -1, "niveau vs 1 an")
+    add("Spread High Yield", mx_z_change(data["fred"].get("BAMLH0A0HYM2")), -1, "variation 20 j")
+    add("S&P 500", mx_z_change(data["yahoo"].get("^GSPC")), 1, "variation 20 j")
+    dxy = data["yahoo"].get("DX-Y.NYB")
+    if dxy is None: dxy = data["fred"].get("DTWEXBGS")
+    add("Dollar (DXY)", mx_z_change(dxy), -1, "variation 20 j")
+    add("Conditions financières", mx_z(data["fred"].get("NFCI"), 104), -1, "niveau vs 2 ans")
+    if not comps:
+        return None, "Indisponible", comps
+    sc = float(np.tanh(np.mean([c[1] for c in comps]) / 1.2) * 100)
+    lab = "Risk-On" if sc >= 20 else ("Risk-Off" if sc <= -20 else "Neutre")
+    return sc, lab, comps
+
+
+def mx_strength(data):
+    """Force relative des devises (%, vs moyenne du panier de 8) sur 1 j, 1 s, 1 m, 3 m."""
+    hz = {"1 j": 1, "1 sem.": 5, "1 mois": 21, "3 mois": 63}
+    rows = {}
+    for lab, n in hz.items():
+        r = {"USD": 0.0}
+        for ccy, (tk, sgn) in MX_FX.items():
+            s = data["yahoo"].get(tk)
+            ch = mx_chg(s, n)
+            if ch is None:
+                r[ccy] = None
+            else:
+                r[ccy] = float(np.log1p(ch)) * sgn * 100
+        vals = [v for v in r.values() if v is not None]
+        if len(vals) < 4:
+            continue
+        m = float(np.mean(vals))
+        rows[lab] = {c: (r[c] - m if r.get(c) is not None else None) for c in MX_CCYS}
+    return pd.DataFrame(rows).reindex(MX_CCYS) if rows else pd.DataFrame()
+
+
+def mx_expected_vol(row, regime_score, ev):
+    """Volatilité attendue d'une annonce à venir : importance x sensibilité récente de la devise
+    (surprises absolues moyennes) x régime de marché (stress = réactions amplifiées)."""
+    base = MX_IMPACT_W.get(str(row.get("impact")), 0.2)
+    if row.get("cat") == "Taux":
+        base *= 1.3
+    sens = 1.0
+    if ev is not None and not ev.empty:
+        h = ev[(ev["country"] == row.get("country")) & ev["z"].notna()]
+        if len(h) >= 3:
+            sens = float(np.clip(h["z"].abs().mean(), 0.5, 2.0))
+    stress = 1.25 if (regime_score is not None and regime_score <= -20) else 1.0
+    v = base * sens * stress
+    lab = "Forte" if v >= 1.3 else ("Moyenne" if v >= 0.6 else "Faible")
+    return v, lab
+
+
+MX_METHOD_MD = r"""
+#### Organisation de l'écran
+| Zone | Contenu | Usage |
+|---|---|---|
+| Bandeau | Régime Risk-On / Risk-Off, DXY, VIX, courbe 10 ans - 2 ans, spread HY - IG | Lecture du contexte en 5 secondes |
+| Synthèse & biais | Biais par devise, force des devises, composantes du régime, annonces à 72 h | Décider quelles devises acheter ou vendre |
+| Calendrier & surprises | Indice de surprise par devise, fil des publications et impact par actif | Préparer et lire chaque annonce |
+| Politique monétaire | Taux directeurs, dernière et prochaine décision, Fed funds futures, bilans | Orientation des banques centrales |
+| Inflation & Emploi · Croissance | Indicateurs clés (actuel, précédent, consensus, surprise) et séries longues | Tendance de fond |
+| Liquidité & Sentiment | Courbe des taux, spreads de crédit, M2, conditions financières, DXY, VIX | Appétit pour le risque |
+
+#### Métriques affichées par indicateur
+**Actuel** (dernière valeur), **Précédent**, **Consensus** (prévision des économistes, issue du calendrier) et **Surprise** en écarts-types (σ). Le signe de la surprise est corrigé de la polarité : un chômage plus bas que prévu compte comme une surprise positive.
+
+#### Surprise macroéconomique
+Pour chaque publication : `z = (Actuel − Consensus) / échelle`, où l'échelle est l'écart Consensus − Précédent (l'ampleur du mouvement que le marché attendait), avec un plancher de 5 % du consensus. Le résultat est borné à ±3 σ.
+
+L'**indice de surprise d'une devise** (-100 à +100, sur le modèle du Citi Economic Surprise Index) est la moyenne des z signés des 30 derniers jours. Chaque publication est pondérée par son importance (Fort 1 · Moyen 0,5 · Faible 0,2) et par une décroissance `exp(−âge / 10 jours)`. La moyenne est ensuite modérée par `n / (n + 2)`, où n est le nombre effectif de publications : une seule surprise ne suffit pas à saturer l'indice. Le tout est ramené à l'échelle par `tanh(m / 1,5) × 100`.
+
+**Volatilité attendue d'une annonce à venir** = importance × sensibilité récente de la devise × stress du marché.
+- La sensibilité est la moyenne des |z| récents de la devise, bornée entre 0,5 et 2.
+- Le stress vaut ×1,25 quand le régime est Risk-Off.
+- Une décision de taux compte ×1,3.
+
+#### Biais Hawkish / Dovish par devise (-100 à +100)
+| Composante | Poids | Mesure |
+|---|---|---|
+| Dynamique des taux | 40 % | variation du taux directeur sur 6 mois, `tanh(Δ / 50 pb)` |
+| Trajectoire attendue | 30 % | consensus de la prochaine décision moins le taux actuel ; pour l'USD, moyenne avec les Fed funds futures et l'écart US 2 ans - Fed |
+| Surprises d'inflation | 20 % | indice de surprise limité à l'inflation, 60 jours |
+| Surprises d'activité | 10 % | emploi et croissance, 45 jours |
+
+Hawkish au-dessus de +25, Dovish en dessous de −25. Les poids sont recalculés sur les composantes disponibles.
+
+**Biais global d'une devise** = 45 % orientation monétaire + 30 % indice de surprise + 25 % force de marché sur 1 mois. L'écart entre la devise la plus forte et la plus faible signale la paire où les fondamentaux divergent le plus.
+
+#### Régime Risk-On / Risk-Off (-100 à +100)
+Moyenne des z-scores sur un an, bornés à ±3, puis `tanh(m / 1,2) × 100` :
+- VIX, en niveau, inversé ;
+- spread High Yield, en variation sur 20 jours, inversé ;
+- S&P 500, en performance sur 20 jours ;
+- DXY, en performance sur 20 jours, inversé (le dollar sert de refuge) ;
+- conditions financières de la Chicago Fed (NFCI), inversées.
+
+Risk-On au-dessus de +20, Risk-Off en dessous de −20.
+
+#### Force des devises
+Rendement logarithmique de chaque devise contre l'USD, puis écart à la moyenne du panier de 8 devises, sur 1 jour, 1 semaine, 1 mois et 3 mois.
+
+#### Sources de données
+| Source | Coût | Données | Fréquence de mise à jour ici |
+|---|---|---|---|
+| FRED (Fed de Saint-Louis), export CSV public | gratuit, sans clé | inflation, emploi, PIB, taux, courbe, spreads, M2, bilans, VIX, NFCI | 6 h |
+| BIS (Banque des règlements internationaux) | gratuit, sans clé | taux directeurs quotidiens des 8 banques centrales | 12 h |
+| Yahoo Finance | gratuit, non officiel | DXY, VIX, S&P 500, change, or, pétrole, Bitcoin, Fed funds futures | 30 min |
+| TradingView puis ForexFactory | gratuit, non officiel | calendrier, consensus, chiffres publiés | 30 min, chaque minute autour d'une annonce |
+
+**Pour aller plus loin (payant)**
+- Trading Economics : consensus historiques, ce qui permettrait un vrai écart-type de surprise par indicateur. C'est le meilleur gain de précision.
+- Financial Modeling Prep et Polygon : cours en temps réel.
+- CME FedWatch ou un fournisseur de swaps (€STR, SONIA, TONA) : courbe complète des anticipations de taux.
+- Bloomberg ou Refinitiv : couverture institutionnelle complète.
+
+#### Architecture technique
+| Couche | Version actuelle | Version cible |
+|---|---|---|
+| Interface | Streamlit et Plotly, une seule application, déployée sur Streamlit Cloud | Next.js avec TypeScript, et TradingView Lightweight Charts ou ECharts, pour un rendu temps réel |
+| Données | Python (pandas) et requests, en appels parallèles | Une API FastAPI qui alimente l'interface |
+| Cache | `st.cache_data` | Redis entre les sources et l'API |
+| Stockage | Supabase | Supabase (Postgres) pour l'historique des publications et des consensus, nécessaire à l'écart-type de surprise par indicateur |
+| Collecte | à l'ouverture de la page | Un planificateur (APScheduler, ou une tâche Supabase) qui collecte en continu, plutôt qu'à l'ouverture de la page |
+
+Le biais est une **aide à la décision** : il résume l'état des fondamentaux. Ce n'est pas un signal d'entrée, il se confirme toujours par l'analyse technique et la gestion du risque.
+"""
 
 
 # ── RECHERCHE ET EXPORT DE TRADES ─────────────────────────────────────────────
@@ -4650,9 +5181,11 @@ elif st.session_state.page == "import":
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.page == "analyse":
     _ta = get_theme()
-    st.markdown("# Asset Scorecard & News")
-    st.caption("Ce que le marché prévoyait (consensus) vs ce qui est publié, et l'impact "
-               "estimé de chaque chiffre sur vos actifs. Heures en GMT+1.")
+    st.markdown(
+        f"<div style='display:flex;align-items:baseline;gap:12px;flex-wrap:wrap'>"
+        f"<span style='font-size:22px;font-weight:800;color:{_ta['text']}'>Analyse fondamentale & News</span>"
+        f"<span style='font-size:12px;color:{_ta['muted']}'>politique monétaire · inflation · croissance · liquidité · "
+        f"calendrier et surprises · heures en GMT+1</span></div>", unsafe_allow_html=True)
 
     # ── Réglages du chronomètre (annonces suivies) ────────────────────────────
     _me = st.session_state.get("auth_user", "")
@@ -4786,8 +5319,7 @@ elif st.session_state.page == "analyse":
                                icon=":material/priority_high:")
 
     if not sel_assets:
-        st.info("Sélectionnez au moins un actif.")
-        st.stop()
+        sel_assets = ["US100 (Nasdaq)", "DXY (Dollar US)", "XAUUSD (Or)"]
 
     _imp_badge = {"High": ("Fort", _ta["loss"]), "Medium": ("Moyen", _ta["orange"]),
                   "Low": ("Faible", _ta["muted"])}
@@ -4909,10 +5441,10 @@ elif st.session_state.page == "analyse":
             edge = _ta["win"] if e["es"] > 0 else _ta["loss"]
             act_col = edge
             act_bg = edge + "1A"
-            if e["es"] > 0:
-                surp_txt, surp_col = "⬆ Supérieur au consensus", _ta["win"]
-            else:
-                surp_txt, surp_col = "⬇ Inférieur au consensus", _ta["loss"]
+            _above = (e["delta"] or 0) > 0
+            surp_txt = ("⬆ Au-dessus du consensus" if _above else "⬇ En dessous du consensus") + \
+                       (" · lecture favorable à la devise" if e["es"] > 0 else " · lecture défavorable à la devise")
+            surp_col = _ta["win"] if e["es"] > 0 else _ta["loss"]
         elif e["has_actual"]:
             edge = _ta["muted"]; act_col = _ta["text"]; act_bg = _ta["muted"] + "14"
             surp_txt, surp_col = "➡ Conforme / neutre", _ta["muted"]
@@ -4987,9 +5519,9 @@ elif st.session_state.page == "analyse":
 
     events, _src = _fetch_calendar(_scope_map[scope_lbl])
     if not events:
-        st.error("Calendrier économique indisponible pour le moment (sources injoignables). "
-                 "Réessayez plus tard.")
-        st.stop()
+        events = []
+        st.warning("Calendrier économique indisponible pour le moment (sources injoignables). "
+                   "Les autres onglets restent alimentés par FRED, BIS et Yahoo Finance.")
     _has_actual_src = "sans chiffre publié" not in _src
     # Fraîcheur + rafraîchissement automatique autour des annonces
     import time as _tmn
@@ -5069,107 +5601,583 @@ elif st.session_state.page == "analyse":
             _render_card(_build_entry(_fr), focus=True)
         st.markdown("---")
 
-    # Union des devises de tous les actifs sélectionnés
-    all_ccy = sorted({c for a in sel_assets for c in ASSETS[a]["ccy"]})
-    df = df[df["country"].isin(all_ccy)]
-    if imp_sel: df = df[df["impact"].isin(imp_sel)]
-    if df.empty:
-        st.info("Aucune publication pour ces actifs sur la période / les filtres choisis.")
-        st.stop()
+    def _calendar_tab(df):
+        """Fil des publications : consensus vs résultat et impact par actif."""
+        if df.empty or "country" not in df.columns:
+            st.info("Calendrier indisponible pour le moment.")
+            return
+        # Union des devises de tous les actifs sélectionnés
+        all_ccy = sorted({c for a in sel_assets for c in ASSETS[a]["ccy"]})
+        df = df[df["country"].isin(all_ccy)]
+        if imp_sel: df = df[df["impact"].isin(imp_sel)]
+        if df.empty:
+            st.info("Aucune publication pour ces actifs sur la période / les filtres choisis.")
+            return
 
-    # ── Construction des événements enrichis ─────────────────────────────────
-    _w = {"High": 3, "Medium": 2, "Low": 1}
-    feed = []
-    # score par actif : {asset: [somme, poids]}
-    asset_score = {a: [0.0, 0.0] for a in sel_assets}
+        # ── Construction des événements enrichis ─────────────────────────────────
+        _w = {"High": 3, "Medium": 2, "Low": 1}
+        feed = []
+        # score par actif : {asset: [somme, poids]}
+        asset_score = {a: [0.0, 0.0] for a in sel_assets}
 
-    for _, ev in df.iterrows():
-        _e = _build_entry(ev)
-        feed.append(_e)
-        if _e["has_actual"]:
-            _wv = _w.get(_e["impact"], 1)
-            for aset, adir in _e["impacts"].items():
-                if adir != 0:
-                    asset_score[aset][0] += adir * _wv
-                    asset_score[aset][1] += _wv
+        for _, ev in df.iterrows():
+            _e = _build_entry(ev)
+            feed.append(_e)
+            if _e["has_actual"]:
+                _wv = _w.get(_e["impact"], 1)
+                for aset, adir in _e["impacts"].items():
+                    if adir != 0:
+                        asset_score[aset][0] += adir * _wv
+                        asset_score[aset][1] += _wv
 
-    def _norm(acc):
-        return (acc[0] / acc[1] * 100.0) if acc[1] else 0.0
+        def _norm(acc):
+            return (acc[0] / acc[1] * 100.0) if acc[1] else 0.0
 
-    def _bias_label(s):
-        if s >= 50:  return "Très Haussier", _ta["win"]
-        if s >= 15:  return "Haussier", _ta["win"]
-        if s > -15:  return "Neutre", _ta["muted"]
-        if s > -50:  return "Baissier", _ta["loss"]
-        return "Très Baissier", _ta["loss"]
+        def _bias_label(s):
+            if s >= 50:  return "Très Haussier", _ta["win"]
+            if s >= 15:  return "Haussier", _ta["win"]
+            if s > -15:  return "Neutre", _ta["muted"]
+            if s > -50:  return "Baissier", _ta["loss"]
+            return "Très Baissier", _ta["loss"]
 
-    # ── Bandeau de biais par actif ───────────────────────────────────────────
-    st.markdown("##### <i class='fa-solid fa-gauge-high'></i> Biais fondamental par actif",
-                unsafe_allow_html=True)
-    ncol = min(3, len(sel_assets))
-    rows_assets = [sel_assets[i:i + ncol] for i in range(0, len(sel_assets), ncol)]
-    for grp in rows_assets:
-        bcols = st.columns(ncol)
-        for i, aset in enumerate(grp):
-            cfg = ASSETS[aset]
-            s = _norm(asset_score[aset])
-            lbl, col = _bias_label(s)
-            n_rel = sum(
-                1 for e in feed if aset in e["impacts"] and e["has_actual"] and e["impacts"][aset] != 0)
-            pos = max(0.0, min(100.0, (s + 100.0) / 2.0))  # position 0-100 sur la barre
-            with bcols[i]:
-                st.markdown(
-                    f"<div class='grad-card' style='padding:14px 16px'>"
-                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                    f"<span style='font-weight:800;color:{_ta['text']};font-size:14px'>{aset}</span>"
-                    f"<span style='font-size:9px;letter-spacing:.5px;text-transform:uppercase;"
-                    f"color:{_ta['muted']};border:1px solid {_ta['border']};padding:1px 6px;"
-                    f"border-radius:6px'>{_CLS_LABEL.get(cfg['cls'], '')}</span></div>"
-                    f"<div style='display:flex;align-items:baseline;gap:8px;margin:6px 0 2px'>"
-                    f"<span style='font-size:26px;font-weight:800;color:{col};"
-                    f"font-family:JetBrains Mono,monospace'>{s:+.0f}</span>"
-                    f"<span style='font-size:12px;font-weight:700;color:{col}'>{lbl}</span></div>"
-                    f"<div style='position:relative;height:7px;border-radius:4px;margin:8px 0 4px;"
-                    f"background:linear-gradient(90deg,{_ta['loss']}33,{_ta['muted']}22,{_ta['win']}33)'>"
-                    f"<div style='position:absolute;left:calc({pos:.0f}% - 5px);top:-2px;width:10px;"
-                    f"height:11px;border-radius:3px;background:{col};box-shadow:0 0 6px {col}'></div></div>"
-                    f"<div style='font-size:10px;color:{_ta['muted']}'>{n_rel} chiffre(s) publié(s) pris en compte</div>"
-                    f"</div>",
+        # ── Bandeau de biais par actif ───────────────────────────────────────────
+        st.markdown("##### <i class='fa-solid fa-gauge-high'></i> Biais fondamental par actif",
                     unsafe_allow_html=True)
+        ncol = min(3, len(sel_assets))
+        rows_assets = [sel_assets[i:i + ncol] for i in range(0, len(sel_assets), ncol)]
+        for grp in rows_assets:
+            bcols = st.columns(ncol)
+            for i, aset in enumerate(grp):
+                cfg = ASSETS[aset]
+                s = _norm(asset_score[aset])
+                lbl, col = _bias_label(s)
+                n_rel = sum(
+                    1 for e in feed if aset in e["impacts"] and e["has_actual"] and e["impacts"][aset] != 0)
+                pos = max(0.0, min(100.0, (s + 100.0) / 2.0))  # position 0-100 sur la barre
+                with bcols[i]:
+                    st.markdown(
+                        f"<div class='grad-card' style='padding:14px 16px'>"
+                        f"<div style='display:flex;justify-content:space-between;align-items:center'>"
+                        f"<span style='font-weight:800;color:{_ta['text']};font-size:14px'>{aset}</span>"
+                        f"<span style='font-size:9px;letter-spacing:.5px;text-transform:uppercase;"
+                        f"color:{_ta['muted']};border:1px solid {_ta['border']};padding:1px 6px;"
+                        f"border-radius:6px'>{_CLS_LABEL.get(cfg['cls'], '')}</span></div>"
+                        f"<div style='display:flex;align-items:baseline;gap:8px;margin:6px 0 2px'>"
+                        f"<span style='font-size:26px;font-weight:800;color:{col};"
+                        f"font-family:JetBrains Mono,monospace'>{s:+.0f}</span>"
+                        f"<span style='font-size:12px;font-weight:700;color:{col}'>{lbl}</span></div>"
+                        f"<div style='position:relative;height:7px;border-radius:4px;margin:8px 0 4px;"
+                        f"background:linear-gradient(90deg,{_ta['loss']}33,{_ta['muted']}22,{_ta['win']}33)'>"
+                        f"<div style='position:absolute;left:calc({pos:.0f}% - 5px);top:-2px;width:10px;"
+                        f"height:11px;border-radius:3px;background:{col};box-shadow:0 0 6px {col}'></div></div>"
+                        f"<div style='font-size:10px;color:{_ta['muted']}'>{n_rel} chiffre(s) publié(s) pris en compte</div>"
+                        f"</div>",
+                        unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='font-size:11px;color:{_ta['muted']};margin:6px 2px 2px'>"
+            f"Score = moyenne pondérée (importance) de l'effet des surprises publiées sur l'actif. "
+            f"Positif = pression haussière, négatif = baissière.</div>",
+            unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # ── Fil des publications : Prévu vs Publié + impact ──────────────────────
+        st.markdown("##### <i class='fa-solid fa-newspaper'></i> Publications — consensus vs résultat",
+                    unsafe_allow_html=True)
+
+        # Tri : publiés récents en premier, puis à venir (plus proche d'abord)
+        published = [e for e in feed if e["has_actual"]]
+        upcoming = [e for e in feed if not e["has_actual"]]
+        published.sort(key=lambda e: e["dt"] or datetime.min, reverse=True)
+        upcoming.sort(key=lambda e: e["dt"] or datetime.max)
+        ordered = published + upcoming
+        MAXN = 45
+        shown = ordered[:MAXN]
+
+        for e in shown:
+            _render_card(e)
+
+        if len(ordered) > MAXN:
+            st.caption(f"{len(ordered)} publications au total · {MAXN} affichées (publiées en premier). "
+                       f"Affinez via les filtres Période / Impact.")
+
+        st.caption(f"Source des données : {_src}. L'impact par actif est une estimation directionnelle "
+                   "fondée sur la réaction habituelle : un chiffre supérieur au consensus renforce "
+                   "généralement la devise (sauf chômage / inscriptions). Pour les indices actions, "
+                   "une inflation ou un taux plus chauds pèsent (effet hawkish) ; pour les obligations, "
+                   "des chiffres plus chauds font monter les rendements et baisser le prix. "
+                   "Analyse indicative, à recouper avec le contexte de marché.")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TABLEAU DE BORD MACRO : données, biais, puis zones
+    # ══════════════════════════════════════════════════════════════════════════
+    _cs_m = get_chart_style()
+    with st.spinner("Chargement des données macro (FRED, BIS, marchés)…"):
+        _mx = macro_load()
+    try:
+        _ev3w = mx_events_frame(_fetch_calendar("all")[0])
+    except Exception:
+        _ev3w = pd.DataFrame()
+    try:
+        _evr = mx_events_frame([e for e in _fetch_calendar("rates")[0]
+                                if any(k in str(e.get("title", "")).lower() for k in _MX_RATE_RX)])
+    except Exception:
+        _evr = pd.DataFrame()
+    _ev_all = pd.concat([x for x in (_ev3w, _evr) if not x.empty]).drop_duplicates(
+        subset=["title", "country", "date"]) if (not _ev3w.empty or not _evr.empty) else pd.DataFrame()
+
+    _pol = mx_policy(_mx, _evr)
+    _fed = mx_fed_pricing(_mx)
+    _stance = mx_stance(_pol, _ev_all, _fed)
+    _reg_sc, _reg_lab, _reg_comps = mx_risk_regime(_mx)
+    _strength = mx_strength(_mx)
+    _surp = {c: mx_surprise_index(_ev_all, c) for c in MX_CCYS}
+
+    def _sgn_col(v, pos_good=True):
+        if v is None: return _ta["muted"]
+        if abs(v) < 1e-12: return _ta["muted"]
+        return _ta["win"] if ((v > 0) == pos_good) else _ta["loss"]
+
+    def _nfr(v, d=2, suf=""):
+        return "—" if v is None else (f"{v:,.{d}f}".replace(",", " ").replace(".", ",") + suf)
+
+    def _spark(s, color, w=110, h=30, n=60):
+        if s is None or len(s) < 3:
+            return ""
+        v = list(s.iloc[-n:].astype(float))
+        lo, hi = min(v), max(v); rg = (hi - lo) or 1.0
+        pts = " ".join(f"{i * w / (len(v) - 1):.1f},{h - 2 - (x - lo) / rg * (h - 4):.1f}" for i, x in enumerate(v))
+        return (f"<svg width='{w}' height='{h}' viewBox='0 0 {w} {h}'><polyline points='{pts}' fill='none' "
+                f"stroke='{color}' stroke-width='1.6' stroke-linejoin='round'/></svg>")
+
+    def _gauge(score, lab_neg, lab_pos):
+        pos = 50 if score is None else (score + 100) / 2
+        col = _ta["muted"] if score is None else (_ta["win"] if score >= 20 else (_ta["loss"] if score <= -20 else _ta["orange"]))
+        return (f"<div style='position:relative;height:8px;border-radius:999px;margin:10px 0 4px;"
+                f"background:linear-gradient(90deg,{_ta['loss']}55,{_ta['muted']}22,{_ta['win']}55)'>"
+                f"<div style='position:absolute;left:calc({pos:.0f}% - 7px);top:-4px;width:14px;height:16px;"
+                f"border-radius:4px;background:{col};box-shadow:0 0 8px {col}'></div></div>"
+                f"<div style='display:flex;justify-content:space-between;font-size:10px;color:{_ta['muted']}'>"
+                f"<span>{lab_neg}</span><span>{lab_pos}</span></div>")
+
+    def _chip(txt, col):
+        return (f"<span style='font-size:11px;font-weight:800;color:{col};background:{col}18;border:1px solid {col}44;"
+                f"border-radius:999px;padding:1px 9px;white-space:nowrap'>{txt}</span>")
+
+    # ── ZONE 1 : bandeau global (régime + baromètres de liquidité) ─────────────
+    def _tile(label, s, unit, d=2, pos_good=None, chg_n=1, how="lvl", shape="22px 6px 22px 6px"):
+        s2 = mx_transform(s, how) if s is not None else None
+        v, p, dt_ = mx_last(s2)
+        ch = (v - s2.iloc[-1 - chg_n]) if (s2 is not None and len(s2) > chg_n) else None
+        col = _ta["text"] if pos_good is None else _sgn_col(ch, pos_good)
+        return (f"<div style='flex:1 1 150px;min-width:140px;background:{_ta['card']};border:1px solid {_ta['border']};"
+                f"border-radius:{shape};padding:10px 14px'>"
+                f"<div style='font-size:10px;letter-spacing:1px;text-transform:uppercase;color:{_ta['muted']};font-weight:700'>{label}</div>"
+                f"<div style='display:flex;align-items:flex-end;justify-content:space-between;gap:6px'>"
+                f"<div><div style='font-size:20px;font-weight:800;color:{_ta['text']};font-family:JetBrains Mono,monospace'>"
+                f"{_nfr(v, d)}<span style='font-size:11px;color:{_ta['muted']}'> {unit}</span></div>"
+                f"<div style='font-size:11px;font-weight:700;color:{col}'>{'' if ch is None else ('▲ ' if ch > 0 else '▼ ') + _nfr(abs(ch), d)}</div></div>"
+                f"{_spark(s2, col if pos_good is not None else _ta['accent'])}</div></div>")
+
+    _rc = _ta["muted"] if _reg_sc is None else (_ta["win"] if _reg_sc >= 20 else (_ta["loss"] if _reg_sc <= -20 else _ta["orange"]))
+    _vix = _mx["yahoo"].get("^VIX", _mx["fred"].get("VIXCLS"))
+    _dxy = _mx["yahoo"].get("DX-Y.NYB", _mx["fred"].get("DTWEXBGS"))
+    _hy = _mx["fred"].get("BAMLH0A0HYM2"); _ig = _mx["fred"].get("BAMLC0A0CM")
+    _hyig = (_hy - _ig).dropna() if (_hy is not None and _ig is not None) else None
     st.markdown(
-        f"<div style='font-size:11px;color:{_ta['muted']};margin:6px 2px 2px'>"
-        f"Score = moyenne pondérée (importance) de l'effet des surprises publiées sur l'actif. "
-        f"Positif = pression haussière, négatif = baissière.</div>",
-        unsafe_allow_html=True)
+        "<div style='display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 10px'>"
+        f"<div style='flex:1.4 1 230px;min-width:220px;background:linear-gradient(135deg,{_rc}1f,{_ta['card']});"
+        f"border:1px solid {_rc}55;border-radius:30px 8px 30px 8px;padding:10px 16px'>"
+        f"<div style='font-size:10px;letter-spacing:1px;text-transform:uppercase;color:{_ta['muted']};font-weight:700'>Régime de marché</div>"
+        f"<div style='display:flex;align-items:baseline;gap:10px'><span style='font-size:22px;font-weight:800;color:{_rc}'>{_reg_lab}</span>"
+        f"<span style='font-family:JetBrains Mono,monospace;color:{_rc};font-weight:700'>{'' if _reg_sc is None else f'{_reg_sc:+.0f}'}</span></div>"
+        f"{_gauge(_reg_sc, 'Risk-Off', 'Risk-On')}</div>"
+        + _tile("Dollar (DXY)", _dxy, "", 2, None)
+        + _tile("VIX", _vix, "", 1, False, shape="44px 12px 12px 44px")
+        + _tile("Courbe 10 ans - 2 ans", _mx["fred"].get("T10Y2Y"), "pb", 0, True, how="bp")
+        + _tile("Spread HY - IG", _hyig, "pb", 0, False, how="bp",
+                shape="3px 20px 3px 20px")
+        + "</div>", unsafe_allow_html=True)
+    if _mx["missing"]:
+        st.caption("Données partielles · " + " · ".join(
+            f"{k} : {len(v) if v and v[0] not in ('toutes les séries', 'tous les cours', 'toutes les banques centrales') else 'indisponible'}"
+            + (" série(s) manquante(s)" if v and v[0] not in ('toutes les séries', 'tous les cours', 'toutes les banques centrales') else "")
+            for k, v in _mx["missing"].items()))
 
-    st.markdown("---")
+    (tab_syn, tab_cal, tab_mon, tab_inf, tab_gro, tab_liq, tab_met) = st.tabs([
+        "Synthèse & biais", "Calendrier & surprises", "Politique monétaire", "Inflation & Emploi",
+        "Croissance", "Liquidité & Sentiment", "Méthode & sources"])
 
-    # ── Fil des publications : Prévu vs Publié + impact ──────────────────────
-    st.markdown("##### <i class='fa-solid fa-newspaper'></i> Publications — consensus vs résultat",
+    def _hz_series(s, key, default="3 ans"):
+        hz = st.session_state.get(key, default)
+        days = {"1 an": 365, "3 ans": 1095, "5 ans": 1825, "10 ans": 3650}.get(hz, 1095)
+        return s[s.index >= s.index[-1] - pd.Timedelta(days=days)] if (s is not None and len(s)) else s
+
+    def _ts_chart(series_list, key, height=250, ref=None, unit=""):
+        """series_list : [(libellé, série, couleur)] ; ref = ligne horizontale (ex. cible 2 %)."""
+        fig = go.Figure()
+        for lab, s, col in series_list:
+            if s is None or len(s) == 0:
+                continue
+            s = _hz_series(s, key)
+            fig.add_trace(go.Scatter(x=s.index, y=s.values, name=lab, mode="lines",
+                                     line=dict(color=col, width=2), hovertemplate=f"%{{y:.2f}} {unit}<extra>{lab}</extra>"))
+        if not fig.data:
+            st.caption("Série indisponible pour le moment.")
+            return
+        if ref is not None:
+            fig.add_hline(y=ref, line=dict(color=_ta["muted"], dash="dot", width=1))
+        fig.update_layout(**chart_layout(_ta, _cs_m, height=height, showlegend=len(fig.data) > 1,
+                                         margin=dict(l=44, r=12, t=24, b=30),
+                                         legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0,
+                                                     font=dict(color=_ta["text"], size=11), bgcolor="rgba(0,0,0,0)")))
+        chart_axes(fig, _ta, _cs_m)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"mxc_{key}_{series_list[0][0]}")
+
+    def _hz_picker(key):
+        st.radio("Horizon", ["1 an", "3 ans", "5 ans", "10 ans"], index=1, horizontal=True, key=key,
+                 label_visibility="collapsed")
+
+    _MX_CAL_MATCH = {  # série FRED -> mots du titre de la publication correspondante (USD)
+        "CPIAUCSL": (["cpi"], ["core", "m/m", "mom"]), "CPILFESL": (["core cpi"], ["m/m", "mom"]),
+        "PCEPILFE": (["core pce"], []), "PCEPI": (["pce price"], ["core"]),
+        "PAYEMS": (["non-farm", "nonfarm"], []), "UNRATE": (["unemployment rate"], []),
+        "CES0500000003": (["average hourly earnings"], []), "ICSA": (["jobless claims", "initial claims"], ["continuing"]),
+        "A191RL1Q225SBEA": (["gdp"], ["deflator", "price"]), "RSAFS": (["retail sales"], ["core", "control", "ex"]),
+        "UMCSENT": (["michigan", "consumer sentiment"], ["expectations", "inflation"]),
+        "INDPRO": (["industrial production"], []),
+    }
+
+    def _cal_last(sid):
+        if _ev_all is None or _ev_all.empty or sid not in _MX_CAL_MATCH:
+            return None
+        inc, exc = _MX_CAL_MATCH[sid]
+        t = _ev_all["title"].astype(str).str.lower()
+        m = (_ev_all["country"] == "USD") & _ev_all["has_actual"] & t.map(lambda x: any(k in x for k in inc) and not any(k in x for k in exc))
+        d = _ev_all[m].sort_values("dt")
+        return None if d.empty else d.iloc[-1]
+
+    def _ind_card(sid, label=None, d=1, pos_good=True, shape="22px 6px 22px 6px"):
+        lab_, unit, how = MX_FRED[sid]
+        s = mx_transform(_mx["fred"].get(sid), how)
+        v, p, dt_ = mx_last(s)
+        ch = None if (v is None or p is None) else v - p
+        col = _sgn_col(ch, pos_good)
+        cal = _cal_last(sid)
+        cal_html = ""
+        if cal is not None:
+            z = cal["zs"]
+            zc = _ta["muted"] if z is None or abs(z) < 0.3 else (_ta["win"] if z > 0 else _ta["loss"])
+            cal_html = (f"<div style='margin-top:6px;font-size:11px;color:{_ta['muted']};line-height:1.5'>"
+                        f"Publié <b style='color:{_ta['text']}'>{_html.escape(str(cal['actual']))}</b> · consensus "
+                        f"<b style='color:{_ta['text']}'>{_html.escape(str(cal['forecast']) or '—')}</b> · préc. "
+                        f"{_html.escape(str(cal['previous']) or '—')}<br>"
+                        + (_chip(f"Surprise {z:+.1f} σ", zc) if z is not None else "") + "</div>")
+        st.markdown(
+            f"<div style='background:{_ta['card']};border:1px solid {_ta['border']};border-radius:{shape};"
+            f"padding:10px 14px;margin-bottom:10px;min-height:118px'>"
+            f"<div style='display:flex;justify-content:space-between;gap:6px'>"
+            f"<span style='font-size:11.5px;font-weight:700;color:{_ta['text']}'>{label or lab_}</span>"
+            f"<span style='font-size:10px;color:{_ta['muted']}'>{'' if dt_ is None else dt_.strftime('%m/%Y')}</span></div>"
+            f"<div style='display:flex;align-items:flex-end;justify-content:space-between'>"
+            f"<div><span style='font-size:22px;font-weight:800;color:{_ta['text']};font-family:JetBrains Mono,monospace'>{_nfr(v, d)}</span>"
+            f"<span style='font-size:11px;color:{_ta['muted']}'> {unit}</span>"
+            f"<div style='font-size:11px;color:{col};font-weight:700'>préc. {_nfr(p, d)} "
+            f"{'' if ch is None else ('▲' if ch > 0 else '▼' if ch < 0 else '=')}</div></div>"
+            f"{_spark(s, _ta['accent'])}</div>{cal_html}</div>", unsafe_allow_html=True)
+
+    def _releases_table(cats, title):
+        if _ev_all is None or _ev_all.empty:
+            st.caption("Calendrier indisponible.")
+            return
+        d = _ev_all[_ev_all["cat"].isin(cats) & _ev_all["has_actual"]].sort_values("dt", ascending=False).head(18)
+        if d.empty:
+            st.caption("Aucune publication récente dans le calendrier.")
+            return
+        rows = ""
+        for _, r in d.iterrows():
+            z = r["zs"]
+            zc = _ta["muted"] if z is None or abs(z) < 0.3 else (_ta["win"] if z > 0 else _ta["loss"])
+            rows += (f"<tr><td style='white-space:nowrap;color:var(--tj-muted)'>{_fmt_local(r['date'])[0]}</td>"
+                     f"<td><b>{r['country']}</b></td><td>{_html.escape(str(r['title']))}</td>"
+                     f"<td style='font-family:monospace;font-weight:800'>{_html.escape(str(r['actual']))}</td>"
+                     f"<td style='font-family:monospace'>{_html.escape(str(r['forecast']) or '—')}</td>"
+                     f"<td style='font-family:monospace;color:var(--tj-muted)'>{_html.escape(str(r['previous']) or '—')}</td>"
+                     f"<td>{_chip(f'{z:+.1f} σ', zc) if z is not None else '—'}</td></tr>")
+        _card_t(title)
+        st.markdown(f"<div style='overflow-x:auto'><table class='tj-table'><thead><tr><th>Date</th><th>Devise</th>"
+                    f"<th>Indicateur</th><th>Actuel</th><th>Consensus</th><th>Précédent</th><th>Surprise</th></tr></thead>"
+                    f"<tbody>{rows}</tbody></table></div>", unsafe_allow_html=True)
+
+    def _card_t(title, sub=""):
+        st.markdown(f"<div style='margin:6px 0 8px'><span style='font-size:13.5px;font-weight:700;color:{_ta['text']};"
+                    f"background:{_ta['accent']}14;border-left:3px solid {_ta['accent']};border-radius:3px 999px 999px 3px;"
+                    f"padding:3px 14px 3px 10px'>{title}</span>"
+                    + (f" <span style='font-size:11px;color:{_ta['muted']}'>{sub}</span>" if sub else "") + "</div>",
+                    unsafe_allow_html=True)
+
+    # ── ONGLET 1 : SYNTHÈSE & BIAIS ───────────────────────────────────────────
+    with tab_syn:
+        _comp = {}
+        for c in MX_CCYS:
+            st_sc = _stance.get(c, (None,))[0]
+            su = _surp.get(c, (None, 0))[0]
+            fs = None
+            if not _strength.empty and "1 mois" in _strength.columns and _strength.loc[c, "1 mois"] is not None \
+                    and not pd.isna(_strength.loc[c, "1 mois"]):
+                fs = float(np.tanh(_strength.loc[c, "1 mois"] / 1.5) * 100)
+            parts = [(x, w) for x, w in ((st_sc, 0.45), (su, 0.30), (fs, 0.25)) if x is not None]
+            _comp[c] = (sum(x * w for x, w in parts) / sum(w for _, w in parts)) if parts else None
+
+        s1, s2 = st.columns([1.05, 1], gap="medium")
+        with s1:
+            _card_t("Biais par devise", "politique monétaire · surprises · force de marché")
+            rows = ""
+            for c in sorted(MX_CCYS, key=lambda x: -(_comp[x] if _comp[x] is not None else -999)):
+                p = _pol[c]; sc, lab, det = _stance.get(c, (None, "Indisponible", ""))
+                lc = {"Hawkish": _ta["win"], "Dovish": _ta["loss"]}.get(lab, _ta["muted"])
+                su = _surp[c][0]; cp = _comp[c]
+                cc = _ta["muted"] if cp is None else (_ta["win"] if cp >= 15 else (_ta["loss"] if cp <= -15 else _ta["orange"]))
+                rows += (f"<tr><td><b>{c}</b> <span style='color:var(--tj-muted);font-size:11px'>{p['cb']}</span></td>"
+                         f"<td style='font-family:monospace'>{_nfr(p['rate'], 2, ' %')}</td>"
+                         f"<td title='{_html.escape(det)}'>{_chip(lab + ('' if sc is None else f' {sc:+.0f}'), lc)}</td>"
+                         f"<td style='font-family:monospace;color:{_sgn_col(su)}'>{'—' if su is None else f'{su:+.0f}'}</td>"
+                         f"<td><div style='display:flex;align-items:center;gap:6px'><div style='width:70px;height:6px;"
+                         f"border-radius:999px;background:{_ta['border']};position:relative'><div style='position:absolute;"
+                         f"left:{50 if cp is None else (cp + 100) / 2:.0f}%;top:-3px;width:4px;height:12px;border-radius:2px;"
+                         f"background:{cc}'></div></div><b style='color:{cc};font-family:monospace'>"
+                         f"{'—' if cp is None else f'{cp:+.0f}'}</b></div></td></tr>")
+            st.markdown(f"<table class='tj-table'><thead><tr><th>Devise</th><th>Taux</th><th>Politique</th>"
+                        f"<th>Surprise 30 j</th><th>Biais global</th></tr></thead><tbody>{rows}</tbody></table>",
+                        unsafe_allow_html=True)
+            _rk = [c for c in MX_CCYS if _comp[c] is not None]
+            if len(_rk) >= 2:
+                hi = max(_rk, key=lambda c: _comp[c]); lo = min(_rk, key=lambda c: _comp[c])
+                if _comp[hi] - _comp[lo] >= 25:
+                    st.markdown(
+                        f"<div style='margin-top:8px;padding:8px 14px;border-radius:16px 16px 16px 4px;"
+                        f"background:{_ta['accent']}12;border:1px solid {_ta['accent']}44;font-size:12.5px;color:{_ta['text']}'>"
+                        f"Divergence la plus marquée : <b>{hi}</b> ({_comp[hi]:+.0f}) contre <b>{lo}</b> ({_comp[lo]:+.0f}). "
+                        f"Les fondamentaux favorisent <b>{hi}/{lo}</b> à la hausse, à confirmer par la technique.</div>",
+                        unsafe_allow_html=True)
+        with s2:
+            _card_t("Force des devises", "performance relative au panier, en %")
+            if _strength.empty:
+                st.caption("Cours de change indisponibles.")
+            else:
+                z = _strength.astype(float)
+                zmax = float(np.nanmax(np.abs(z.values))) or 1.0
+                fig = go.Figure(go.Heatmap(
+                    z=z.values, x=list(z.columns), y=list(z.index), zmin=-zmax, zmax=zmax,
+                    colorscale=[[0, _ta["loss"]], [0.5, _ta["card"]], [1, _ta["win"]]], showscale=False,
+                    text=[[("" if pd.isna(v) else f"{v:+.2f}") for v in row] for row in z.values],
+                    texttemplate="%{text}", textfont=dict(size=12, color=_ta["text"]),
+                    hovertemplate="%{y} · %{x} : %{z:+.2f} %<extra></extra>", xgap=3, ygap=3))
+                fig.update_layout(**chart_layout(_ta, _cs_m, height=300, margin=dict(l=44, r=10, t=10, b=30)))
+                fig.update_yaxes(autorange="reversed", tickfont=dict(color=_ta["text"]), ticks="", showgrid=False, zeroline=False)
+                fig.update_xaxes(side="top", tickfont=dict(color=_ta["muted"]), ticks="", showgrid=False, zeroline=False)
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="mx_heat")
+
+        r1, r2 = st.columns([1, 1.05], gap="medium")
+        with r1:
+            _card_t("Régime Risk-On / Risk-Off", "composantes, en écarts-types")
+            if not _reg_comps:
+                st.caption("Données de marché indisponibles.")
+            else:
+                fig = go.Figure(go.Bar(
+                    y=[c[0] for c in _reg_comps], x=[c[1] for c in _reg_comps], orientation="h",
+                    marker_color=[_ta["win"] if c[1] >= 0 else _ta["loss"] for c in _reg_comps],
+                    text=[f"{c[1]:+.1f} σ" for c in _reg_comps], textposition="outside",
+                    customdata=[c[2] for c in _reg_comps],
+                    hovertemplate="%{y} (%{customdata}) : %{x:+.2f} σ<extra></extra>"))
+                fig.update_layout(**chart_layout(_ta, _cs_m, height=230, margin=dict(l=150, r=30, t=10, b=24)))
+                fig.update_xaxes(range=[-3.4, 3.4], zeroline=True, zerolinecolor=_ta["muted"], gridcolor=_ta["border"])
+                fig.update_yaxes(tickfont=dict(color=_ta["text"]))
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="mx_regime")
+                st.caption("Vert = pousse vers le Risk-On. Le dollar et le VIX sont inversés : leur hausse traduit une "
+                           "recherche de refuge.")
+        with r2:
+            _card_t("Prochaines annonces à fort impact", "72 h · volatilité attendue")
+            if _ev3w.empty:
+                st.caption("Calendrier indisponible.")
+            else:
+                now = datetime.utcnow()
+                up = _ev3w[(_ev3w["dt"] >= now - timedelta(minutes=15)) & (_ev3w["dt"] <= now + timedelta(hours=72))
+                           & _ev3w["impact"].isin(["High", "Medium"]) & _ev3w["country"].isin(MX_CCYS)].sort_values("dt").head(9)
+                if up.empty:
+                    st.caption("Aucune annonce Fort / Moyen dans les 72 prochaines heures.")
+                for _, r in up.iterrows():
+                    vv, vl = mx_expected_vol(r, _reg_sc, _ev_all)
+                    vc = {"Forte": _ta["loss"], "Moyenne": _ta["orange"]}.get(vl, _ta["muted"])
+                    st.markdown(
+                        f"<div style='display:flex;align-items:center;gap:10px;padding:6px 12px;margin-bottom:6px;"
+                        f"background:{_ta['card']};border:1px solid {_ta['border']};border-left:3px solid {vc};"
+                        f"border-radius:4px 18px 18px 4px'>"
+                        f"<span style='font-family:JetBrains Mono,monospace;font-size:11.5px;color:{_ta['muted']};min-width:98px'>"
+                        f"{_fmt_local(r['date'])[0]}</span><b style='font-size:12px'>{r['country']}</b>"
+                        f"<span style='font-size:12.5px;color:{_ta['text']};flex:1'>{_html.escape(str(r['title']))}</span>"
+                        f"<span style='font-size:11px;color:{_ta['muted']}'>cons. {_html.escape(str(r['forecast']) or '—')}</span>"
+                        f"{_chip('Vol. ' + vl.lower(), vc)}</div>", unsafe_allow_html=True)
+
+    # ── ONGLET 2 : CALENDRIER & SURPRISES (fil existant) ──────────────────────
+    with tab_cal:
+        _card_t("Indice de surprise par devise", "30 derniers jours, -100 à +100")
+        _sv = [(c, _surp[c][0], _surp[c][1]) for c in MX_CCYS if _surp[c][0] is not None]
+        if _sv:
+            fig = go.Figure(go.Bar(x=[c for c, _, _ in _sv], y=[v for _, v, _ in _sv],
+                                   marker_color=[_ta["win"] if v >= 0 else _ta["loss"] for _, v, _ in _sv],
+                                   text=[f"{v:+.0f}" for _, v, _ in _sv], textposition="outside",
+                                   customdata=[n for _, _, n in _sv],
+                                   hovertemplate="%{x} : %{y:+.0f} (%{customdata} publications)<extra></extra>"))
+            fig.update_layout(**chart_layout(_ta, _cs_m, height=200, margin=dict(l=40, r=10, t=14, b=26)))
+            fig.update_yaxes(range=[-110, 110], gridcolor=_ta["border"], zeroline=True, zerolinecolor=_ta["muted"])
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="mx_surp")
+        else:
+            st.caption("Pas encore de publications avec consensus sur 30 jours.")
+        _calendar_tab(df)
+
+    # ── ONGLET 3 : POLITIQUE MONÉTAIRE ────────────────────────────────────────
+    with tab_mon:
+        m1, m2 = st.columns([1.25, 1], gap="medium")
+        with m1:
+            _card_t("Taux directeurs", "niveau, dernière décision, prochaine réunion")
+            rows = ""
+            for c in MX_CCYS:
+                p = _pol[c]; sc, lab, det = _stance.get(c, (None, "Indisponible", ""))
+                lc = {"Hawkish": _ta["win"], "Dovish": _ta["loss"]}.get(lab, _ta["muted"])
+                lm = p["last_move"]
+                lm_t = "—" if lm is None else (f"{lm*100:+.0f} pb" + (f" ({pd.Timestamp(p['last_date']).strftime('%d/%m/%y')})"
+                                                                       if p["last_date"] is not None else ""))
+                c6 = "—" if p["chg6m"] is None else f"{p['chg6m'] * 100:+.0f} pb"
+                nx = "—" if p["next_date"] is None else pd.Timestamp(p["next_date"]).strftime("%d/%m")
+                exp_ = "" if (p["next_cons"] is None or p["rate"] is None) else f" · cons. {_nfr(p['next_cons'], 2, ' %')}"
+                rows += (f"<tr><td><b>{p['cb']}</b> <span style='color:var(--tj-muted);font-size:11px'>{c}</span></td>"
+                         f"<td style='font-family:monospace;font-weight:800'>{_nfr(p['rate'], 2, ' %')}</td>"
+                         f"<td style='font-family:monospace;color:{_sgn_col(lm)}'>{lm_t}</td>"
+                         f"<td style='font-family:monospace;color:{_sgn_col(p['chg6m'])}'>"
+                         f"{c6}</td>"
+                         f"<td style='font-size:12px'>{nx}{exp_}</td>"
+                         f"<td title='{_html.escape(det)}'>{_chip(lab, lc)}</td>"
+                         f"<td style='font-size:10.5px;color:var(--tj-muted)'>{p['src'] or '—'}</td></tr>")
+            st.markdown(f"<div style='overflow-x:auto'><table class='tj-table'><thead><tr><th>Banque</th><th>Taux</th>"
+                        f"<th>Dernier mouvement</th><th>6 mois</th><th>Prochaine réunion</th><th>Orientation</th>"
+                        f"<th>Source</th></tr></thead><tbody>{rows}</tbody></table></div>", unsafe_allow_html=True)
+        with m2:
+            _card_t("Anticipations sur la Fed")
+            fb = _fed.get("bp"); sp = _fed.get("spread2y")
+            st.markdown(
+                "<div style='display:flex;gap:10px;flex-wrap:wrap'>"
+                f"<div style='flex:1;min-width:150px;background:{_ta['card']};border:1px solid {_ta['border']};border-radius:44px 12px 12px 44px;padding:10px 16px'>"
+                f"<div style='font-size:10px;text-transform:uppercase;letter-spacing:1px;color:{_ta['muted']};font-weight:700'>Fed funds futures</div>"
+                f"<div style='font-size:20px;font-weight:800;color:{_sgn_col(fb)};font-family:JetBrains Mono,monospace'>{'—' if fb is None else f'{fb:+.0f} pb'}</div>"
+                f"<div style='font-size:11px;color:{_ta['muted']}'>taux implicite {_nfr(_fed.get('implied'), 2, ' %')} vs effectif {_nfr(_fed.get('effr'), 2, ' %')}</div></div>"
+                f"<div style='flex:1;min-width:150px;background:{_ta['card']};border:1px solid {_ta['border']};border-radius:12px 44px 44px 12px;padding:10px 16px'>"
+                f"<div style='font-size:10px;text-transform:uppercase;letter-spacing:1px;color:{_ta['muted']};font-weight:700'>US 2 ans - Fed</div>"
+                f"<div style='font-size:20px;font-weight:800;color:{_sgn_col(sp)};font-family:JetBrains Mono,monospace'>{'—' if sp is None else f'{sp:+.0f} pb'}</div>"
+                f"<div style='font-size:11px;color:{_ta['muted']}'>positif : hausses anticipées · négatif : baisses</div></div></div>",
                 unsafe_allow_html=True)
+            st.caption("Le contrat Fed funds le plus proche indique le taux moyen attendu sur son mois d'échéance. "
+                       "Pour la courbe complète des anticipations (FedWatch, swaps €STR / SONIA), voir la méthode.")
+        _hz_picker("hz_mon")
+        g1, g2 = st.columns(2, gap="medium")
+        with g1:
+            _card_t("Taux directeurs")
+            pal = [_ta["accent"], _ta["alt"], _ta["orange"], _ta["win"], _ta["loss"], _ta["muted"], "#8ab4f8", "#c58af9"]
+            _ts_chart([(f"{_pol[c]['cb']}", _pol[c]["series"], pal[i % len(pal)]) for i, c in enumerate(MX_CCYS)
+                       if _pol[c]["series"] is not None], "hz_mon", unit="%")
+        with g2:
+            _card_t("Bilans des banques centrales", "Fed et BCE, milliers de milliards")
+            fw = _mx["fred"].get("WALCL"); ew = _mx["fred"].get("ECBASSETSW")
+            _ts_chart([("Fed (T$)", fw / 1e6 if fw is not None else None, _ta["accent"]),
+                       ("BCE (T€)", ew / 1e6 if ew is not None else None, _ta["alt"])], "hz_mon")
 
-    # Tri : publiés récents en premier, puis à venir (plus proche d'abord)
-    published = [e for e in feed if e["has_actual"]]
-    upcoming = [e for e in feed if not e["has_actual"]]
-    published.sort(key=lambda e: e["dt"] or datetime.min, reverse=True)
-    upcoming.sort(key=lambda e: e["dt"] or datetime.max)
-    ordered = published + upcoming
-    MAXN = 45
-    shown = ordered[:MAXN]
+    # ── ONGLET 4 : INFLATION & EMPLOI ─────────────────────────────────────────
+    with tab_inf:
+        _card_t("États-Unis", "dernière valeur · précédente · publication vs consensus")
+        ic = st.columns(4)
+        for i, (sid, pg) in enumerate([("CPIAUCSL", False), ("CPILFESL", False), ("PCEPILFE", False), ("CES0500000003", False)]):
+            with ic[i]:
+                _ind_card(sid, pos_good=pg, d=1, shape=["22px 6px 22px 6px", "44px 12px 12px 44px", "3px 20px 3px 20px", "12px 44px 44px 12px"][i])
+        ic = st.columns(4)
+        for i, (sid, pg, dd) in enumerate([("PAYEMS", True, 0), ("UNRATE", False, 1), ("ICSA", False, 0), ("T5YIE", False, 2)]):
+            with ic[i]:
+                _ind_card(sid, pos_good=pg, d=dd, shape=["12px 44px 44px 12px", "22px 6px 22px 6px", "44px 12px 12px 44px", "3px 20px 3px 20px"][i])
+        _hz_picker("hz_inf")
+        g1, g2 = st.columns(2, gap="medium")
+        with g1:
+            _card_t("Inflation US", "% sur un an · cible Fed 2 %")
+            _ts_chart([("CPI", mx_transform(_mx["fred"].get("CPIAUCSL"), "yoy"), _ta["loss"]),
+                       ("Core CPI", mx_transform(_mx["fred"].get("CPILFESL"), "yoy"), _ta["orange"]),
+                       ("Core PCE", mx_transform(_mx["fred"].get("PCEPILFE"), "yoy"), _ta["accent"])], "hz_inf", ref=2.0, unit="%")
+        with g2:
+            _card_t("Marché du travail US", "chômage % · salaires % a/a")
+            _ts_chart([("Chômage", _mx["fred"].get("UNRATE"), _ta["alt"]),
+                       ("Salaires a/a", mx_transform(_mx["fred"].get("CES0500000003"), "yoy"), _ta["win"])], "hz_inf", unit="%")
+        _releases_table(["Inflation", "Emploi"], "Dernières publications, toutes devises")
 
-    for e in shown:
-        _render_card(e)
+    # ── ONGLET 5 : CROISSANCE ─────────────────────────────────────────────────
+    with tab_gro:
+        _card_t("États-Unis", "activité et confiance")
+        gc = st.columns(4)
+        for i, (sid, dd) in enumerate([("A191RL1Q225SBEA", 1), ("RSAFS", 1), ("INDPRO", 1), ("UMCSENT", 1)]):
+            with gc[i]:
+                _ind_card(sid, d=dd, shape=["44px 12px 12px 44px", "22px 6px 22px 6px", "3px 20px 3px 20px", "12px 44px 44px 12px"][i])
+        _hz_picker("hz_gro")
+        g1, g2 = st.columns(2, gap="medium")
+        with g1:
+            _card_t("PIB US", "croissance trimestrielle annualisée, %")
+            gdp = _mx["fred"].get("A191RL1Q225SBEA")
+            if gdp is not None and len(gdp):
+                gs = _hz_series(gdp, "hz_gro")
+                fig = go.Figure(go.Bar(x=gs.index, y=gs.values, marker_color=[_ta["win"] if v >= 0 else _ta["loss"] for v in gs.values],
+                                       hovertemplate="%{x|%m/%Y} : %{y:.1f} %<extra></extra>"))
+                fig.update_layout(**chart_layout(_ta, _cs_m, height=250, margin=dict(l=40, r=10, t=14, b=30)))
+                chart_axes(fig, _ta, _cs_m)
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="mx_gdp")
+            else:
+                st.caption("Série indisponible pour le moment.")
+        with g2:
+            _card_t("Consommation et industrie", "% sur un an")
+            _ts_chart([("Ventes au détail a/a", mx_transform(_mx["fred"].get("RSAFS"), "yoy"), _ta["accent"]),
+                       ("Production industrielle a/a", mx_transform(_mx["fred"].get("INDPRO"), "yoy"), _ta["orange"])], "hz_gro", ref=0, unit="%")
+        _releases_table(["Croissance"], "PMI, ISM, ZEW, IFO, ventes, confiance : dernières publications")
 
-    if len(ordered) > MAXN:
-        st.caption(f"{len(ordered)} publications au total · {MAXN} affichées (publiées en premier). "
-                   f"Affinez via les filtres Période / Impact.")
+    # ── ONGLET 6 : LIQUIDITÉ & SENTIMENT ──────────────────────────────────────
+    with tab_liq:
+        lc = st.columns(4)
+        tiles = [("Courbe 10 ans - 3 mois", _mx["fred"].get("T10Y3M"), "pb", 0, True, "bp"),
+                 ("Spread High Yield", _hy, "pb", 0, False, "bp"),
+                 ("Masse monétaire M2", _mx["fred"].get("M2SL"), "% a/a", 1, True, "yoy"),
+                 ("Conditions financières", _mx["fred"].get("NFCI"), "", 2, False, "lvl")]
+        shapes = ["22px 6px 22px 6px", "44px 12px 12px 44px", "3px 20px 3px 20px", "12px 44px 44px 12px"]
+        for i, (lab, s, u, dd, pg, how) in enumerate(tiles):
+            with lc[i]:
+                st.markdown("<div style='display:flex'>" + _tile(lab, s, u, dd, pg, how=how, shape=shapes[i]) + "</div>",
+                            unsafe_allow_html=True)
+        _hz_picker("hz_liq")
+        g1, g2 = st.columns(2, gap="medium")
+        with g1:
+            _card_t("Courbe des taux US", "points de base · négatif = courbe inversée")
+            _ts_chart([("10 ans - 2 ans", mx_transform(_mx["fred"].get("T10Y2Y"), "bp"), _ta["accent"]),
+                       ("10 ans - 3 mois", mx_transform(_mx["fred"].get("T10Y3M"), "bp"), _ta["orange"])], "hz_liq", ref=0, unit="pb")
+        with g2:
+            _card_t("Spreads de crédit", "points de base")
+            _ts_chart([("High Yield", mx_transform(_hy, "bp") if _hy is not None else None, _ta["loss"]),
+                       ("Investment Grade", mx_transform(_ig, "bp") if _ig is not None else None, _ta["accent"]),
+                       ("HY - IG", mx_transform(_hyig, "bp") if _hyig is not None else None, _ta["orange"])], "hz_liq", unit="pb")
+        g3, g4 = st.columns(2, gap="medium")
+        with g3:
+            _card_t("Dollar et volatilité", "DXY · VIX")
+            _ts_chart([("DXY", _dxy, _ta["accent"]), ("VIX", _vix, _ta["loss"])], "hz_liq")
+        with g4:
+            _card_t("Liquidité", "M2 % a/a · bilan Fed en T$")
+            fw = _mx["fred"].get("WALCL")
+            _ts_chart([("M2 a/a", mx_transform(_mx["fred"].get("M2SL"), "yoy"), _ta["win"]),
+                       ("Bilan Fed", fw / 1e6 if fw is not None else None, _ta["alt"])], "hz_liq")
 
-    st.caption(f"Source des données : {_src}. L'impact par actif est une estimation directionnelle "
-               "fondée sur la réaction habituelle : un chiffre supérieur au consensus renforce "
-               "généralement la devise (sauf chômage / inscriptions). Pour les indices actions, "
-               "une inflation ou un taux plus chauds pèsent (effet hawkish) ; pour les obligations, "
-               "des chiffres plus chauds font monter les rendements et baisser le prix. "
-               "Analyse indicative, à recouper avec le contexte de marché.")
+    # ── ONGLET 7 : MÉTHODE & SOURCES ──────────────────────────────────────────
+    with tab_met:
+        st.markdown(MX_METHOD_MD)
 
 
 elif st.session_state.page == "calendar":
