@@ -154,7 +154,7 @@ def _is_light(t):
 # Designs clairs d'abord (fond non noir par défaut), puis les sombres, au choix
 THEME_NAMES = ([n for n, t in THEMES.items() if _is_light(t)]
                + [n for n, t in THEMES.items() if not _is_light(t)])
-DEFAULT_THEME = "Émeraude Sombre"  # design par défaut du dashboard
+DEFAULT_THEME = "Violet Lavande"   # design par défaut du dashboard
 LOGIN_THEME   = "Navy Corporate"   # design unique de la page de connexion
 DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
 DEFAULT_BG      = "Bitcoin"            # fond d'écran par défaut
@@ -1016,6 +1016,34 @@ def screenshots_save(shots):
             headers={**SB_HDR, "Prefer": "resolution=merge-duplicates,return=representation"},
             json={"key": "trade_screenshots", "value": shots}, timeout=30)
         return r2.status_code in (200, 201)
+    except Exception:
+        return False
+
+def kv_load_many(keys):
+    """Lit plusieurs clés en une requête : {clé: valeur}."""
+    keys = [k for k in keys if k]
+    if not keys:
+        return {}
+    if not _sb_ready():
+        return {k: st.session_state.get(f"_local_kv_{k}") for k in keys}
+    out = {}
+    try:
+        for i in range(0, len(keys), 40):
+            chunk = keys[i:i + 40]
+            r = requests.get(f"{SB_EP}?key=in.({','.join(chunk)})&select=key,value", headers=SB_HDR, timeout=20)
+            if r.status_code == 200:
+                out.update({row["key"]: row.get("value") for row in r.json()})
+    except Exception:
+        pass
+    return out
+
+def kv_delete(key):
+    if not _sb_ready():
+        st.session_state.pop(f"_local_kv_{key}", None)
+        return False
+    try:
+        r = requests.delete(f"{SB_EP}?key=eq.{key}", headers=SB_HDR, timeout=15)
+        return r.status_code in (200, 204)
     except Exception:
         return False
 
@@ -7073,87 +7101,297 @@ elif st.session_state.page == "sessions":
 
 elif st.session_state.page == "captures":
     _t = get_theme()
-    st.markdown("# Captures d'écran des trades")
-    st.caption("Toutes les captures de setups, filtrables par date et par compte. "
-               + ("L'ajout se fait dans le Journal (trade sélectionné)."
-                  if is_admin() else "Consultation limitée à vos comptes."))
+    st.markdown(
+        f"<div style='display:flex;align-items:baseline;gap:12px'>"
+        f"<span style='font-size:22px;font-weight:800;color:{_t['text']}'>Captures d'écran</span>"
+        f"<span style='font-size:12px;color:{_t['muted']}'>images libres ou rattachées aux trades</span></div>",
+        unsafe_allow_html=True)
+    tab_free, tab_trc = st.tabs(["Captures libres", "Captures des trades"])
 
-    _shots = st.session_state.get("trade_screenshots", {})
-    _allowed = allowed_accounts()
-    # Index des trades par id
-    _by_id = {str(t["id"]): t for t in st.session_state.trades}
+    # ══ CAPTURES LIBRES : images seules, datées à l'import, commentables ═══════
+    with tab_free:
+        _me = st.session_state.get("auth_user", "")
+        if "_free_idx" not in st.session_state:
+            st.session_state._free_idx = kv_load("free_captures_index", []) or []
+        if "_free_grp" not in st.session_state:
+            st.session_state._free_grp = kv_load("free_captures_groups", {}) or {}
+        _idx = st.session_state._free_idx
+        _grp = st.session_state._free_grp
+        _gid = lambda c: c.get("group") or f"{c['ts']}|{c.get('owner', '')}"
+        # anciens imports : la note commune devient le commentaire du groupe
+        for c in _idx:
+            if c.get("note") and _gid(c) not in _grp:
+                _grp[_gid(c)] = c["note"]
+        _vis = [c for c in _idx if is_admin() or c.get("owner") == _me]
 
-    # Construire la liste (trade, screenshot) visible selon droits
-    _items = []
-    for tid, lst in _shots.items():
-        tr = _by_id.get(str(tid))
-        if not tr:
-            continue
-        if tr.get("trade_mode", "Réel Indépendant") not in _allowed:
-            continue
-        for sh in lst:
-            _items.append((tr, sh))
+        def _save_caps():
+            ok1 = kv_save("free_captures_index", st.session_state._free_idx)
+            ok2 = kv_save("free_captures_groups", st.session_state._free_grp)
+            return ok1 and ok2
 
-    if not _items:
-        st.info("Aucune capture disponible pour vos comptes. "
-                + ("Ajoutez-en depuis le Journal." if is_admin() else ""))
-    else:
-        # Bornes de dates
-        _dts = sorted([tr.get("date", "") for tr, _ in _items if tr.get("date")])
-        _dmin = date.fromisoformat(_dts[0]) if _dts else date(2024, 1, 1)
-        _dmax = date.fromisoformat(_dts[-1]) if _dts else date.today()
+        # ── Import : commentaire de groupe + commentaire par image ──
+        _nup = st.session_state.get("_free_up_n", 0)
+        with st.expander("Importer des images", expanded=not _vis, icon=":material/add_photo_alternate:"):
+            _ups = st.file_uploader("Images (PNG, JPG, WEBP)", type=["png", "jpg", "jpeg", "webp"],
+                                    accept_multiple_files=True, key=f"free_up_{_nup}", label_visibility="collapsed")
+            if _ups:
+                _gnote = st.text_area("Commentaire du groupe", key=f"free_gnote_{_nup}", height=70,
+                                      placeholder="Commentaire commun à ces images : contexte, marché, idée…")
+                if len(_ups) == 1:
+                    _per = [st.text_input("Commentaire de l'image", key=f"free_c_{_nup}_0",
+                                          placeholder="Facultatif")]
+                else:
+                    st.caption("Commentaire propre à chaque image (facultatif)")
+                    _per = []
+                    _pc = st.columns(min(3, len(_ups)))
+                    for _i, f in enumerate(_ups):
+                        with _pc[_i % len(_pc)]:
+                            st.image(f, use_container_width=True)
+                            _per.append(st.text_input(f.name[:38], key=f"free_c_{_nup}_{_i}",
+                                                      placeholder="Commentaire…"))
+                if st.button(f"Importer {len(_ups)} image(s)", type="primary", icon=":material/upload:",
+                             key="free_save"):
+                    _now = datetime.now()
+                    _g = f"{_now.strftime('%Y%m%d%H%M%S')}{_secrets.token_hex(2)}"
+                    _added, _ok_all = 0, True
+                    for _i, f in enumerate(_ups):
+                        try:
+                            _cid = f"{_now.strftime('%Y%m%d%H%M%S')}{_i:03d}{_secrets.token_hex(2)}"
+                            _data = compress_image(f.getvalue())
+                            _ok_all &= bool(kv_save(f"free_cap_{_cid}", _data))
+                            st.session_state[f"_free_img_{_cid}"] = _data
+                            _idx.append({"id": _cid, "name": f.name, "ts": _now.isoformat(timespec="seconds"),
+                                         "owner": _me, "group": _g, "comment": (_per[_i] or "").strip()})
+                            _added += 1
+                        except Exception as e:
+                            st.warning(f"Échec {f.name} : {e}")
+                    if (_gnote or "").strip():
+                        _grp[_g] = _gnote.strip()
+                    st.session_state._free_idx = _idx; st.session_state._free_grp = _grp
+                    _ok_all &= bool(_save_caps())
+                    st.session_state._free_up_n = _nup + 1
+                    st.toast(f"{_added} image(s) importée(s)" + ("" if _ok_all else " (sauvegarde en ligne à vérifier)"))
+                    st.rerun()
 
-        fc1, fc2, fc3 = st.columns([1.2, 1.2, 2.4])
-        with fc1:
-            c_from = st.date_input("Du", value=_dmin, key="cap_from")
-        with fc2:
-            c_to = st.date_input("Au", value=_dmax, key="cap_to")
-        with fc3:
-            c_acc = st.multiselect("Comptes", _allowed, default=[],
-                                   placeholder="Tous mes comptes", key="cap_acc")
-
-        # Filtrage
-        def _in_range(tr):
-            d = tr.get("date", "")
-            try:
-                dd = date.fromisoformat(d)
-            except Exception:
-                return False
-            if dd < c_from or dd > c_to:
-                return False
-            if c_acc and tr.get("trade_mode") not in c_acc:
-                return False
-            return True
-
-        _filtered = [(tr, sh) for tr, sh in _items if _in_range(tr)]
-        # Trier par date décroissante
-        _filtered.sort(key=lambda x: (x[0].get("date", ""), x[1].get("ts", "")), reverse=True)
-
-        st.markdown(
-            f"<div style='color:{_t['muted']};font-size:13px;margin:6px 0 12px'>"
-            f"<b style='color:{_t['accent']};font-family:JetBrains Mono,monospace'>"
-            f"{len(_filtered)}</b> capture(s) sur la période.</div>",
-            unsafe_allow_html=True)
-
-        if not _filtered:
-            st.info("Aucune capture sur cette plage de dates.")
+        if not _vis:
+            st.info("Aucune capture libre pour l'instant : importe une ou plusieurs images ci-dessus.")
         else:
-            gcols = st.columns(3)
-            for _i, (tr, sh) in enumerate(_filtered):
-                with gcols[_i % 3]:
-                    _pnl = tr.get("pnl", 0)
-                    _pc = _t["win"] if _pnl >= 0 else _t["loss"]
-                    st.markdown(
-                        f"<div style='font-size:12px;margin-bottom:2px'>"
-                        f"<b style='color:{_t['text']}'>{tr.get('date','')} "
-                        f"{tr.get('time','') or ''}</b> · "
-                        f"<span style='color:{_t['muted']}'>{tr.get('symbol','')} "
-                        f"{tr.get('direction','')}</span> · "
-                        f"<span style='color:{_pc};font-family:JetBrains Mono,monospace'>"
-                        f"{fmt(_pnl)}</span></div>",
+            _dd = sorted(c["ts"][:10] for c in _vis)
+            _fmin, _fmax = date.fromisoformat(_dd[0]), date.fromisoformat(_dd[-1])
+            with st.container(horizontal=True, key="fc_filters", gap="small"):
+                _f_from, _f_to = period_filter("Date d'import", _fmin, _fmax, "fcper")
+            _q = st.text_input("Recherche", key="fc_q", label_visibility="collapsed",
+                               placeholder="Rechercher dans les commentaires ou le nom du fichier…")
+            _sel = [c for c in _vis if str(_f_from) <= c["ts"][:10] <= str(_f_to)]
+            if _q:
+                _ql = _q.lower()
+                _sel = [c for c in _sel if _ql in " ".join([c.get("name", ""), c.get("comment", ""),
+                                                            _grp.get(_gid(c), "")]).lower()]
+            _sel.sort(key=lambda c: (c["ts"], c["id"]), reverse=True)
+
+            # ── Commentaire d'une sélection de plusieurs images ──
+            _pk = st.session_state.get("fc_sel_n", 0)
+            _picked = [c for c in _sel if st.session_state.get(f"fc_pick_{_pk}_{c['id']}")]
+            if _picked:
+                with st.container(key="fc_selbar"):
+                    sb1, sb2, sb3 = st.columns([3.2, 1.4, 1.1], vertical_alignment="bottom")
+                    with sb1:
+                        _sc = st.text_input(f"Commentaire pour les {len(_picked)} image(s) sélectionnée(s)",
+                                            key=f"fc_sel_txt_{st.session_state.get('fc_sel_n', 0)}",
+                                            placeholder="Même commentaire pour toute la sélection")
+                    with sb2:
+                        _mode = st.radio("Mode", ["Remplacer", "Ajouter à la suite"], key="fc_sel_mode",
+                                         horizontal=True, label_visibility="collapsed")
+                    with sb3:
+                        if st.button("Appliquer", type="primary", key="fc_sel_go", icon=":material/comment:",
+                                     use_container_width=True, disabled=not (_sc or "").strip()):
+                            for c in _picked:
+                                old = c.get("comment", "")
+                                c["comment"] = _sc.strip() if (_mode == "Remplacer" or not old) else f"{old} · {_sc.strip()}"
+                            _save_caps(); st.session_state.fc_sel_n = st.session_state.get("fc_sel_n", 0) + 1
+                            st.toast(f"Commentaire appliqué à {len(_picked)} image(s)"); st.rerun()
+
+            _PER = 12
+            _np = max(1, -(-len(_sel) // _PER))
+            _pg = min(st.session_state.get("fc_page", 0), _np - 1)
+            _page = _sel[_pg * _PER:(_pg + 1) * _PER]
+            st.markdown(f"<div style='color:{_t['muted']};font-size:13px;margin:6px 0 10px'>"
+                        f"<b style='color:{_t['accent']};font-family:JetBrains Mono,monospace'>{len(_sel)}</b> "
+                        f"image(s) · page {_pg + 1} / {_np} · coche des images pour les commenter ensemble</div>",
                         unsafe_allow_html=True)
+
+            _need = [c["id"] for c in _page if f"_free_img_{c['id']}" not in st.session_state]
+            if _need:
+                _got = kv_load_many([f"free_cap_{i}" for i in _need])
+                for i in _need:
+                    st.session_state[f"_free_img_{i}"] = _got.get(f"free_cap_{i}")
+
+            # ── Galerie regroupée par import ──
+            _groups = []
+            for c in _page:
+                if not _groups or _groups[-1][0] != _gid(c):
+                    _groups.append((_gid(c), []))
+                _groups[-1][1].append(c)
+            for _g, _items in _groups:
+                _can = is_admin() or _items[0].get("owner") == _me
+                _gtot = sum(1 for c in _vis if _gid(c) == _g)
+                _d = datetime.fromisoformat(_items[0]["ts"])
+                gh1, gh2 = st.columns([5, 1.3], vertical_alignment="center")
+                with gh1:
+                    _gc = _grp.get(_g, "")
                     st.markdown(
-                        f"<div style='font-size:10px;color:{_t['muted']};margin-bottom:4px'>"
-                        f"{tr.get('trade_mode','')} · {tr.get('strategy','')}</div>",
-                        unsafe_allow_html=True)
-                    st.image(sh["data"], use_container_width=True)
+                        f"<div style='margin:14px 0 6px;padding:8px 14px;background:{_t['accent']}10;"
+                        f"border-left:3px solid {_t['accent']};border-radius:4px 18px 18px 4px'>"
+                        f"<span style='font-size:12.5px;font-weight:800;color:{_t['text']}'>Import du "
+                        f"{_d.strftime('%d/%m/%Y à %H:%M')}</span> <span style='font-size:11px;color:{_t['muted']}'>· "
+                        f"{_gtot} image(s)</span>"
+                        + (f"<div style='font-size:12.5px;color:{_t['text']};margin-top:3px'>{_html.escape(_gc)}</div>"
+                           if _gc else f"<div style='font-size:11.5px;color:{_t['muted']};margin-top:2px'>"
+                                       f"Pas de commentaire de groupe</div>")
+                        + "</div>", unsafe_allow_html=True)
+                with gh2:
+                    if _can:
+                        with st.popover("Groupe", icon=":material/edit_note:", use_container_width=True):
+                            _ng = st.text_area("Commentaire du groupe", value=_gc, key=f"fc_g_{_g}", height=90)
+                            if st.button("Enregistrer", key=f"fc_gs_{_g}", type="primary", use_container_width=True):
+                                if _ng.strip(): _grp[_g] = _ng.strip()
+                                else: _grp.pop(_g, None)
+                                st.session_state._free_grp = _grp; _save_caps(); st.rerun()
+                gcols = st.columns(3)
+                for _i, c in enumerate(_items):
+                    with gcols[_i % 3]:
+                        _img = st.session_state.get(f"_free_img_{c['id']}")
+                        ch1, ch2 = st.columns([4, 1], vertical_alignment="center")
+                        with ch1:
+                            st.markdown(f"<div style='font-size:11.5px;color:{_t['muted']}'>"
+                                        f"{_html.escape(c.get('name', ''))[:40]}</div>", unsafe_allow_html=True)
+                        with ch2:
+                            if _can:
+                                st.checkbox("Sélection", key=f"fc_pick_{_pk}_{c['id']}", label_visibility="collapsed")
+                        if _img:
+                            st.image(_img, use_container_width=True)
+                        else:
+                            st.caption("Image indisponible.")
+                        if c.get("comment"):
+                            st.markdown(f"<div style='font-size:12.5px;color:{_t['text']};margin:2px 0 6px;"
+                                        f"padding:6px 10px;background:{_t['card']};border:1px solid {_t['border']};"
+                                        f"border-radius:4px 14px 14px 14px'>{_html.escape(c['comment'])}</div>",
+                                        unsafe_allow_html=True)
+                        if _can:
+                            a1, a2 = st.columns(2)
+                            with a1:
+                                with st.popover("Commenter", icon=":material/comment:", use_container_width=True):
+                                    _nc = st.text_area("Commentaire de l'image", value=c.get("comment", ""),
+                                                       key=f"fc_c_{c['id']}", height=90)
+                                    if st.button("Enregistrer", key=f"fc_cs_{c['id']}", type="primary",
+                                                 use_container_width=True):
+                                        c["comment"] = _nc.strip(); _save_caps(); st.rerun()
+                            with a2:
+                                if st.session_state.get("fc_del") == c["id"]:
+                                    if st.button("Confirmer", key=f"fc_yes_{c['id']}", icon=":material/check:",
+                                                 use_container_width=True):
+                                        kv_delete(f"free_cap_{c['id']}")
+                                        st.session_state._free_idx = [x for x in _idx if x["id"] != c["id"]]
+                                        _save_caps()
+                                        st.session_state.pop(f"_free_img_{c['id']}", None)
+                                        st.session_state.pop("fc_del", None); st.rerun()
+                                elif st.button("Supprimer", key=f"fc_del_{c['id']}", icon=":material/delete:",
+                                               use_container_width=True):
+                                    st.session_state.fc_del = c["id"]; st.rerun()
+
+            if _np > 1:
+                p1, p2, p3 = st.columns([1, 1, 4])
+                with p1:
+                    if st.button("Précédent", key="fc_prev", icon=":material/chevron_left:", disabled=_pg == 0,
+                                 use_container_width=True):
+                        st.session_state.fc_page = _pg - 1; st.rerun()
+                with p2:
+                    if st.button("Suivant", key="fc_next", icon=":material/chevron_right:", disabled=_pg >= _np - 1,
+                                 use_container_width=True):
+                        st.session_state.fc_page = _pg + 1; st.rerun()
+
+    # ══ CAPTURES DES TRADES (existant) ══════════════════════════════════════════
+    with tab_trc:
+        st.caption("Toutes les captures de setups, filtrables par date et par compte. "
+                   + ("L'ajout se fait dans le Journal (trade sélectionné)."
+                      if is_admin() else "Consultation limitée à vos comptes."))
+
+        _shots = st.session_state.get("trade_screenshots", {})
+        _allowed = allowed_accounts()
+        # Index des trades par id
+        _by_id = {str(t["id"]): t for t in st.session_state.trades}
+
+        # Construire la liste (trade, screenshot) visible selon droits
+        _items = []
+        for tid, lst in _shots.items():
+            tr = _by_id.get(str(tid))
+            if not tr:
+                continue
+            if tr.get("trade_mode", "Réel Indépendant") not in _allowed:
+                continue
+            for sh in lst:
+                _items.append((tr, sh))
+
+        if not _items:
+            st.info("Aucune capture disponible pour vos comptes. "
+                    + ("Ajoutez-en depuis le Journal." if is_admin() else ""))
+        else:
+            # Bornes de dates
+            _dts = sorted([tr.get("date", "") for tr, _ in _items if tr.get("date")])
+            _dmin = date.fromisoformat(_dts[0]) if _dts else date(2024, 1, 1)
+            _dmax = date.fromisoformat(_dts[-1]) if _dts else date.today()
+
+            fc1, fc2, fc3 = st.columns([1.2, 1.2, 2.4])
+            with fc1:
+                c_from = st.date_input("Du", value=_dmin, key="cap_from")
+            with fc2:
+                c_to = st.date_input("Au", value=_dmax, key="cap_to")
+            with fc3:
+                c_acc = st.multiselect("Comptes", _allowed, default=[],
+                                       placeholder="Tous mes comptes", key="cap_acc")
+
+            # Filtrage
+            def _in_range(tr):
+                d = tr.get("date", "")
+                try:
+                    dd = date.fromisoformat(d)
+                except Exception:
+                    return False
+                if dd < c_from or dd > c_to:
+                    return False
+                if c_acc and tr.get("trade_mode") not in c_acc:
+                    return False
+                return True
+
+            _filtered = [(tr, sh) for tr, sh in _items if _in_range(tr)]
+            # Trier par date décroissante
+            _filtered.sort(key=lambda x: (x[0].get("date", ""), x[1].get("ts", "")), reverse=True)
+
+            st.markdown(
+                f"<div style='color:{_t['muted']};font-size:13px;margin:6px 0 12px'>"
+                f"<b style='color:{_t['accent']};font-family:JetBrains Mono,monospace'>"
+                f"{len(_filtered)}</b> capture(s) sur la période.</div>",
+                unsafe_allow_html=True)
+
+            if not _filtered:
+                st.info("Aucune capture sur cette plage de dates.")
+            else:
+                gcols = st.columns(3)
+                for _i, (tr, sh) in enumerate(_filtered):
+                    with gcols[_i % 3]:
+                        _pnl = tr.get("pnl", 0)
+                        _pc = _t["win"] if _pnl >= 0 else _t["loss"]
+                        st.markdown(
+                            f"<div style='font-size:12px;margin-bottom:2px'>"
+                            f"<b style='color:{_t['text']}'>{tr.get('date','')} "
+                            f"{tr.get('time','') or ''}</b> · "
+                            f"<span style='color:{_t['muted']}'>{tr.get('symbol','')} "
+                            f"{tr.get('direction','')}</span> · "
+                            f"<span style='color:{_pc};font-family:JetBrains Mono,monospace'>"
+                            f"{fmt(_pnl)}</span></div>",
+                            unsafe_allow_html=True)
+                        st.markdown(
+                            f"<div style='font-size:10px;color:{_t['muted']};margin-bottom:4px'>"
+                            f"{tr.get('trade_mode','')} · {tr.get('strategy','')}</div>",
+                            unsafe_allow_html=True)
+                        st.image(sh["data"], use_container_width=True)
