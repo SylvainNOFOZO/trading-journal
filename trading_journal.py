@@ -154,7 +154,7 @@ def _is_light(t):
 # Designs clairs d'abord (fond non noir par défaut), puis les sombres, au choix
 THEME_NAMES = ([n for n, t in THEMES.items() if _is_light(t)]
                + [n for n, t in THEMES.items() if not _is_light(t)])
-DEFAULT_THEME = "Émeraude Sombre"  # design par défaut du dashboard
+DEFAULT_THEME = "Violet Lavande"  # design par défaut du dashboard
 LOGIN_THEME   = "Navy Corporate"   # design unique de la page de connexion
 DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
 DEFAULT_BG      = "Bitcoin"            # fond d'écran par défaut
