@@ -80,61 +80,7 @@ CHART_COLORS = ["#00d4aa","#7c6aff","#ff9f43","#ff4d6d","#54a0ff","#5f27cd","#00
 
 # ── THÈMES ─────────────────────────────────────────────────────────────────────
 THEMES = {
-    "Émeraude Sombre": {
-        "bg":"#0a0c12","bg2":"#0d111d","card":"#111520","border":"#1e2535",
-        "text":"#e8ecf4","muted":"#6b7894","accent":"#00d4aa","win":"#00d4aa",
-        "loss":"#ff4d6d","alt":"#7c6aff","orange":"#ff9f43","sidebar":"#0c0f1a",
-        "btn_text":"#000000",
-    },
-    "Indigo Minuit": {
-        "bg":"#0a0a16","bg2":"#0d0d1a","card":"#13131f","border":"#232336",
-        "text":"#eaeaf5","muted":"#7a7a9a","accent":"#6c5ce7","win":"#2ecc91",
-        "loss":"#ff5c7a","alt":"#00cec9","orange":"#fdcb6e","sidebar":"#0e0e1c",
-        "btn_text":"#ffffff",
-    },
-    "Ardoise Bleu": {
-        "bg":"#0b0e14","bg2":"#0e1118","card":"#141821","border":"#232a38",
-        "text":"#e5e9f0","muted":"#6f7a8c","accent":"#4fa3ff","win":"#2dd4bf",
-        "loss":"#fb7185","alt":"#a78bfa","orange":"#ffb454","sidebar":"#0d1016",
-        "btn_text":"#0b0e14",
-    },
-    "Ambre Doré": {
-        "bg":"#100d0a","bg2":"#14110d","card":"#1c1812","border":"#2e2620",
-        "text":"#f5ece0","muted":"#9c8f7c","accent":"#f0a500","win":"#9ed36c",
-        "loss":"#ff6b5e","alt":"#ff7849","orange":"#ffcb47","sidebar":"#120f0b",
-        "btn_text":"#1c1410",
-    },
-    "Ivoire Clair": {
-        "bg":"#f4f5f9","bg2":"#eceef4","card":"#ffffff","border":"#e1e4ec",
-        "text":"#1a1d29","muted":"#6b7280","accent":"#00a884","win":"#00a884",
-        "loss":"#e74c3c","alt":"#6c5ce7","orange":"#e67e22","sidebar":"#ffffff",
-        "btn_text":"#ffffff",
-    },
-    "Or & Noir": {
-        "bg":"#070707","bg2":"#0d0d0d","card":"#151310","border":"#2b2616",
-        "text":"#f6efdd","muted":"#8d8870",
-        "accent":"#d4af37","win":"#5fd38a","loss":"#ff5c6c","alt":"#e8c35a",
-        "orange":"#ffb300","sidebar":"#0a0a0a","btn_text":"#000000",
-    },
-    "Néon Électrique": {
-        "bg":"#06070d","bg2":"#0a0c16","card":"#10131f","border":"#1c2238",
-        "text":"#e9edff","muted":"#6f7aa0","accent":"#0078ff","win":"#22e3a0",
-        "loss":"#ff2d55","alt":"#4d9bff","orange":"#ff8a3d","sidebar":"#080a12",
-        "btn_text":"#ffffff",
-    },
-    "Violet Lavande": {
-        "bg":"#0b0912","bg2":"#0f0c18","card":"#15111f","border":"#271f3a",
-        "text":"#efeaff","muted":"#8278a0","accent":"#8a2be2","win":"#2ed19a",
-        "loss":"#ff5c7a","alt":"#d8b4fe","orange":"#ffb454","sidebar":"#0d0a16",
-        "btn_text":"#ffffff",
-    },
-    "Aubergine Doré": {
-        "bg":"#0c0714","bg2":"#120a1d","card":"#190f28","border":"#2e1f42",
-        "text":"#f3ecff","muted":"#9484ac","accent":"#9b59ff","win":"#46d6a0",
-        "loss":"#ff6b81","alt":"#d4af37","orange":"#ffc24b","sidebar":"#0e0818",
-        "btn_text":"#ffffff",
-    },
-    # ── Thèmes multicolores : la couleur dominante change selon la page, reliefs 3D et reflets ──
+    # Thèmes multicolores : la couleur dominante change selon la page, reliefs 3D et reflets
     "Aurore Boréale": {
         "bg":"#070b17","bg2":"#0b1124","card":"#111a33","border":"#22305a",
         "text":"#eaf2ff","muted":"#7d8bb3","accent":"#00e5c0","win":"#22e3a0",
@@ -171,31 +117,17 @@ THEMES = {
         "loss":"#f43f5e","alt":"#ec4899","orange":"#f97316","sidebar":"#1f2347","btn_text":"#ffffff",
         "multi":["#6366f1","#ec4899","#14b8a6","#f97316","#8b5cf6"], "fx":"3d",
     },
-    "Navy Corporate": {
-        "bg":"#eef1f7","bg2":"#e5e9f2","card":"#ffffff","border":"#d9dfea",
-        "text":"#1b2440","muted":"#6b7488","accent":"#2b3a67","win":"#16a085",
-        "loss":"#e74c3c","alt":"#3d5a9a","orange":"#f39c12","sidebar":"#1e2a4a",
-        "btn_text":"#ffffff",
-    },
-    "Violet Clair": {
-        "bg":"#f5f3fd","bg2":"#efeafb","card":"#ffffff","border":"#e6def7",
-        "text":"#211b33","muted":"#6d6786","accent":"#7c5cfc","win":"#10b981",
-        "loss":"#ef4444","alt":"#b794f6","orange":"#f59e0b","sidebar":"#ffffff",
-        "btn_text":"#ffffff",
-    },
 }
 def _is_light(t):
     h = t["bg"].lstrip("#"); r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return (0.299 * r + 0.587 * g + 0.114 * b) > 150
 
 # Designs clairs d'abord (fond non noir par défaut), puis les sombres, au choix
-THEME_NAMES = ([n for n, t in THEMES.items() if _is_light(t) and not t.get("multi")]
-               + [n for n, t in THEMES.items() if not _is_light(t) and not t.get("multi")]
-               + [n for n, t in THEMES.items() if t.get("multi")])
-DEFAULT_THEME = "Violet Lavande"   # design par défaut du dashboard
-LOGIN_THEME   = "Navy Corporate"   # design unique de la page de connexion
+THEME_NAMES = ["Voltage"] + [n for n in THEMES if n != "Voltage"]
+DEFAULT_THEME = "Voltage"          # design par défaut du dashboard
+LOGIN_THEME   = "Voltage"          # design unique de la page de connexion
 DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
-DEFAULT_BG      = "Bitcoin"            # fond d'écran par défaut
+DEFAULT_BG      = "Aucun"              # fond d'écran par défaut
 
 # ── FONDS D'ÉCRAN (photos libres de droits, licence Unsplash) ─────────────────
 # Rempli avec des photos dont la licence gratuite a été vérifiée. "Aucun" = pas d'image.
@@ -302,12 +234,7 @@ CHART_STYLES = {
         toolbar=False, transparent=True, heat="Purples", legend_top=True),
 }
 THEME_CHART_STYLE = {
-    "Émeraude Sombre": "Classique", "Ardoise Bleu": "Classique",
-    "Indigo Minuit": "Néon", "Néon Électrique": "Néon",
-    "Ambre Doré": "Luxe", "Or & Noir": "Luxe", "Aubergine Doré": "Luxe",
-    "Ivoire Clair": "Corporate", "Navy Corporate": "Corporate",
-    "Violet Lavande": "Doux", "Violet Clair": "Doux",
-    "Aurore Boréale": "Néon", "Voltage": "Néon", "Coucher Tropical": "Doux",
+    "Voltage": "Luxe", "Aurore Boréale": "Néon", "Coucher Tropical": "Doux",
     "Safran Kente": "Luxe", "Pop Créatif": "Doux", "Verre Pastel": "Corporate",
 }
 CHART_STYLE_NAMES = list(CHART_STYLES.keys())
@@ -485,6 +412,9 @@ def category_figure(cats, vals, colors, t, cs, kind, orientation="v", texts=None
             text=texts, textposition="outside" if texts else None,
             textfont=dict(size=11, color=t["muted"]),
             customdata=customdata, hovertemplate=hovertemplate, showlegend=False))
+    if not h and len(cats) > 9:            # trop de libellés : un sur k, sans chevauchement
+        k = -(-len(cats) // 8)
+        fig.update_xaxes(tickmode="array", tickvals=list(cats)[::-1][::k][::-1])
     return fig
 
 def fx_css(t):
@@ -692,6 +622,21 @@ label[data-testid="stRadioOption"][data-selected="true"] > div > div:first-child
 /* KPI montant : feuille (angles opposés) · KPI ratio : capsule avec jauge · KPI risque : angles coupés */
 .kpi {{ border-radius:22px 6px 22px 6px; }}
 .kpi.kpi-ratio {{ border-radius:44px 14px 14px 44px; padding-left:18px; }}
+/* KPI : valeur sur une ligne, taille adaptée à la largeur, pictos en haut à droite sans pousser le texte */
+.kpi {{ min-height:94px !important; padding:12px 14px 10px !important; }}
+.kpi-label {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:34px; }}
+.kpi-value {{ white-space:nowrap; font-size:clamp(15px, 1.38vw, 22px) !important; letter-spacing:-.3px; }}
+.kpi-sub {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+.kpi-icon {{ position:absolute; top:11px; right:13px; float:none !important; margin:0 !important; }}
+.kpi-ring {{ position:absolute; top:9px; right:11px; float:none !important; margin:0 !important; width:34px !important; height:34px !important; }}
+.kpi.kpi-ratio .kpi-ring, .kpi.kpi-ratio .kpi-icon {{ right:16px; }}
+/* Filtres du dashboard : une seule rangée, pastilles de même largeur */
+.st-key-dash_filters {{ flex-wrap:nowrap !important; justify-content:flex-end; }}
+.st-key-dash_filters > div {{ flex:1 1 0 !important; min-width:0 !important; max-width:230px; }}
+.st-key-dash_filters [data-testid="stPopover"] button {{ min-height:34px; padding:2px 10px !important; }}
+.st-key-dash_filters [data-testid="stPopover"] button p {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:12.5px !important; }}
+@media (max-width: 900px) {{ .st-key-dash_filters {{ flex-wrap:wrap !important; }}
+    .st-key-dash_filters > div {{ flex:1 1 45% !important; max-width:none; }} }}
 .kpi.kpi-ratio .kpi-bar {{ left:30px; right:18px; border-radius:0 0 4px 4px; }}
 .kpi.kpi-risk {{ border-radius:3px; border:none; background:linear-gradient(135deg,{t['loss']}14,{t['card']} 45%,{t['bg2']});
     clip-path:polygon(0 0,calc(100% - 20px) 0,100% 20px,100% 100%,20px 100%,0 calc(100% - 20px)); }}
@@ -744,8 +689,8 @@ div[role="dialog"] span, div[role="dialog"] [data-testid="stMarkdownContainer"] 
 div[role="dialog"] [data-testid="stCaptionContainer"] p {{ color:{t['muted']} !important; }}
 div[role="dialog"] input {{ color:{t['text']} !important; }}
 div[role="dialog"] button[aria-label="Close"] svg {{ color:{t['muted']}; fill:{t['muted']}; }}
-.st-key-dash_filters, .st-key-jq_filters, .st-key-ex_filters, .st-key-news_filters {{ flex-wrap:wrap; }}
-.st-key-dash_filters > div, .st-key-jq_filters > div, .st-key-ex_filters > div, .st-key-news_filters > div {{ flex:1 1 150px; min-width:130px; }}
+.st-key-jq_filters, .st-key-ex_filters, .st-key-news_filters {{ flex-wrap:wrap; }}
+.st-key-jq_filters > div, .st-key-ex_filters > div, .st-key-news_filters > div {{ flex:1 1 150px; min-width:130px; }}
 </style>
 """
 # Comptes par défaut (utilisés au tout premier lancement, puis gérés par l'admin)
@@ -961,6 +906,7 @@ if "trades" not in st.session_state:
 if "page"        not in st.session_state: st.session_state.page        = "dashboard"
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
 if "theme_name"  not in st.session_state: st.session_state.theme_name  = DEFAULT_THEME
+if st.session_state.theme_name not in THEMES: st.session_state.theme_name = DEFAULT_THEME
 if "mode_filter" not in st.session_state: st.session_state.mode_filter = "Tous"
 if "mode_selection" not in st.session_state: st.session_state.mode_selection = []
 
@@ -1453,6 +1399,7 @@ def login_gate():
         return True
     _t = THEMES[LOGIN_THEME]          # design unique pour la page de connexion
     st.markdown(build_css(_t), unsafe_allow_html=True)
+    st.markdown(fx_css(_t), unsafe_allow_html=True)
     st.markdown(f"""<style>
 .block-container {{ padding-top:3rem; max-width:1100px; }}
 .stApp {{ background:
@@ -3571,12 +3518,12 @@ if st.session_state.page == "dashboard":
     d_max = date.fromisoformat(dates[-1]) if dates else date.today()
 
     # ── En-tête compact : titre + date à gauche, filtres repliables à droite ──
-    _dh1, _dh2 = st.columns([1.6, 2.4])
+    _dh1, _dh2 = st.columns([1.15, 3.85], vertical_alignment="center")
     with _dh1:
         st.markdown(
-            f"<div style='display:flex;align-items:baseline;gap:12px;padding-top:4px'>"
-            f"<span style='font-size:22px;font-weight:800;color:{_tdb['text']}'>Dashboard</span>"
-            f"<span style='font-size:12px;color:{_tdb['muted']}'>"
+            f"<div style='display:flex;flex-direction:column;line-height:1.15'>"
+            f"<span style='font-size:22px;font-weight:800;color:{_tdb['text']};white-space:nowrap'>Dashboard</span>"
+            f"<span style='font-size:11.5px;color:{_tdb['muted']};white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
             f"{datetime.now().strftime('%d/%m/%Y')} · {selection_label()}</span></div>",
             unsafe_allow_html=True)
     with _dh2:
