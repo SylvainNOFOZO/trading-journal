@@ -1,0 +1,5 @@
+[server]
+# Garde la session 6 h quand l'onglet est en arrière-plan ou l'ordinateur en veille (défaut : 120 s)
+disconnectedSessionTTL = 21600
+# Signal régulier pour que la connexion ne soit pas coupée par les proxys pendant l'inactivité
+websocketPingInterval = 20
