@@ -134,6 +134,43 @@ THEMES = {
         "loss":"#ff6b81","alt":"#d4af37","orange":"#ffc24b","sidebar":"#0e0818",
         "btn_text":"#ffffff",
     },
+    # ── Thèmes multicolores : la couleur dominante change selon la page, reliefs 3D et reflets ──
+    "Aurore Boréale": {
+        "bg":"#070b17","bg2":"#0b1124","card":"#111a33","border":"#22305a",
+        "text":"#eaf2ff","muted":"#7d8bb3","accent":"#00e5c0","win":"#22e3a0",
+        "loss":"#ff4d6d","alt":"#7c5cff","orange":"#ffb648","sidebar":"#080c1a","btn_text":"#ffffff",
+        "multi":["#00e5c0","#7c5cff","#ff4ecd","#2f80ff","#ffb648"], "fx":"3d",
+    },
+    "Voltage": {
+        "bg":"#05070f","bg2":"#080b18","card":"#0e1324","border":"#1d2645",
+        "text":"#eef3ff","muted":"#7884a8","accent":"#0057ff","win":"#1fe0a3",
+        "loss":"#ff2d6f","alt":"#00d4ff","orange":"#ffb000","sidebar":"#060912","btn_text":"#ffffff",
+        "multi":["#0057ff","#00d4ff","#ff2d95","#ffd60a","#8b3dff"], "fx":"3d",
+    },
+    "Coucher Tropical": {
+        "bg":"#120a12","bg2":"#180d18","card":"#211322","border":"#3a2238",
+        "text":"#fff1f3","muted":"#a48a9c","accent":"#ff6b6b","win":"#2ee6a6",
+        "loss":"#ff4d6d","alt":"#ff9f43","orange":"#ffb347","sidebar":"#140b14","btn_text":"#ffffff",
+        "multi":["#ff6b6b","#ff9f43","#ff4ecd","#a855f7","#22d3ee"], "fx":"3d",
+    },
+    "Safran Kente": {
+        "bg":"#130c06","bg2":"#1a1009","card":"#23160c","border":"#3d2a18",
+        "text":"#fff4e6","muted":"#b09779","accent":"#f4a300","win":"#1bc8a0",
+        "loss":"#e5383b","alt":"#d7263d","orange":"#f46036","sidebar":"#160e07","btn_text":"#ffffff",
+        "multi":["#f4a300","#d7263d","#1b998b","#2e86ab","#f46036"], "fx":"3d",
+    },
+    "Pop Créatif": {
+        "bg":"#fbf6fb","bg2":"#f4eef7","card":"#ffffff","border":"#eadff0",
+        "text":"#22172e","muted":"#7c6f8a","accent":"#ea4c89","win":"#10b981",
+        "loss":"#ef4444","alt":"#8b5cf6","orange":"#f59e0b","sidebar":"#2a1b38","btn_text":"#ffffff",
+        "multi":["#ea4c89","#8b5cf6","#0ea5e9","#f59e0b","#10b981"], "fx":"3d",
+    },
+    "Verre Pastel": {
+        "bg":"#eef1ff","bg2":"#e6e9fb","card":"#ffffff","border":"#dde2f6",
+        "text":"#1d2140","muted":"#6d7393","accent":"#6366f1","win":"#14b8a6",
+        "loss":"#f43f5e","alt":"#ec4899","orange":"#f97316","sidebar":"#1f2347","btn_text":"#ffffff",
+        "multi":["#6366f1","#ec4899","#14b8a6","#f97316","#8b5cf6"], "fx":"3d",
+    },
     "Navy Corporate": {
         "bg":"#eef1f7","bg2":"#e5e9f2","card":"#ffffff","border":"#d9dfea",
         "text":"#1b2440","muted":"#6b7488","accent":"#2b3a67","win":"#16a085",
@@ -152,8 +189,9 @@ def _is_light(t):
     return (0.299 * r + 0.587 * g + 0.114 * b) > 150
 
 # Designs clairs d'abord (fond non noir par défaut), puis les sombres, au choix
-THEME_NAMES = ([n for n, t in THEMES.items() if _is_light(t)]
-               + [n for n, t in THEMES.items() if not _is_light(t)])
+THEME_NAMES = ([n for n, t in THEMES.items() if _is_light(t) and not t.get("multi")]
+               + [n for n, t in THEMES.items() if not _is_light(t) and not t.get("multi")]
+               + [n for n, t in THEMES.items() if t.get("multi")])
 DEFAULT_THEME = "Violet Lavande"   # design par défaut du dashboard
 LOGIN_THEME   = "Navy Corporate"   # design unique de la page de connexion
 DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
@@ -214,11 +252,27 @@ def background_css(t, name):
             f"{layer}, {t['bg']} !important; }}</style>{credit}")
 
 def theme_label(n):
+    if THEMES[n].get("multi"):
+        return ("Multicolore clair · " if _is_light(THEMES[n]) else "Multicolore · ") + n
     return ("Clair · " if _is_light(THEMES[n]) else "Sombre · ") + n
+
+# Thèmes multicolores : chaque page prend sa propre paire de couleurs dans la palette
+_PAGE_HUE = {"dashboard": 0, "journal": 1, "add": 2, "import": 3, "analyse": 4,
+             "calendar": 2, "sessions": 3, "captures": 2, "users": 4}
+
+def _lum(hexc):
+    h = hexc.lstrip("#"); r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return 0.299 * r + 0.587 * g + 0.114 * b
 
 def get_theme():
     name = st.session_state.get("theme_name", DEFAULT_THEME)
-    return THEMES.get(name, THEMES[DEFAULT_THEME])
+    t = THEMES.get(name, THEMES[DEFAULT_THEME])
+    if t.get("multi"):
+        m = t["multi"]; i = _PAGE_HUE.get(st.session_state.get("page", "dashboard"), 0) % len(m)
+        t = dict(t)
+        t["accent"], t["alt"] = m[i], m[(i + 1) % len(m)]
+        t["btn_text"] = "#111111" if (_lum(m[i]) + _lum(m[(i + 1) % len(m)])) / 2 > 175 else "#ffffff"
+    return t
 
 # ── PROFILS GRAPHIQUES : chaque design change aussi le type et la config des graphiques ──
 # equity   : "area" | "line" | "step" | "glow"      (courbe de capital / progression %)
@@ -253,6 +307,8 @@ THEME_CHART_STYLE = {
     "Ambre Doré": "Luxe", "Or & Noir": "Luxe", "Aubergine Doré": "Luxe",
     "Ivoire Clair": "Corporate", "Navy Corporate": "Corporate",
     "Violet Lavande": "Doux", "Violet Clair": "Doux",
+    "Aurore Boréale": "Néon", "Voltage": "Néon", "Coucher Tropical": "Doux",
+    "Safran Kente": "Luxe", "Pop Créatif": "Doux", "Verre Pastel": "Corporate",
 }
 CHART_STYLE_NAMES = list(CHART_STYLES.keys())
 
@@ -430,6 +486,70 @@ def category_figure(cats, vals, colors, t, cs, kind, orientation="v", texts=None
             textfont=dict(size=11, color=t["muted"]),
             customdata=customdata, hovertemplate=hovertemplate, showlegend=False))
     return fig
+
+def fx_css(t):
+    """Couche visuelle des thèmes multicolores : fond en maillage de couleurs, cartes en relief
+    avec reflet, bordures dégradées, boutons brillants, survol en perspective."""
+    if not t.get("multi"):
+        return ""
+    m = t["multi"]; light = _is_light(t)
+    grad = ",".join(m + [m[0]])
+    hi = "rgba(255,255,255,.95)" if light else "rgba(255,255,255,.10)"
+    sh = ("0 1px 0 rgba(255,255,255,.9) inset, 0 -3px 0 rgba(30,20,60,.05) inset, "
+          "0 14px 28px -12px rgba(60,40,120,.28), 0 3px 8px rgba(60,40,120,.10)") if light else \
+         ("0 1px 0 rgba(255,255,255,.09) inset, 0 -3px 0 rgba(0,0,0,.35) inset, "
+          "0 18px 34px -14px rgba(0,0,0,.75), 0 3px 8px rgba(0,0,0,.35)")
+    a = 0.20 if light else 0.16
+    return f"""<style>
+/* ══ THÈME MULTICOLORE : maillage de couleurs, verre, relief ══ */
+.stApp {{ background:
+    radial-gradient(1200px 700px at 8% -10%, {m[0]}{int(a*255):02x}, transparent 60%),
+    radial-gradient(1000px 650px at 105% 5%, {m[1]}{int(a*255):02x}, transparent 60%),
+    radial-gradient(900px 700px at 50% 115%, {m[2]}{int(a*0.9*255):02x}, transparent 60%),
+    radial-gradient(700px 500px at -5% 85%, {m[3]}{int(a*0.8*255):02x}, transparent 60%),
+    linear-gradient(160deg, {t['bg']} 0%, {t['bg2']} 100%) !important; background-attachment:fixed !important; }}
+/* Cartes : relief, reflet en haut, bordure dégradée */
+.kpi, .grad-card, [data-testid="stPlotlyChart"], div[data-testid="stExpander"] details, .st-key-tj_hdr,
+.st-key-tj_nav, [data-testid="stPopoverBody"] {{
+    position:relative; box-shadow:{sh} !important;
+    border:1px solid transparent !important;
+    background:linear-gradient({t['card']},{t['card']}) padding-box,
+               linear-gradient(135deg,{m[0]}66,{t['border']} 30%,{t['border']} 70%,{m[2]}66) border-box !important;
+    transition:transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s ease; }}
+.kpi::after, .grad-card::after {{ content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+    background:linear-gradient(180deg,{hi} 0%,rgba(255,255,255,0) 42%); mix-blend-mode:{'normal' if light else 'screen'}; }}
+.kpi:hover, .grad-card:hover {{ transform:perspective(900px) rotateX(3deg) translateY(-3px); }}
+[data-testid="stPlotlyChart"]:hover {{ transform:translateY(-2px); }}
+.kpi-bar {{ height:4px !important; background:linear-gradient(90deg,{grad}) !important; background-size:200% 100% !important;
+    animation:fxFlow 8s linear infinite; }}
+.st-key-tj_hdr::before {{ height:4px !important; background:linear-gradient(90deg,{grad}) !important;
+    background-size:200% 100% !important; animation:fxFlow 6s linear infinite !important; }}
+@keyframes fxFlow {{ 0% {{background-position:0% 0}} 100% {{background-position:200% 0}} }}
+/* Verre dépoli sur les panneaux */
+.st-key-tj_hdr, .st-key-tj_nav, [data-testid="stPopoverBody"] {{ backdrop-filter:blur(14px) saturate(140%);
+    -webkit-backdrop-filter:blur(14px) saturate(140%); }}
+/* Boutons : dégradé tricolore brillant, effet pressé */
+.stButton > button, [data-testid="stFormSubmitButton"] > button {{
+    background:linear-gradient(135deg,{t['accent']} 0%,{t['alt']} 55%,{m[(m.index(t['accent']) + 2) % len(m)] if t['accent'] in m else m[2]} 100%) !important;
+    box-shadow:0 1px 0 rgba(255,255,255,.35) inset, 0 -2px 0 rgba(0,0,0,.18) inset,
+               0 8px 18px -6px {t['accent']}99 !important;
+    text-shadow:0 1px 1px rgba(0,0,0,.18); transition:transform .12s ease, box-shadow .2s ease, filter .2s ease !important; }}
+.stButton > button:hover {{ transform:translateY(-1px); filter:brightness(1.08) saturate(1.1); }}
+.stButton > button:active {{ transform:translateY(1px);
+    box-shadow:0 1px 0 rgba(255,255,255,.2) inset, 0 3px 8px -4px {t['accent']}99 !important; }}
+/* Onglets et filtres : pastilles en relief */
+.stTabs [aria-selected="true"], [data-testid="stTab"][data-selected="true"] {{
+    background:linear-gradient(135deg,{t['accent']}2e,{t['alt']}2e) !important;
+    box-shadow:0 1px 0 rgba(255,255,255,.12) inset, 0 6px 14px -8px {t['accent']} !important; }}
+[data-testid="stPopover"] > div > button {{ box-shadow:0 1px 0 {hi} inset, 0 6px 14px -10px rgba(0,0,0,.6) !important; }}
+/* Pastilles de comptes, cases et curseurs aux couleurs de la page */
+span[data-tag] {{ box-shadow:0 1px 0 rgba(255,255,255,.3) inset, 0 4px 10px -4px {t['accent']}aa; }}
+/* Sphère du chronomètre : halo multicolore */
+.st-key-cd_sphere iframe {{ box-shadow:0 0 0 2px transparent, 0 0 26px -4px {m[1]}aa, 0 0 40px -10px {m[2]}88; }}
+/* Titres de page : dégradé de la palette */
+h1 {{ background:linear-gradient(90deg,{t['accent']},{t['alt']}); -webkit-background-clip:text; background-clip:text;
+    color:transparent !important; }}
+</style>"""
 
 def build_css(t):
     """Génère le CSS complet en fonction du thème actif."""
@@ -1793,6 +1913,7 @@ if not login_gate():
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 # ── INJECTION CSS (avant le header pour que le thème s'applique) ─────────────────
 st.markdown(build_css(get_theme()), unsafe_allow_html=True)
+st.markdown(fx_css(get_theme()), unsafe_allow_html=True)
 if "bg_name" not in st.session_state:
     st.session_state.bg_name = DEFAULT_BG if DEFAULT_BG in BACKGROUNDS else "Aucun"
 if st.session_state.bg_name not in BACKGROUNDS:
@@ -1894,6 +2015,17 @@ st.markdown(f"""<style>
   font-size:18px !important; color:inherit !important; }}
 [class*="st-key-tjnav_"] button[kind="primary"] *, [class*="st-key-tjmnav_"] button[kind="primary"] * {{
   color:{_t['btn_text']} !important; }}
+div[class*="st-key-tjnav_"] .stButton > button:not([kind="primary"]),
+div[class*="st-key-tjmnav_"] .stButton > button:not([kind="primary"]) {{
+  background:transparent !important; box-shadow:none !important; text-shadow:none !important; }}
+div[class*="st-key-tjnav_"] .stButton > button:not([kind="primary"]) p,
+div[class*="st-key-tjnav_"] .stButton > button:not([kind="primary"]) [data-testid="stIconMaterial"],
+div[class*="st-key-tjmnav_"] .stButton > button:not([kind="primary"]) p,
+div[class*="st-key-tjmnav_"] .stButton > button:not([kind="primary"]) [data-testid="stIconMaterial"] {{
+  color:{_t['muted']} !important; }}
+div[class*="st-key-tjnav_"] .stButton > button:not([kind="primary"]):hover p,
+div[class*="st-key-tjnav_"] .stButton > button:not([kind="primary"]):hover [data-testid="stIconMaterial"] {{
+  color:{_t['text']} !important; }}
 /* Boutons d'action ronds (synchro, déconnexion, masquer/afficher) */
 .st-key-hdr_sync button, .st-key-hdr_logout button, .st-key-hdr_toggle button, .st-key-hdr_show button {{
   background:{_t['bg2']} !important; color:{_t['muted']} !important; border:1px solid {_t['border']} !important;
