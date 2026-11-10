@@ -903,7 +903,10 @@ def force_reload():
 # ── INIT SESSION ────────────────────────────────────────────────────────────
 if "trades" not in st.session_state:
     st.session_state.trades = load_and_migrate()
-if "page"        not in st.session_state: st.session_state.page        = "dashboard"
+_VALID_PAGES = ("dashboard", "journal", "add", "import", "analyse", "calendar", "sessions", "captures", "users")
+if "page"        not in st.session_state:
+    _qp = st.query_params.get("p", "dashboard")
+    st.session_state.page = _qp if _qp in _VALID_PAGES and _qp not in ("add",) else "dashboard"
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
 if "theme_name"  not in st.session_state: st.session_state.theme_name  = DEFAULT_THEME
 if st.session_state.theme_name not in THEMES: st.session_state.theme_name = DEFAULT_THEME
@@ -1383,9 +1386,61 @@ def user_mode_options():
     allowed = allowed_accounts()
     return (["Tous"] + allowed) if len(allowed) >= 2 else allowed
 
+# ── SESSION PERSISTANTE : jeton signé dans l'adresse, la connexion survit aux coupures ──
+SESSION_DAYS = 7
+
+def _sess_secret():
+    try:
+        sec = st.secrets.get("SESSION_SECRET", "") or st.secrets.get("SUPABASE_KEY", "")
+    except Exception:
+        sec = ""
+    return hashlib.sha256(("tj-session|" + (sec or os.environ.get("SESSION_SECRET", "local"))).encode()).digest()
+
+def _sess_sig(uname, exp, pwh):
+    import hmac
+    return hmac.new(_sess_secret(), f"{uname}|{exp}|{(pwh or '')[:24]}".encode(), hashlib.sha256).hexdigest()[:32]
+
+def make_session_token(user):
+    import time as _t
+    exp = int(_t.time()) + SESSION_DAYS * 86400
+    raw = base64.urlsafe_b64encode(f"{user['username']}|{exp}".encode()).decode().rstrip("=")
+    return f"{raw}.{_sess_sig(user['username'], exp, user.get('password_hash', ''))}"
+
+def read_session_token(tok):
+    """Renvoie l'utilisateur si le jeton est valide, non expiré, et que le mot de passe n'a pas changé."""
+    import hmac, time as _t
+    try:
+        raw, sig = str(tok).split(".", 1)
+        uname, exp = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)).decode().split("|")
+        if int(exp) < _t.time():
+            return None
+        u = next((x for x in bootstrap_admin() if x.get("username") == uname), None)
+        if not u or not u.get("active", True):
+            return None
+        if not hmac.compare_digest(sig, _sess_sig(uname, int(exp), u.get("password_hash", ""))):
+            return None
+        return u
+    except Exception:
+        return None
+
+def _apply_login(user):
+    st.session_state.auth_user = user["username"]
+    st.session_state.auth_role = user.get("role", "user")
+    st.session_state.auth_accounts = user.get("accounts", [])
+    if not st.session_state.get("mode_selection"):
+        try:
+            st.session_state.mode_selection = [a for a in allowed_accounts() if a == DEFAULT_ACCOUNT]
+        except Exception:
+            st.session_state.mode_selection = []
+
 def logout():
     for k in ("auth_user", "auth_role", "auth_accounts"):
         st.session_state.pop(k, None)
+    for k in ("s", "p"):
+        try:
+            del st.query_params[k]
+        except Exception:
+            pass
     st.rerun()
 
 def _logo_svg(c, sz):
@@ -1397,6 +1452,16 @@ def login_gate():
     """Affiche le formulaire de connexion. Retourne True si connecté."""
     if st.session_state.get("auth_user"):
         return True
+    _tok = st.query_params.get("s")
+    if _tok:
+        _u = read_session_token(_tok)
+        if _u:
+            _apply_login(_u)                 # session perdue (veille, onglet en arrière-plan) : on reprend
+            return True
+        try:
+            del st.query_params["s"]
+        except Exception:
+            pass
     _t = THEMES[LOGIN_THEME]          # design unique pour la page de connexion
     st.markdown(build_css(_t), unsafe_allow_html=True)
     st.markdown(fx_css(_t), unsafe_allow_html=True)
@@ -1465,15 +1530,9 @@ div[data-testid="stForm"] button {{ padding:11px 0 !important; font-size:14px !i
             if st.form_submit_button("Se connecter", use_container_width=True, type="primary"):
                 ok, user, msg = authenticate(u.strip(), p)
                 if ok:
-                    st.session_state.auth_user = user["username"]
-                    st.session_state.auth_role = user.get("role", "user")
-                    st.session_state.auth_accounts = user.get("accounts", [])
-                    # Compte affiché par défaut à l'ouverture : Réel Indépendant (s'il est autorisé)
-                    try:
-                        _def_acc = [a for a in allowed_accounts() if a == DEFAULT_ACCOUNT]
-                    except Exception:
-                        _def_acc = []
-                    st.session_state.mode_selection = _def_acc
+                    st.session_state.mode_selection = []
+                    _apply_login(user)       # compte par défaut : Réel Indépendant (s'il est autorisé)
+                    st.query_params["s"] = make_session_token(user)
                     st.rerun()
                 else:
                     st.error(msg)
@@ -1855,6 +1914,8 @@ tick(); setInterval(tick,1000);
 # Porte d'authentification : rien ne s'affiche tant qu'on n'est pas connecté
 if not login_gate():
     st.stop()
+if st.query_params.get("p") != st.session_state.page:      # la page suit l'adresse (reprise après coupure)
+    st.query_params["p"] = st.session_state.page
 
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
