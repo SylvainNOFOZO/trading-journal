@@ -530,7 +530,9 @@ div[data-baseweb="select"] > div {{
 div[data-testid="stExpander"] details {{ background:{t['card']}; border:1px solid {t['border']}; border-radius:10px; }}
 div[data-testid="stExpander"] summary p {{ font-size:12px !important; color:{t['muted']} !important; }}
 .kpi-sub {{ font-size:11px;color:{t['muted']}; }}
-.tj-table {{ width:100%;border-collapse:collapse;font-size:13px; }}
+.tj-table {{ width:100%;border-collapse:collapse;font-size:13px;border:none !important; }}
+.tj-table th, .tj-table td {{ border-left:none !important;border-right:none !important;border-top:none !important; }}
+.tj-table td {{ white-space:nowrap; }} .tj-table td:nth-child(3) {{ white-space:normal; }}
 .tj-table th {{ padding:10px 12px;text-align:left;font-size:10px;color:{t['muted']};letter-spacing:1px;
     text-transform:uppercase;border-bottom:1px solid {t['border']};background:linear-gradient(180deg,{t['card']},{t['bg2']});font-weight:600; }}
 .tj-table td {{ padding:11px 12px;border-bottom:1px solid {t['border']}80;color:{t['text']}; }}
@@ -2682,6 +2684,7 @@ MX_YAHOO = {
     "CL=F": "WTI", "BTC-USD": "Bitcoin", "ZQ=F": "Fed funds futures", "^TNX": "US 10 ans",
     "EURUSD=X": "EURUSD", "GBPUSD=X": "GBPUSD", "USDJPY=X": "USDJPY", "USDCHF=X": "USDCHF",
     "USDCAD=X": "USDCAD", "AUDUSD=X": "AUDUSD", "NZDUSD=X": "NZDUSD",
+    "HYG": "ETF High Yield", "LQD": "ETF Investment Grade", "IEF": "ETF Trésor 7-10 ans",
 }
 MX_FX = {"EUR": ("EURUSD=X", 1), "GBP": ("GBPUSD=X", 1), "JPY": ("USDJPY=X", -1), "CHF": ("USDCHF=X", -1),
          "CAD": ("USDCAD=X", -1), "AUD": ("AUDUSD=X", 1), "NZD": ("NZDUSD=X", 1)}
@@ -2719,18 +2722,87 @@ def macro_category(title):
 
 
 # ── Accès aux sources (non mis en cache : appelés par les paquets mis en cache) ──
-def _fred_raw(sid, start="2012-01-01"):
-    r = requests.get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}&cosd={start}",
-                     headers=_UA, timeout=12)
-    r.raise_for_status()
-    d = pd.read_csv(io.StringIO(r.text))
-    d = d.iloc[:, :2]; d.columns = ["date", "value"]
-    d["date"] = pd.to_datetime(d["date"], errors="coerce")
-    d["value"] = pd.to_numeric(d["value"], errors="coerce")
-    s = d.dropna().set_index("date")["value"]
-    if s.empty:
-        raise ValueError("série vide")
-    return s
+def _fred_key():
+    """Clé API FRED (gratuite) : secrets Streamlit FRED_API_KEY ou variable d'environnement."""
+    try:
+        k = st.secrets.get("FRED_API_KEY", "")
+    except Exception:
+        k = ""
+    return (k or os.environ.get("FRED_API_KEY", "")).strip()
+
+
+def _fred_raw(sid, start="2012-01-01", key=""):
+    """Série FRED. Avec clé : API officielle (fiable). Sans clé : export CSV public, lent et
+    limité en connexions simultanées, d'où le délai long et les nouveaux essais."""
+    import time as _t
+    if key:
+        r = requests.get("https://api.stlouisfed.org/fred/series/observations",
+                         params={"series_id": sid, "api_key": key, "file_type": "json",
+                                 "observation_start": start}, timeout=25)
+        if r.status_code != 200:
+            raise RuntimeError(f"API FRED HTTP {r.status_code}")
+        obs = r.json().get("observations", [])
+        d = pd.DataFrame(obs)
+        if d.empty:
+            raise ValueError("série vide")
+        s = pd.Series(pd.to_numeric(d["value"], errors="coerce").values,
+                      index=pd.to_datetime(d["date"], errors="coerce")).dropna()
+        if s.empty:
+            raise ValueError("série vide")
+        return s
+    last = "échec"
+    urls = [f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}&cosd={start}",
+            f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}"]
+    for i, url in enumerate(urls * 2):
+        try:
+            r = requests.get(url, headers={**_UA, "Accept": "text/csv,text/plain,*/*"}, timeout=35)
+            txt = r.text.lstrip()
+            if r.status_code == 200 and txt and not txt.startswith("<"):
+                d = pd.read_csv(io.StringIO(txt))
+                d = d.iloc[:, :2]; d.columns = ["date", "value"]
+                s = pd.Series(pd.to_numeric(d["value"], errors="coerce").values,
+                              index=pd.to_datetime(d["date"], errors="coerce")).dropna()
+                if len(s):
+                    return s
+                last = "série vide"
+            else:
+                last = f"HTTP {r.status_code}" + (" (page HTML : accès refusé)" if txt.startswith("<") else "")
+        except Exception as e:
+            last = type(e).__name__
+        _t.sleep(1.5 * (i + 1))
+    raise RuntimeError(last)
+
+
+def _treasury_raw(_k=None):
+    """Courbe des taux du Trésor US (gratuit, sans clé) : 3 mois, 2 ans, 10 ans et écarts."""
+    frames, last = [], "échec"
+    y0 = date.today().year
+    for y in range(y0 - 3, y0 + 1):
+        url = (f"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/"
+               f"{y}/all?type=daily_treasury_yield_curve&field_tdr_date_value={y}&page&_format=csv")
+        try:
+            r = requests.get(url, headers=_UA, timeout=30)
+            if r.status_code == 200 and r.text.lstrip()[:1] not in ("<", ""):
+                frames.append(pd.read_csv(io.StringIO(r.text)))
+            else:
+                last = f"HTTP {r.status_code}"
+        except Exception as e:
+            last = type(e).__name__
+    if not frames:
+        raise RuntimeError(last)
+    d = pd.concat(frames)
+    d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
+    d = d.dropna(subset=["Date"]).drop_duplicates("Date").set_index("Date").sort_index()
+    col = lambda *names: next((pd.to_numeric(d[n], errors="coerce").dropna() for n in names if n in d.columns), None)
+    out = {"DGS3MO": col("3 Mo", "3 Month"), "DGS2": col("2 Yr", "2 Year"), "DGS10": col("10 Yr", "10 Year")}
+    out = {k: v for k, v in out.items() if v is not None and len(v)}
+    if "DGS10" in out and "DGS2" in out:
+        out["T10Y2Y"] = (out["DGS10"] - out["DGS2"]).dropna()
+    if "DGS10" in out and "DGS3MO" in out:
+        out["T10Y3M"] = (out["DGS10"] - out["DGS3MO"]).dropna()
+    if not out:
+        raise RuntimeError("colonnes introuvables")
+    return out
 
 
 def _yahoo_raw(ticker, rng="2y"):
@@ -2770,20 +2842,22 @@ def _bis_policy_raw(start):
     return out
 
 
-def _parallel(fn, keys, workers=8):
+def _parallel(fn, keys, workers=8, errs=None):
     from concurrent.futures import ThreadPoolExecutor
     ok, ko = {}, []
     def _one(k):
         try:
             return k, fn(k), None
         except Exception as e:
-            return k, None, f"{type(e).__name__}"
+            return k, None, (str(e) or type(e).__name__)[:80]
     with ThreadPoolExecutor(max_workers=workers) as ex:
         for k, v, err in ex.map(_one, keys):
             if err is None:
                 ok[k] = v
             else:
                 ko.append(k)
+                if errs is not None:
+                    errs[k] = err
     return ok, ko
 
 
@@ -2808,30 +2882,36 @@ def macro_bis_rates(start):
     return _bis_policy_raw(start)
 
 
-MX_TTL = {"fred": 6 * 3600, "yahoo": 30 * 60, "bis": 12 * 3600, "rates": 6 * 3600}
+MX_TTL = {"fred": 6 * 3600, "yahoo": 30 * 60, "bis": 12 * 3600, "rates": 6 * 3600, "treasury": 6 * 3600}
 MX_RETRY = 10 * 60          # une source en échec n'est retentée qu'après 10 min
-MX_SRC_LABEL = {"fred": "FRED", "yahoo": "Yahoo Finance", "bis": "BIS (taux directeurs)", "rates": "Décisions de taux"}
+MX_SRC_LABEL = {"fred": "FRED", "yahoo": "Yahoo Finance", "bis": "BIS (taux directeurs)",
+                "rates": "Décisions de taux (calendrier)", "treasury": "Trésor US (courbe des taux)"}
 
 
 @st.cache_resource(show_spinner=False)
 def _mx_store():
     """Mémoire partagée par toutes les sessions du serveur : les données ne sont chargées qu'une fois."""
     import threading
-    return {"fred": {}, "yahoo": {}, "bis": {}, "rates": [], "ts": {}, "fail_ts": {}, "missing": {},
-            "running": False, "lock": threading.Lock(), "started": 0.0}
+    return {"fred": {}, "yahoo": {}, "bis": {}, "rates": [], "treasury": {}, "ts": {}, "fail_ts": {},
+            "missing": {}, "errors": {}, "running": False, "lock": threading.Lock(), "started": 0.0, "fred_key": ""}
 
 
 def _mx_worker(store, jobs):
     import time as _t
     try:
         for kind in jobs:
+            errs = {}
             try:
                 if kind == "fred":
-                    ok, ko = _parallel(_fred_raw, list(MX_FRED), workers=12)
+                    key = store.get("fred_key", "")
+                    ok, ko = _parallel(lambda sid: _fred_raw(sid, key=key), list(MX_FRED),
+                                       workers=6 if key else 3, errs=errs)
                 elif kind == "yahoo":
-                    ok, ko = _parallel(_yahoo_raw, list(MX_YAHOO), workers=12)
+                    ok, ko = _parallel(_yahoo_raw, list(MX_YAHOO), workers=8, errs=errs)
                 elif kind == "bis":
                     ok, ko = _bis_policy_raw((date.today() - timedelta(days=800)).isoformat()), []
+                elif kind == "treasury":
+                    ok, ko = _treasury_raw(), []
                 else:
                     evs, _src = _fetch_calendar_raw("rates")
                     ok = [e for e in (evs or []) if any(k in str(e.get("title", "")).lower() for k in _MX_RATE_RX)]
@@ -2846,29 +2926,61 @@ def _mx_worker(store, jobs):
                 else:
                     store["fail_ts"][kind] = _t.time()
                     store["missing"][kind] = ["tout"]
-            except Exception:
+            except Exception as e:
+                errs["_"] = (str(e) or type(e).__name__)[:80]
                 store["fail_ts"][kind] = _t.time()
                 store["missing"][kind] = ["tout"]
+            store["errors"][kind] = errs
     finally:
         store["running"] = False
 
 
 def macro_get(force=False):
-    """Données macro disponibles tout de suite ; le rafraîchissement se fait en tâche de fond."""
+    """Données macro disponibles tout de suite ; le rafraîchissement se fait en tâche de fond.
+    Les séries FRED manquantes sont remplacées quand c'est possible (Trésor US, BIS)."""
     import threading, time as _t
     store = _mx_store(); now = _t.time()
+    store["fred_key"] = _fred_key()
     jobs = [k for k, ttl in MX_TTL.items()
             if force or ((now - store["ts"].get(k, 0) > ttl) and (now - store["fail_ts"].get(k, 0) > MX_RETRY))]
     with store["lock"]:
-        if store["running"] and now - store["started"] > 300:      # tâche bloquée : on la relance
+        if store["running"] and now - store["started"] > 420:      # tâche bloquée : on la relance
             store["running"] = False
         if jobs and not store["running"]:
             store["running"] = True; store["started"] = now
             threading.Thread(target=_mx_worker, args=(store, jobs), daemon=True).start()
+    fred = dict(store["fred"]); subs = []
+    for k, v in store["treasury"].items():
+        if k not in fred:
+            fred[k] = v; subs.append(f"{k} ← Trésor US")
+    us = store["bis"].get("USD")
+    if us is not None and len(us):
+        if "DFF" not in fred:
+            fred["DFF"] = us; subs.append("DFF ← BIS")
+        if "DFEDTARU" not in fred:
+            fred["DFEDTARU"] = us + 0.125; subs.append("DFEDTARU ← BIS")
     missing = {MX_SRC_LABEL[k]: v for k, v in store["missing"].items() if v}
-    return {"fred": store["fred"], "yahoo": store["yahoo"], "bis": store["bis"], "rates": store["rates"],
-            "missing": missing, "loading": store["running"],
+    return {"fred": fred, "yahoo": store["yahoo"], "bis": store["bis"], "rates": store["rates"],
+            "missing": missing, "loading": store["running"], "subs": subs,
             "empty": not (store["fred"] or store["yahoo"] or store["bis"])}
+
+
+def macro_diagnostics():
+    """État de chaque source : séries reçues, manquantes, dernière erreur."""
+    import time as _t
+    store = _mx_store(); rows = []
+    sizes = {"fred": len(MX_FRED), "yahoo": len(MX_YAHOO), "bis": len(MX_CB), "treasury": 5, "rates": None}
+    for k, lab in MX_SRC_LABEL.items():
+        got = len(store[k]) if k != "rates" else len(store["rates"])
+        ts = store["ts"].get(k); ft = store["fail_ts"].get(k)
+        errs = store["errors"].get(k, {})
+        sample = next(iter(errs.values()), "") if errs else ""
+        state = "OK" if got and not store["missing"].get(k) else ("Partiel" if got else ("Échec" if ft else "En attente"))
+        rows.append({"Source": lab, "État": state,
+                     "Reçu": f"{got}" + (f" / {sizes[k]}" if sizes.get(k) else ""),
+                     "Dernier succès": datetime.fromtimestamp(ts).strftime("%d/%m %H:%M") if ts else "—",
+                     "Erreur": sample or "—"})
+    return pd.DataFrame(rows)
 
 
 # ── Transformations et statistiques ───────────────────────────────────────────
@@ -2955,6 +3067,7 @@ def mx_events_frame(events):
     d["has_actual"] = d["actual"].astype(str).str.strip().isin(["", "nan", "None"]) == False
     d["z"] = [mx_event_surprise(a, f, p) if h else None
               for a, f, p, h in zip(d["actual"], d["forecast"], d["previous"], d["has_actual"])]
+    d["z"] = [None if (z is None or (isinstance(z, float) and np.isnan(z))) else z for z in d["z"]]
     d["zs"] = [(z * pol) if (z is not None and pol) else None for z, pol in zip(d["z"], d["pol"])]
     d["w"] = d["impact"].map(MX_IMPACT_W).fillna(0.2)
     return d
@@ -3083,7 +3196,14 @@ def mx_risk_regime(data):
     vix = data["yahoo"].get("^VIX")
     if vix is None: vix = data["fred"].get("VIXCLS")
     add("VIX", mx_z(vix), -1, "niveau vs 1 an")
-    add("Spread High Yield", mx_z_change(data["fred"].get("BAMLH0A0HYM2")), -1, "variation 20 j")
+    _hy = data["fred"].get("BAMLH0A0HYM2")
+    if _hy is not None and len(_hy):
+        add("Spread High Yield", mx_z_change(_hy), -1, "variation 20 j")
+    else:
+        hyg, ief = data["yahoo"].get("HYG"), data["yahoo"].get("IEF")
+        if hyg is not None and ief is not None:
+            ratio = (hyg / ief).dropna()
+            add("Crédit (HYG / IEF)", mx_z_change(ratio), 1, "variation 20 j, ETF")
     add("S&P 500", mx_z_change(data["yahoo"].get("^GSPC")), 1, "variation 20 j")
     dxy = data["yahoo"].get("DX-Y.NYB")
     if dxy is None: dxy = data["fred"].get("DTWEXBGS")
@@ -5866,6 +5986,9 @@ elif st.session_state.page == "analyse":
     _dxy = _mx["yahoo"].get("DX-Y.NYB", _mx["fred"].get("DTWEXBGS"))
     _hy = _mx["fred"].get("BAMLH0A0HYM2"); _ig = _mx["fred"].get("BAMLC0A0CM")
     _hyig = (_hy - _ig).dropna() if (_hy is not None and _ig is not None) else None
+    _cred = None
+    if _hyig is None and _mx["yahoo"].get("HYG") is not None and _mx["yahoo"].get("LQD") is not None:
+        _cred = (_mx["yahoo"]["HYG"] / _mx["yahoo"]["LQD"] * 100).dropna()     # repli : ratio d'ETF
     st.markdown(
         "<div style='display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 10px'>"
         f"<div style='flex:1.4 1 230px;min-width:220px;background:linear-gradient(135deg,{_rc}1f,{_ta['card']});"
@@ -5877,13 +6000,15 @@ elif st.session_state.page == "analyse":
         + _tile("Dollar (DXY)", _dxy, "", 2, None)
         + _tile("VIX", _vix, "", 1, False, shape="44px 12px 12px 44px")
         + _tile("Courbe 10 ans - 2 ans", _mx["fred"].get("T10Y2Y"), "pb", 0, True, how="bp")
-        + _tile("Spread HY - IG", _hyig, "pb", 0, False, how="bp",
-                shape="3px 20px 3px 20px")
+        + (_tile("Spread HY - IG", _hyig, "pb", 0, False, how="bp", shape="3px 20px 3px 20px") if _cred is None else
+           _tile("Crédit HYG / LQD", _cred, "", 2, True, shape="3px 20px 3px 20px"))
         + "</div>", unsafe_allow_html=True)
     if _mx["missing"] and not _mx["loading"]:
         st.caption("Données partielles · " + " · ".join(
             (f"{k} : indisponible" if v == ["tout"] else f"{k} : {len(v)} série(s) manquante(s)")
-            for k, v in _mx["missing"].items()) + " · nouvel essai automatique dans 10 min")
+            for k, v in _mx["missing"].items()) + " · nouvel essai automatique dans 10 min"
+            + (f" · remplacements : {', '.join(_mx['subs'])}" if _mx.get("subs") else "")
+            + " · détail dans Méthode & sources")
 
     (tab_syn, tab_cal, tab_mon, tab_inf, tab_gro, tab_liq, tab_met) = st.tabs([
         "Synthèse & biais", "Calendrier & surprises", "Politique monétaire", "Inflation & Emploi",
@@ -5919,24 +6044,41 @@ elif st.session_state.page == "analyse":
         st.radio("Horizon", ["1 an", "3 ans", "5 ans", "10 ans"], index=1, horizontal=True, key=key,
                  label_visibility="collapsed")
 
-    _MX_CAL_MATCH = {  # série FRED -> mots du titre de la publication correspondante (USD)
-        "CPIAUCSL": (["cpi"], ["core", "m/m", "mom"]), "CPILFESL": (["core cpi"], ["m/m", "mom"]),
-        "PCEPILFE": (["core pce"], []), "PCEPI": (["pce price"], ["core"]),
-        "PAYEMS": (["non-farm", "nonfarm"], []), "UNRATE": (["unemployment rate"], []),
-        "CES0500000003": (["average hourly earnings"], []), "ICSA": (["jobless claims", "initial claims"], ["continuing"]),
-        "A191RL1Q225SBEA": (["gdp"], ["deflator", "price"]), "RSAFS": (["retail sales"], ["core", "control", "ex"]),
-        "UMCSENT": (["michigan", "consumer sentiment"], ["expectations", "inflation"]),
-        "INDPRO": (["industrial production"], []),
+    _MX_CAL_MATCH = {  # série FRED -> titres de publication USD, du plus précis au plus large
+        "CPIAUCSL": [(["inflation rate yoy", "cpi y/y", "cpi yoy", "cpi (yoy)"], ["core", "mom", "m/m"])],
+        "CPILFESL": [(["core inflation rate yoy", "core cpi y/y", "core cpi yoy", "core cpi (yoy)"], ["mom", "m/m"])],
+        "PCEPILFE": [(["core pce price index yoy", "core pce price index y/y", "core pce y/y", "core pce yoy"], ["mom", "m/m"]),
+                     (["core pce"], ["mom", "m/m", "qoq", "q/q"])],
+        "PCEPI": [(["pce price index yoy", "pce price index y/y"], ["core", "mom", "m/m"])],
+        "PAYEMS": [(["non farm payrolls", "non-farm payrolls", "nonfarm payrolls", "non-farm employment change"],
+                    ["adp", "private", "manufacturing", "government"])],
+        "UNRATE": [(["unemployment rate"], ["u6", "u-6"])],
+        "CES0500000003": [(["average hourly earnings yoy", "average hourly earnings y/y"], []),
+                          (["average hourly earnings"], [])],
+        "ICSA": [(["initial jobless claims", "jobless claims"], ["continuing", "4-week", "average"])],
+        "A191RL1Q225SBEA": [(["gdp growth rate qoq", "gdp q/q", "gdp annualized", "gdp growth"],
+                             ["deflator", "price", "yoy", "y/y", "gdpnow"]),
+                            (["gdp"], ["deflator", "price", "yoy", "y/y", "gdpnow"])],
+        "RSAFS": [(["retail sales mom", "retail sales m/m"], ["ex ", "excl", "control", "core", "yoy", "y/y"])],
+        "UMCSENT": [(["michigan consumer sentiment", "uom consumer sentiment"], ["expectations", "inflation", "current"])],
+        "INDPRO": [(["industrial production yoy", "industrial production y/y"], []),
+                   (["industrial production"], [])],
     }
+
+    def _nn(x):
+        return None if (x is None or (isinstance(x, float) and np.isnan(x))) else x
 
     def _cal_last(sid):
         if _ev_all is None or _ev_all.empty or sid not in _MX_CAL_MATCH:
             return None
-        inc, exc = _MX_CAL_MATCH[sid]
-        t = _ev_all["title"].astype(str).str.lower()
-        m = (_ev_all["country"] == "USD") & _ev_all["has_actual"] & t.map(lambda x: any(k in x for k in inc) and not any(k in x for k in exc))
-        d = _ev_all[m].sort_values("dt")
-        return None if d.empty else d.iloc[-1]
+        base = _ev_all[(_ev_all["country"] == "USD") & _ev_all["has_actual"]]
+        t = base["title"].astype(str).str.lower()
+        for inc, exc in _MX_CAL_MATCH[sid]:
+            m = t.map(lambda x: any(k in x for k in inc) and not any(k in x for k in exc))
+            d = base[m].sort_values("dt")
+            if not d.empty:
+                return d.iloc[-1]
+        return None
 
     def _ind_card(sid, label=None, d=1, pos_good=True, shape="22px 6px 22px 6px"):
         lab_, unit, how = MX_FRED[sid]
@@ -5946,8 +6088,12 @@ elif st.session_state.page == "analyse":
         col = _sgn_col(ch, pos_good)
         cal = _cal_last(sid)
         cal_html = ""
+        _from_cal = False
+        if v is None and cal is not None:                     # FRED absent : valeur du calendrier
+            v_txt, p_txt, _from_cal = str(cal["actual"]), str(cal["previous"] or "—"), True
+            dt_ = pd.Timestamp(cal["dt"])
         if cal is not None:
-            z = cal["zs"]
+            z = _nn(cal["zs"])
             zc = _ta["muted"] if z is None or abs(z) < 0.3 else (_ta["win"] if z > 0 else _ta["loss"])
             cal_html = (f"<div style='margin-top:6px;font-size:11px;color:{_ta['muted']};line-height:1.5'>"
                         f"Publié <b style='color:{_ta['text']}'>{_html.escape(str(cal['actual']))}</b> · consensus "
@@ -5961,10 +6107,13 @@ elif st.session_state.page == "analyse":
             f"<span style='font-size:11.5px;font-weight:700;color:{_ta['text']}'>{label or lab_}</span>"
             f"<span style='font-size:10px;color:{_ta['muted']}'>{'' if dt_ is None else dt_.strftime('%m/%Y')}</span></div>"
             f"<div style='display:flex;align-items:flex-end;justify-content:space-between'>"
-            f"<div><span style='font-size:22px;font-weight:800;color:{_ta['text']};font-family:JetBrains Mono,monospace'>{_nfr(v, d)}</span>"
-            f"<span style='font-size:11px;color:{_ta['muted']}'> {unit}</span>"
-            f"<div style='font-size:11px;color:{col};font-weight:700'>préc. {_nfr(p, d)} "
-            f"{'' if ch is None else ('▲' if ch > 0 else '▼' if ch < 0 else '=')}</div></div>"
+            + (f"<div><span style='font-size:22px;font-weight:800;color:{_ta['text']};font-family:JetBrains Mono,monospace'>"
+               f"{_html.escape(v_txt)}</span><div style='font-size:11px;color:{_ta['muted']};font-weight:700'>préc. "
+               f"{_html.escape(p_txt)} · source calendrier</div></div>" if _from_cal else
+               f"<div><span style='font-size:22px;font-weight:800;color:{_ta['text']};font-family:JetBrains Mono,monospace'>{_nfr(v, d)}</span>"
+               f"<span style='font-size:11px;color:{_ta['muted']}'> {unit}</span>"
+               f"<div style='font-size:11px;color:{col};font-weight:700'>préc. {_nfr(p, d)} "
+               f"{'' if ch is None else ('▲' if ch > 0 else '▼' if ch < 0 else '=')}</div></div>") +
             f"{_spark(s, _ta['accent'])}</div>{cal_html}</div>", unsafe_allow_html=True)
 
     def _releases_table(cats, title):
@@ -5977,7 +6126,7 @@ elif st.session_state.page == "analyse":
             return
         rows = ""
         for _, r in d.iterrows():
-            z = r["zs"]
+            z = _nn(r["zs"])
             zc = _ta["muted"] if z is None or abs(z) < 0.3 else (_ta["win"] if z > 0 else _ta["loss"])
             rows += (f"<tr><td style='white-space:nowrap;color:var(--tj-muted)'>{_fmt_local(r['date'])[0]}</td>"
                      f"<td><b>{r['country']}</b></td><td>{_html.escape(str(r['title']))}</td>"
@@ -6227,7 +6376,8 @@ elif st.session_state.page == "analyse":
     with tab_liq:
         lc = st.columns(4)
         tiles = [("Courbe 10 ans - 3 mois", _mx["fred"].get("T10Y3M"), "pb", 0, True, "bp"),
-                 ("Spread High Yield", _hy, "pb", 0, False, "bp"),
+                 (("Spread High Yield", _hy, "pb", 0, False, "bp") if _hy is not None or _cred is None
+                  else ("Crédit HYG / LQD", _cred, "", 2, True, "lvl")),
                  ("Masse monétaire M2", _mx["fred"].get("M2SL"), "% a/a", 1, True, "yoy"),
                  ("Conditions financières", _mx["fred"].get("NFCI"), "", 2, False, "lvl")]
         shapes = ["22px 6px 22px 6px", "44px 12px 12px 44px", "3px 20px 3px 20px", "12px 44px 44px 12px"]
@@ -6243,6 +6393,9 @@ elif st.session_state.page == "analyse":
                        ("10 ans - 3 mois", mx_transform(_mx["fred"].get("T10Y3M"), "bp"), _ta["orange"])], "hz_liq", ref=0, unit="pb")
         with g2:
             _card_t("Spreads de crédit", "points de base")
+            if _hy is None and _cred is not None:
+                st.caption("Spreads FRED indisponibles : ratio HYG / LQD (ETF), une baisse signale une tension sur le crédit.")
+                _ts_chart([("HYG / LQD", _cred, _ta["orange"])], "hz_liq")
             _ts_chart([("High Yield", mx_transform(_hy, "bp") if _hy is not None else None, _ta["loss"]),
                        ("Investment Grade", mx_transform(_ig, "bp") if _ig is not None else None, _ta["accent"]),
                        ("HY - IG", mx_transform(_hyig, "bp") if _hyig is not None else None, _ta["orange"])], "hz_liq", unit="pb")
@@ -6267,6 +6420,24 @@ elif st.session_state.page == "analyse":
         with _m2:
             if st.button("Recharger les données", icon=":material/refresh:", key="mx_force", use_container_width=True):
                 macro_get(force=True); st.rerun()
+        _card_t("État des sources", "diagnostic du chargement")
+        _dg = macro_diagnostics()
+        _stc = {"OK": _ta["win"], "Partiel": _ta["orange"], "Échec": _ta["loss"]}
+        st.markdown("<div style='overflow-x:auto'><table class='tj-table'><thead><tr><th>Source</th><th>État</th>"
+                    "<th>Reçu</th><th>Dernier succès</th><th>Erreur</th></tr></thead><tbody>" + "".join(
+                        f"<tr><td><b>{r['Source']}</b></td><td>{_chip(r['État'], _stc.get(r['État'], _ta['muted']))}</td>"
+                        f"<td style='font-family:monospace'>{r['Reçu']}</td><td>{r['Dernier succès']}</td>"
+                        f"<td style='white-space:normal;color:var(--tj-muted);font-size:12px'>{_html.escape(str(r['Erreur']))}</td></tr>"
+                        for _, r in _dg.iterrows()) + "</tbody></table></div>", unsafe_allow_html=True)
+        if not _fred_key():
+            st.markdown(
+                f"<div style='padding:10px 14px;border-radius:16px 16px 16px 4px;background:{_ta['accent']}12;"
+                f"border:1px solid {_ta['accent']}44;font-size:12.5px;color:{_ta['text']}'>"
+                f"<b>Fiabiliser FRED (gratuit, 2 min)</b> : crée une clé sur "
+                f"<a href='https://fredaccount.stlouisfed.org/apikeys' target='_blank'>fredaccount.stlouisfed.org/apikeys</a>, "
+                f"puis dans Streamlit Cloud ouvre <i>Manage app → Settings → Secrets</i> et ajoute la ligne "
+                f"<code>FRED_API_KEY = \"ta_clé\"</code>. L'app passe alors par l'API officielle au lieu de l'export public.</div>",
+                unsafe_allow_html=True)
         st.markdown(MX_METHOD_MD)
 
 
