@@ -126,8 +126,8 @@ def _is_light(t):
 THEME_NAMES = ["Voltage"] + [n for n in THEMES if n != "Voltage"]
 DEFAULT_THEME = "Voltage"          # design par défaut du dashboard
 LOGIN_THEME   = "Voltage"          # design unique de la page de connexion
-DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
-DEFAULT_BG      = "Aucun"              # fond d'écran par défaut
+DEFAULT_ACCOUNT = "Compte Secondaire"   # compte affiché à l'ouverture de l'app
+DEFAULT_BG      = "Bitcoin"              # fond d'écran par défaut
 
 # ── FONDS D'ÉCRAN (photos libres de droits, licence Unsplash) ─────────────────
 # Rempli avec des photos dont la licence gratuite a été vérifiée. "Aucun" = pas d'image.
