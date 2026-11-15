@@ -126,8 +126,8 @@ def _is_light(t):
 THEME_NAMES = ["Voltage"] + [n for n in THEMES if n != "Voltage"]
 DEFAULT_THEME = "Voltage"          # design par défaut du dashboard
 LOGIN_THEME   = "Voltage"          # design unique de la page de connexion
-DEFAULT_ACCOUNT = "Compte Secondaire"   # compte affiché à l'ouverture de l'app
-DEFAULT_BG      = "Bitcoin"              # fond d'écran par défaut
+DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
+DEFAULT_BG      = "Aucun"              # fond d'écran par défaut
 
 # ── FONDS D'ÉCRAN (photos libres de droits, licence Unsplash) ─────────────────
 # Rempli avec des photos dont la licence gratuite a été vérifiée. "Aucun" = pas d'image.
@@ -779,7 +779,25 @@ def _sb_ready():
     """Vérifie que les secrets Supabase sont configurés."""
     return bool(SB_URL and SB_KEY and SB_URL.startswith("https://"))
 
+@st.cache_resource(show_spinner=False)
+def _trades_mem():
+    """Copie des trades partagée par les sessions du serveur (évite de tout recharger à chaque retour)."""
+    return {"data": None, "ts": 0.0}
+
+def _trades_copy(v):
+    return json.loads(json.dumps(v))
+
 def db_load():
+    import time as _t
+    mem = _trades_mem()
+    if mem["data"] is not None and _t.time() - mem["ts"] < 180:
+        return _trades_copy(mem["data"])
+    v = _db_load_remote()
+    if v:
+        mem["data"], mem["ts"] = _trades_copy(v), _t.time()
+    return v
+
+def _db_load_remote():
     if not _sb_ready():
         return st.session_state.get("_local_trades", [])
     try:
@@ -796,7 +814,7 @@ def db_load():
         st.error(f"Erreur chargement base de données : {e}")
         return []
 
-def db_save(trades):
+def _db_save_remote(trades):
     if not _sb_ready():
         st.session_state["_local_trades"] = trades
         st.warning("Supabase non configuré — données en mémoire uniquement.")
@@ -831,6 +849,15 @@ def db_save(trades):
     except Exception as e:
         st.error(f"Erreur sauvegarde : {e}")
         return False
+def db_save(trades):
+    import time as _t
+    ok = _db_save_remote(trades)
+    if ok:
+        _trades_mem().update(data=_trades_copy(trades), ts=_t.time())
+    else:
+        _trades_mem().update(data=None, ts=0.0)
+    return ok
+
 def db_init():
     try:
         requests.post(SB_EP, headers=SB_HDR,
@@ -899,6 +926,7 @@ def load_and_migrate():
     return trades
 
 def force_reload():
+    _trades_mem().update(data=None, ts=0.0)          # synchroniser = relire vraiment la base
     st.session_state.trades = load_and_migrate()
 # ── INIT SESSION ────────────────────────────────────────────────────────────
 if "trades" not in st.session_state:
@@ -1163,8 +1191,11 @@ if "accounts_meta" not in st.session_state:
 apply_accounts(st.session_state.accounts_meta)   # réassigne TRADE_MODES à chaque run
 if "account_capital" not in st.session_state:
     st.session_state.account_capital = capital_load()
-if "trade_screenshots" not in st.session_state:
-    st.session_state.trade_screenshots = screenshots_load()
+def shots_state():
+    """Captures des trades : chargées seulement quand une page en a besoin (lourdes)."""
+    if "trade_screenshots" not in st.session_state:
+        st.session_state.trade_screenshots = screenshots_load()
+    return st.session_state.trade_screenshots
 
 
 def get_pnl(t): return float(t.get("pnl", 0))
@@ -1400,9 +1431,11 @@ def _sess_sig(uname, exp, pwh):
     import hmac
     return hmac.new(_sess_secret(), f"{uname}|{exp}|{(pwh or '')[:24]}".encode(), hashlib.sha256).hexdigest()[:32]
 
-def make_session_token(user):
+SESSION_CHOICES = {"8 heures": 8 / 24, "7 jours": 7, "30 jours": 30}
+
+def make_session_token(user, days=SESSION_DAYS):
     import time as _t
-    exp = int(_t.time()) + SESSION_DAYS * 86400
+    exp = int(_t.time() + days * 86400)
     raw = base64.urlsafe_b64encode(f"{user['username']}|{exp}".encode()).decode().rstrip("=")
     return f"{raw}.{_sess_sig(user['username'], exp, user.get('password_hash', ''))}"
 
@@ -1527,12 +1560,15 @@ div[data-testid="stForm"] button {{ padding:11px 0 !important; font-size:14px !i
                 f"Identifiez-vous pour accéder à votre journal</div>", unsafe_allow_html=True)
             u = st.text_input("Utilisateur", placeholder="Nom d'utilisateur")
             p = st.text_input("Mot de passe", type="password", placeholder="••••••••")
+            _keep = st.selectbox("Rester connecté", list(SESSION_CHOICES), index=1,
+                                 help="Durée pendant laquelle l'app te reconnecte toute seule, même après une veille "
+                                      "ou un onglet fermé. « Déconnexion » y met fin à tout moment.")
             if st.form_submit_button("Se connecter", use_container_width=True, type="primary"):
                 ok, user, msg = authenticate(u.strip(), p)
                 if ok:
                     st.session_state.mode_selection = []
                     _apply_login(user)       # compte par défaut : Réel Indépendant (s'il est autorisé)
-                    st.query_params["s"] = make_session_token(user)
+                    st.query_params["s"] = make_session_token(user, SESSION_CHOICES.get(_keep, SESSION_DAYS))
                     st.rerun()
                 else:
                     st.error(msg)
@@ -1916,6 +1952,44 @@ if not login_gate():
     st.stop()
 if st.query_params.get("p") != st.session_state.page:      # la page suit l'adresse (reprise après coupure)
     st.query_params["p"] = st.session_state.page
+
+def _connection_watchdog():
+    """Au retour sur l'onglet, si Streamlit n'arrive pas à se reconnecter (plus de 8 s), la page se
+    recharge toute seule : le jeton de l'adresse reconnecte et rouvre la même page."""
+    import streamlit.components.v1 as _cw
+    code = r"""
+(function(){
+  var W = window.parent, D = W.document;
+  if (W.__tjWatchdog) return; W.__tjWatchdog = true;
+  var bad = 0, last = Date.now();
+  function state(){ var a = D.querySelector('[data-testid="stApp"]');
+    return a ? (a.getAttribute('data-test-connection-state') || 'CONNECTED') : 'CONNECTED'; }
+  var busy = false;
+  function reload(){            // on ne recharge que si le serveur répond : sinon Streamlit continue d'essayer
+    if (busy) return; busy = true;
+    var base = W.location.pathname.replace(/[^\/]*$/, '');
+    W.fetch(base + '_stcore/health', {cache: 'no-store'}).then(function(r){
+      if (r.ok) { W.location.reload(); } else { busy = false; bad = 0; }
+    }).catch(function(){ busy = false; bad = 0; });
+  }
+  W.setInterval(function(){
+    var now = Date.now(), gap = now - last; last = now;
+    if (D.hidden) { bad = 0; return; }
+    var s = state();
+    if (s === 'DISCONNECTED_FOREVER') { reload(); return; }
+    if (s !== 'CONNECTED') { bad += (gap > 4000 ? 1 : gap / 2000); if (bad >= 4) reload(); }
+    else bad = 0;
+  }, 2000);
+  D.addEventListener('visibilitychange', function(){ if (!D.hidden) { bad = 0; last = Date.now(); } });
+})();"""
+    _cw.html("<script>try{var s=window.parent.document.createElement('script');s.textContent="
+             + json.dumps(code) + ";window.parent.document.head.appendChild(s);}catch(e){" + code + "}</script>",
+             height=0)
+
+with st.container(key="tj_watchdog"):
+    _connection_watchdog()
+st.markdown("<style>.st-key-tj_watchdog{position:fixed!important;left:-10000px;width:1px;height:1px;overflow:hidden}</style>",
+            unsafe_allow_html=True)
 
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
@@ -4796,7 +4870,7 @@ elif st.session_state.page == "journal":
                 # Captures d'écran du trade sélectionné
                 st.markdown("##### Captures d'écran du setup")
                 _sid = str(sel_id)
-                _shots = st.session_state.trade_screenshots
+                _shots = shots_state()
                 _cur = _shots.get(_sid, [])
                 up = st.file_uploader("Ajouter des captures (PNG/JPG)", type=["png", "jpg", "jpeg"],
                                       accept_multiple_files=True, key=f"up_{_sid}", label_visibility="collapsed")
@@ -7627,7 +7701,7 @@ elif st.session_state.page == "captures":
                    + ("L'ajout se fait dans le Journal (trade sélectionné)."
                       if is_admin() else "Consultation limitée à vos comptes."))
 
-        _shots = st.session_state.get("trade_screenshots", {})
+        _shots = shots_state()
         _allowed = allowed_accounts()
         # Index des trades par id
         _by_id = {str(t["id"]): t for t in st.session_state.trades}
