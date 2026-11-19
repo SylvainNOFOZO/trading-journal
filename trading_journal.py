@@ -106,7 +106,7 @@ THEME_NAMES = ["Graphite", "Papier"]
 DEFAULT_THEME = "Graphite"         # design par défaut
 LOGIN_THEME   = "Graphite"         # design de la page de connexion
 DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
-DEFAULT_BG      = "Aucun"              # fond d'écran par défaut
+DEFAULT_BG      = "Bitcoin"            # fond d'écran par défaut
 
 # ── FONDS D'ÉCRAN (photos libres de droits, licence Unsplash) ─────────────────
 # Rempli avec des photos dont la licence gratuite a été vérifiée. "Aucun" = pas d'image.
@@ -151,10 +151,10 @@ def background_css(t, name):
     else:
         src = bg["url"] + "?auto=format&fit=crop&w=2400&q=75"
     if bg.get("mode") == "logo":
-        ov = 0.30 if light else 0.32
+        ov = 0.55 if light else 0.62
         layer = f"url('{src}') center 58% / min(58vw, 680px) auto no-repeat fixed"
     else:
-        ov = 0.58 if light else 0.48
+        ov = 0.80 if light else 0.76
         layer = f"url('{src}') center / cover no-repeat fixed"
     credit = (f"<div style='position:fixed;right:12px;bottom:6px;z-index:5;font-size:10px;color:{t['muted']};"
               f"opacity:.75;pointer-events:none'>Photo : {bg['credit']} · Unsplash</div>") if bg.get("credit") else ""
@@ -396,7 +396,6 @@ def calm_css(t):
     font-family:'IBM Plex Sans', system-ui, sans-serif; }}
 .stApp [style*="Mono"], .stApp [style*="monospace"], .stApp code, .kpi-value {{
     font-family:'IBM Plex Mono', ui-monospace, monospace !important; font-variant-numeric:tabular-nums; }}
-.stApp {{ background:{t['bg']} !important; }}
 /* Typographie : casse normale, deux graisses, pas d'espacement forcé */
 .stApp [style*="text-transform:uppercase"], .stApp [style*="text-transform: uppercase"], .kpi-label,
 .tj-table th, label[data-testid="stWidgetLabel"] p {{ text-transform:none !important; letter-spacing:0 !important; }}
@@ -443,8 +442,9 @@ div[class*="st-key-tjmnav_"] .stButton > button[kind="primary"] [data-testid="st
 .stButton > button:focus-visible, [data-testid="stPopover"] button:focus-visible {{ outline:2px solid {t['accent']} !important; outline-offset:2px; }}
 /* Cartes : mêmes rayons, filet, pas de relief */
 .kpi, .grad-card, [data-testid="stPlotlyChart"], div[data-testid="stExpander"] details,
-[data-testid="stPopoverBody"], .st-key-cd_sphere iframe {{ box-shadow:none !important; transform:none !important;
+.st-key-cd_sphere iframe {{ box-shadow:none !important; transform:none !important;
     backdrop-filter:none !important; clip-path:none !important; }}
+[data-testid="stPopoverBody"] {{ box-shadow:0 12px 32px rgba(0,0,0,{'.08' if light else '.45'}) !important; backdrop-filter:none !important; }}
 .kpi {{ background:{t['card']} !important; border:1px solid {hair} !important; border-radius:12px !important;
     padding:16px 20px !important; min-height:96px !important; }}
 .kpi::after, .grad-card::after {{ display:none !important; }}
@@ -484,6 +484,41 @@ span[data-tag] * {{ color:{t['text']} !important; }}
 /* Conteneurs qui ne portent que du style : aucun espace dans la mise en page */
 [data-testid="stElementContainer"]:has([data-testid="stMarkdownContainer"] > style:only-child) {{ display:none !important; }}
 .block-container {{ padding-top:24px !important; }}
+/* Encadrés (info, avertissement, erreur, succès) : surface neutre, filet coloré, texte lisible */
+[data-testid="stAlert"] > div, [data-testid="stAlertContainer"] {{ background:{raised} !important; border:1px solid {hair} !important;
+    border-left:3px solid {t['muted']} !important; border-radius:8px !important; }}
+[data-testid="stAlert"]:has([data-testid="stAlertContentWarning"]) > div {{ border-left-color:{t['orange']} !important; }}
+[data-testid="stAlert"]:has([data-testid="stAlertContentError"]) > div {{ border-left-color:{t['loss']} !important; }}
+[data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) > div {{ border-left-color:{t['win']} !important; }}
+[data-testid="stAlert"]:has([data-testid="stAlertContentInfo"]) > div {{ border-left-color:{t['accent']} !important; }}
+[data-testid="stAlert"] p, [data-testid="stAlert"] li, [data-testid="stAlert"] span:not([data-testid="stIconMaterial"]),
+[data-testid="stAlert"] div {{ color:{t['text']} !important; }}
+[data-testid="stAlert"] code {{ color:{t['text']} !important; background:{t['card']} !important; }}
+/* Listes déroulantes, champs et bulles d'aide : surfaces du thème, texte lisible */
+[data-baseweb="select"] > div, [data-testid="stPopoverBody"] [data-baseweb="select"] > div,
+div[data-testid="stTextInputRootElement"], [data-testid="stDateInputField"], [data-baseweb="input"] {{
+    background:{raised} !important; border-color:{hair} !important; color:{t['text']} !important; }}
+[data-baseweb="select"] *, [data-baseweb="select"] input {{ color:{t['text']} !important; }}
+[data-testid="stPopoverBody"] [data-rac][role="group"], [data-testid="stPopoverBody"] [data-testid="stTextInputRootElement"],
+[role="dialog"] [data-rac][role="group"] {{ background-color:{raised} !important; border:1px solid {hair} !important;
+    border-radius:8px !important; color:{t['text']} !important; }}
+[data-testid="stPopoverBody"] [data-rac][role="group"] *, [data-testid="stPopoverBody"] input,
+[data-testid="stPopoverBody"] p, [data-testid="stPopoverBody"] label {{ color:{t['text']} !important; }}
+[data-testid="stPopoverBody"] [data-rac][role="group"] svg {{ fill:{t['muted']} !important; color:{t['muted']} !important; }}
+[role="listbox"], [data-baseweb="popover"] ul {{ background:{t['card']} !important; border:1px solid {hair} !important; }}
+[role="listbox"] [role="option"], [role="listbox"] li {{ color:{t['text']} !important; }}
+[data-testid="stTooltipContent"], [data-baseweb="tooltip"] > div, [data-baseweb="tooltip"] [role="tooltip"] {{
+    background:{t['card']} !important; color:{t['text']} !important; border:1px solid {hair} !important; }}
+[data-testid="stTooltipContent"] *, [data-baseweb="tooltip"] * {{ color:{t['text']} !important; }}
+/* Sur un fond photo : tables, onglets et légendes posés sur une surface */
+.tj-table {{ background:{t['card']}; border:1px solid {hair}; border-radius:12px; overflow:hidden; }}
+.stTabs [data-baseweb="tab-list"], [data-testid="stTabs"] [role="tablist"] {{ background:{_hexa(t['card'], 0.92)};
+    border-radius:8px; padding:0 4px; }}
+/* Menus déroulants : panneau opaque, au premier plan */
+[data-testid="stPopoverBody"], [data-testid="stPopoverBody"] > div {{ background-color:{t['card']} !important; opacity:1 !important; }}
+[data-baseweb="popover"], div:has(> [data-testid="stPopoverBody"]) {{ z-index:100000 !important; }}
+/* Menu de réglages : bouton icône discret */
+.st-key-tj_hdr [data-testid="stPopover"] > div > button {{ min-height:36px; }}
 /* Chronomètre : sans halo */
 .st-key-cd_sphere iframe {{ border-radius:50%; }}
 </style>"""
@@ -753,7 +788,7 @@ div[data-testid="stExpander"] details summary:hover {{ background:{t['accent']}0
 [data-testid="stDialog"] div:has(> [role="dialog"]), [data-testid="stDialog"] [role="dialog"] div {{ background-color:transparent; }}
 [data-testid="stDialog"] div:has(> [role="dialog"]) {{ background:{t['card']} !important; border:1px solid {t['border']} !important;
     border-radius:8px 30px 30px 30px !important; }}
-div[role="dialog"] {{ background:transparent !important; color:{t['text']} !important; border:1px solid {t['border']} !important;
+[data-testid="stDialog"] div[role="dialog"] {{ background:transparent !important; color:{t['text']} !important; border:1px solid {t['border']} !important;
     border-radius:8px 30px 30px 30px !important; }}
 div[role="dialog"] h1, div[role="dialog"] h2, div[role="dialog"] h3, div[role="dialog"] p, div[role="dialog"] label,
 div[role="dialog"] span, div[role="dialog"] [data-testid="stMarkdownContainer"] {{ color:{t['text']}; }}
@@ -2025,7 +2060,8 @@ st.markdown(build_css(get_theme()), unsafe_allow_html=True)
 st.markdown(fx_css(get_theme()), unsafe_allow_html=True)
 if "bg_name" not in st.session_state:
     st.session_state.bg_name = DEFAULT_BG if DEFAULT_BG in BACKGROUNDS else "Aucun"
-st.session_state.bg_name = "Aucun"                      # fond uni (les photos de fond sont retirées)
+if st.session_state.bg_name not in BACKGROUNDS:
+    st.session_state.bg_name = DEFAULT_BG if DEFAULT_BG in BACKGROUNDS else "Aucun"
 st.markdown(background_css(get_theme(), st.session_state.bg_name), unsafe_allow_html=True)
 
 # ── EN-TÊTE MASQUABLE (panneau animé + navigation en onglets thémés) ─────────────
@@ -2162,35 +2198,40 @@ _brand = (f"<div style='display:flex;align-items:center;gap:10px'>"
 
 if st.session_state.hdr_open:
     with st.container(key="tj_hdr"):
-        _r = st.columns([2.6, 1.6, 1.6, 0.0001, 0.4, 0.4, 0.4], vertical_alignment="center", gap="small")
+        _r = st.columns([5.2, 0.4, 0.4, 0.4, 0.4], vertical_alignment="center", gap="small")
         with _r[0]:
             st.markdown(_brand, unsafe_allow_html=True)
         with _r[1]:
-            _sel_theme = st.selectbox("Design", THEME_NAMES,
-                index=THEME_NAMES.index(st.session_state.theme_name)
-                      if st.session_state.theme_name in THEME_NAMES else 0,
-                key="theme_selector", label_visibility="collapsed", format_func=theme_label,
-                help="Design de l'interface : clair ou sombre, couleurs et style des graphiques")
-            if _sel_theme != st.session_state.theme_name:
-                st.session_state.theme_name = _sel_theme; st.rerun()
+            with st.popover("", icon=":material/tune:", help="Réglages d'affichage : design, graphiques, fond",
+                            use_container_width=True):
+                st.markdown(f"<div style='font-size:14px;font-weight:500;color:{_t['text']};margin-bottom:8px'>Affichage</div>",
+                            unsafe_allow_html=True)
+                _sel_theme = st.selectbox("Design", THEME_NAMES,
+                    index=THEME_NAMES.index(st.session_state.theme_name)
+                          if st.session_state.theme_name in THEME_NAMES else 0,
+                    key="theme_selector", format_func=theme_label)
+                if _sel_theme != st.session_state.theme_name:
+                    st.session_state.theme_name = _sel_theme; st.rerun()
+                _cs_opts = ["Auto"] + CHART_STYLE_NAMES
+                _cur_cs = st.session_state.get("chart_style_override", "Auto")
+                _sel_cs = st.selectbox("Graphiques", _cs_opts,
+                    index=_cs_opts.index(_cur_cs) if _cur_cs in _cs_opts else 0,
+                    format_func=lambda x: ("Cotation (par défaut)" if x == "Auto" else x),
+                    key="chart_style_selector")
+                if _sel_cs != _cur_cs:
+                    st.session_state.chart_style_override = _sel_cs; st.rerun()
+                _sel_bg = st.selectbox("Fond", BG_NAMES,
+                    index=BG_NAMES.index(st.session_state.bg_name) if st.session_state.bg_name in BG_NAMES else 0,
+                    format_func=lambda n: "Aucun (uni)" if n == "Aucun" else n, key="bg_selector")
+                if _sel_bg != st.session_state.bg_name:
+                    st.session_state.bg_name = _sel_bg; st.rerun()
         with _r[2]:
-            _cs_opts = ["Auto"] + CHART_STYLE_NAMES
-            _cur_cs = st.session_state.get("chart_style_override", "Auto")
-            _sel_cs = st.selectbox("Graphiques", _cs_opts,
-                index=_cs_opts.index(_cur_cs) if _cur_cs in _cs_opts else 0,
-                format_func=lambda x: (f"Graphiques · Cotation" if x == "Auto" else f"Graphiques · {x}"),
-                key="chart_style_selector", label_visibility="collapsed",
-                help="Type et configuration des graphiques. Auto = suit le design choisi "
-                     f"(actuellement {THEME_CHART_STYLE.get(st.session_state.theme_name, 'Classique')}).")
-            if _sel_cs != _cur_cs:
-                st.session_state.chart_style_override = _sel_cs; st.rerun()
-        with _r[4]:
             if st.button("", icon=":material/sync:", key="hdr_sync", help="Synchroniser", use_container_width=True):
                 force_reload(); st.rerun()
-        with _r[5]:
+        with _r[3]:
             if st.button("", icon=":material/logout:", key="hdr_logout", help="Déconnexion", use_container_width=True):
                 logout()
-        with _r[6]:
+        with _r[4]:
             st.button("", icon=":material/keyboard_arrow_up:", key="hdr_toggle", help="Masquer le panneau",
                       on_click=_hdr_toggle, use_container_width=True)
         _c1, _c2 = st.columns([3, 2.2], vertical_alignment="center", gap="small")
@@ -3915,7 +3956,7 @@ if st.session_state.page == "dashboard":
             lab = {"critique": "critique", "attention": "attention", "info": "à savoir", "positif": "point fort"}[r["level"]]
             st.markdown(
                 f"<div style='background:{T['card']};border:1px solid {T['border']};border-left:4px solid {c};"
-                f"border-radius:4px 20px 20px 4px;padding:9px 13px;margin-bottom:8px'>"
+                f"border-radius:12px;padding:12px 16px;margin-bottom:8px'>"
                 f"<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>"
                 f"<span style='font-size:9.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;"
                 f"color:{c};background:{c}16;border-radius:5px;padding:1px 6px'>{lab}</span>"
@@ -5897,7 +5938,7 @@ elif st.session_state.page == "analyse":
 
         st.markdown(
             f"<div style='background:{_ta['card']};border:1px solid {_ta['accent'] if focus else _ta['border']};"
-            f"border-left:4px solid {edge};border-radius:6px 24px 6px 24px;padding:12px 16px;margin-bottom:10px;"
+            f"border-left:3px solid {edge};border-radius:12px;padding:12px 16px;margin-bottom:12px;"
             f"{'box-shadow:0 0 0 2px ' + _ta['accent'] + '55,0 6px 22px ' + _ta['accent'] + '33' if focus else ''}'>"
             # ligne du haut
             f"<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px'>"
@@ -6175,7 +6216,6 @@ elif st.session_state.page == "analyse":
         return "—" if v is None else (f"{v:,.{d}f}".replace(",", " ").replace(".", ",") + suf)
 
     def _spark(s, color, w=110, h=30, n=60):
-        return ""                                   # pas de mini-courbe dans les cartes de chiffres
         if s is None or len(s) < 3:
             return ""
         v = list(s.iloc[-n:].astype(float))
@@ -6199,7 +6239,7 @@ elif st.session_state.page == "analyse":
                 f"border-radius:999px;padding:1px 9px;white-space:nowrap'>{txt}</span>")
 
     # ── ZONE 1 : bandeau global (régime + baromètres de liquidité) ─────────────
-    def _tile(label, s, unit, d=2, pos_good=None, chg_n=1, how="lvl", shape="22px 6px 22px 6px"):
+    def _tile(label, s, unit, d=2, pos_good=None, chg_n=1, how="lvl", shape="12px"):
         s2 = mx_transform(s, how) if s is not None else None
         v, p, dt_ = mx_last(s2)
         ch = (v - s2.iloc[-1 - chg_n]) if (s2 is not None and len(s2) > chg_n) else None
@@ -6224,16 +6264,16 @@ elif st.session_state.page == "analyse":
     st.markdown(
         "<div style='display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 10px'>"
         f"<div style='flex:1.4 1 230px;min-width:220px;background:linear-gradient(135deg,{_rc}1f,{_ta['card']});"
-        f"border:1px solid {_rc}55;border-radius:30px 8px 30px 8px;padding:10px 16px'>"
+        f"border:1px solid {_rc}55;border-radius:12px;padding:10px 16px'>"
         f"<div style='font-size:10px;letter-spacing:1px;text-transform:uppercase;color:{_ta['muted']};font-weight:700'>Régime de marché</div>"
         f"<div style='display:flex;align-items:baseline;gap:10px'><span style='font-size:22px;font-weight:800;color:{_rc}'>{_reg_lab}</span>"
         f"<span style='font-family:IBM Plex Mono,monospace;color:{_rc};font-weight:700'>{'' if _reg_sc is None else f'{_reg_sc:+.0f}'}</span></div>"
         f"{_gauge(_reg_sc, 'Risk-Off', 'Risk-On')}</div>"
         + _tile("Dollar (DXY)", _dxy, "", 2, None)
-        + _tile("VIX", _vix, "", 1, False, shape="44px 12px 12px 44px")
+        + _tile("VIX", _vix, "", 1, False, shape="12px")
         + _tile("Courbe 10 ans - 2 ans", _mx["fred"].get("T10Y2Y"), "pb", 0, True, how="bp")
-        + (_tile("Spread HY - IG", _hyig, "pb", 0, False, how="bp", shape="3px 20px 3px 20px") if _cred is None else
-           _tile("Crédit HYG / LQD", _cred, "", 2, True, shape="3px 20px 3px 20px"))
+        + (_tile("Spread HY - IG", _hyig, "pb", 0, False, how="bp", shape="12px") if _cred is None else
+           _tile("Crédit HYG / LQD", _cred, "", 2, True, shape="12px"))
         + "</div>", unsafe_allow_html=True)
     if _mx["missing"] and not _mx["loading"]:
         st.caption("Données partielles · " + " · ".join(
@@ -6312,7 +6352,7 @@ elif st.session_state.page == "analyse":
                 return d.iloc[-1]
         return None
 
-    def _ind_card(sid, label=None, d=1, pos_good=True, shape="22px 6px 22px 6px"):
+    def _ind_card(sid, label=None, d=1, pos_good=True, shape="12px"):
         lab_, unit, how = MX_FRED[sid]
         s = mx_transform(_mx["fred"].get(sid), how)
         v, p, dt_ = mx_last(s)
@@ -6558,11 +6598,11 @@ elif st.session_state.page == "analyse":
         ic = st.columns(4)
         for i, (sid, pg) in enumerate([("CPIAUCSL", False), ("CPILFESL", False), ("PCEPILFE", False), ("CES0500000003", False)]):
             with ic[i]:
-                _ind_card(sid, pos_good=pg, d=1, shape=["22px 6px 22px 6px", "44px 12px 12px 44px", "3px 20px 3px 20px", "12px 44px 44px 12px"][i])
+                _ind_card(sid, pos_good=pg, d=1, shape=["12px", "12px", "12px", "12px"][i])
         ic = st.columns(4)
         for i, (sid, pg, dd) in enumerate([("PAYEMS", True, 0), ("UNRATE", False, 1), ("ICSA", False, 0), ("T5YIE", False, 2)]):
             with ic[i]:
-                _ind_card(sid, pos_good=pg, d=dd, shape=["12px 44px 44px 12px", "22px 6px 22px 6px", "44px 12px 12px 44px", "3px 20px 3px 20px"][i])
+                _ind_card(sid, pos_good=pg, d=dd, shape=["12px", "12px", "12px", "12px"][i])
         _hz_picker("hz_inf")
         g1, g2 = st.columns(2, gap="medium")
         with g1:
@@ -6582,7 +6622,7 @@ elif st.session_state.page == "analyse":
         gc = st.columns(4)
         for i, (sid, dd) in enumerate([("A191RL1Q225SBEA", 1), ("RSAFS", 1), ("INDPRO", 1), ("UMCSENT", 1)]):
             with gc[i]:
-                _ind_card(sid, d=dd, shape=["44px 12px 12px 44px", "22px 6px 22px 6px", "3px 20px 3px 20px", "12px 44px 44px 12px"][i])
+                _ind_card(sid, d=dd, shape=["12px", "12px", "12px", "12px"][i])
         _hz_picker("hz_gro")
         g1, g2 = st.columns(2, gap="medium")
         with g1:
@@ -6611,7 +6651,7 @@ elif st.session_state.page == "analyse":
                   else ("Crédit HYG / LQD", _cred, "", 2, True, "lvl")),
                  ("Masse monétaire M2", _mx["fred"].get("M2SL"), "% a/a", 1, True, "yoy"),
                  ("Conditions financières", _mx["fred"].get("NFCI"), "", 2, False, "lvl")]
-        shapes = ["22px 6px 22px 6px", "44px 12px 12px 44px", "3px 20px 3px 20px", "12px 44px 44px 12px"]
+        shapes = ["12px", "12px", "12px", "12px"]
         for i, (lab, s, u, dd, pg, how) in enumerate(tiles):
             with lc[i]:
                 st.markdown("<div style='display:flex'>" + _tile(lab, s, u, dd, pg, how=how, shape=shapes[i]) + "</div>",
