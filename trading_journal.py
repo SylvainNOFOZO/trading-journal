@@ -11,7 +11,7 @@ try:
 except Exception:
     _kb = None
 
-st.set_page_config(page_title="Trading Journal Pro", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Trading Journal", page_icon=":material/show_chart:", layout="wide", initial_sidebar_state="collapsed")
 
 # ── VÉRIFICATION CONFIGURATION ────────────────────────────────────────────────
 _sb_url = st.secrets.get("SUPABASE_URL","")
@@ -74,48 +74,27 @@ MOOD_ICON = {
     "Frustré":    ('<i class="fa-solid fa-fire"        style="color:#ff4d6d"></i>', "#ff4d6d"),
 }
 def mood_html(mood):
-    icon, color = MOOD_ICON.get(mood, ('<i class="fa-solid fa-circle" style="color:#6b7894"></i>', "#6b7894"))
-    return f'<span title="{mood}" style="display:inline-flex;align-items:center;gap:5px">{icon}</span>'
-CHART_COLORS = ["#00d4aa","#7c6aff","#ff9f43","#ff4d6d","#54a0ff","#5f27cd","#00cec9","#fdcb6e"]
+    m = str(mood or "").strip()
+    if not m or m in ("nan", "None"):
+        return "<span style='color:var(--tj-muted)'>—</span>"
+    return (f"<span title='{_html.escape(m)}' style='display:inline-flex;align-items:center;gap:6px;"
+            f"color:var(--tj-muted);font-size:12px'>{_html.escape(m)}</span>")
+CHART_COLORS = ["#f0a830","#a1a1a6","#4cc38a","#6e6e73","#7aa2c7","#c9c9cc","#e5484d","#515155"]
 
 # ── THÈMES ─────────────────────────────────────────────────────────────────────
 THEMES = {
-    # Thèmes multicolores : la couleur dominante change selon la page, reliefs 3D et reflets
-    "Aurore Boréale": {
-        "bg":"#070b17","bg2":"#0b1124","card":"#111a33","border":"#22305a",
-        "text":"#eaf2ff","muted":"#7d8bb3","accent":"#00e5c0","win":"#22e3a0",
-        "loss":"#ff4d6d","alt":"#7c5cff","orange":"#ffb648","sidebar":"#080c1a","btn_text":"#ffffff",
-        "multi":["#00e5c0","#7c5cff","#ff4ecd","#2f80ff","#ffb648"], "fx":"3d",
+    # Deux designs : neutres graphite, un seul accent ambre (couleur de cotation), couleurs sémantiques sobres
+    "Graphite": {
+        "bg":"#141415","bg2":"#0f0f10","card":"#19191b","border":"#2a2a2d",
+        "text":"#ededed","muted":"#8e8e94","accent":"#f0a830","win":"#4cc38a",
+        "loss":"#e5484d","alt":"#a1a1a6","orange":"#d9913a","sidebar":"#0f0f10","btn_text":"#141415",
+        "raised":"#232325",
     },
-    "Voltage": {
-        "bg":"#05070f","bg2":"#080b18","card":"#0e1324","border":"#1d2645",
-        "text":"#eef3ff","muted":"#7884a8","accent":"#0057ff","win":"#1fe0a3",
-        "loss":"#ff2d6f","alt":"#00d4ff","orange":"#ffb000","sidebar":"#060912","btn_text":"#ffffff",
-        "multi":["#0057ff","#00d4ff","#ff2d95","#ffd60a","#8b3dff"], "fx":"3d",
-    },
-    "Coucher Tropical": {
-        "bg":"#120a12","bg2":"#180d18","card":"#211322","border":"#3a2238",
-        "text":"#fff1f3","muted":"#a48a9c","accent":"#ff6b6b","win":"#2ee6a6",
-        "loss":"#ff4d6d","alt":"#ff9f43","orange":"#ffb347","sidebar":"#140b14","btn_text":"#ffffff",
-        "multi":["#ff6b6b","#ff9f43","#ff4ecd","#a855f7","#22d3ee"], "fx":"3d",
-    },
-    "Safran Kente": {
-        "bg":"#130c06","bg2":"#1a1009","card":"#23160c","border":"#3d2a18",
-        "text":"#fff4e6","muted":"#b09779","accent":"#f4a300","win":"#1bc8a0",
-        "loss":"#e5383b","alt":"#d7263d","orange":"#f46036","sidebar":"#160e07","btn_text":"#ffffff",
-        "multi":["#f4a300","#d7263d","#1b998b","#2e86ab","#f46036"], "fx":"3d",
-    },
-    "Pop Créatif": {
-        "bg":"#fbf6fb","bg2":"#f4eef7","card":"#ffffff","border":"#eadff0",
-        "text":"#22172e","muted":"#7c6f8a","accent":"#ea4c89","win":"#10b981",
-        "loss":"#ef4444","alt":"#8b5cf6","orange":"#f59e0b","sidebar":"#2a1b38","btn_text":"#ffffff",
-        "multi":["#ea4c89","#8b5cf6","#0ea5e9","#f59e0b","#10b981"], "fx":"3d",
-    },
-    "Verre Pastel": {
-        "bg":"#eef1ff","bg2":"#e6e9fb","card":"#ffffff","border":"#dde2f6",
-        "text":"#1d2140","muted":"#6d7393","accent":"#6366f1","win":"#14b8a6",
-        "loss":"#f43f5e","alt":"#ec4899","orange":"#f97316","sidebar":"#1f2347","btn_text":"#ffffff",
-        "multi":["#6366f1","#ec4899","#14b8a6","#f97316","#8b5cf6"], "fx":"3d",
+    "Papier": {
+        "bg":"#fafafa","bg2":"#f4f4f5","card":"#ffffff","border":"#e4e4e7",
+        "text":"#171717","muted":"#6b6b70","accent":"#a15f00","win":"#16a34a",
+        "loss":"#dc2626","alt":"#6b7280","orange":"#c2410c","sidebar":"#ffffff","btn_text":"#ffffff",
+        "raised":"#f1f1f3",
     },
 }
 def _is_light(t):
@@ -123,9 +102,9 @@ def _is_light(t):
     return (0.299 * r + 0.587 * g + 0.114 * b) > 150
 
 # Designs clairs d'abord (fond non noir par défaut), puis les sombres, au choix
-THEME_NAMES = ["Voltage"] + [n for n in THEMES if n != "Voltage"]
-DEFAULT_THEME = "Voltage"          # design par défaut du dashboard
-LOGIN_THEME   = "Voltage"          # design unique de la page de connexion
+THEME_NAMES = ["Graphite", "Papier"]
+DEFAULT_THEME = "Graphite"         # design par défaut
+LOGIN_THEME   = "Graphite"         # design de la page de connexion
 DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
 DEFAULT_BG      = "Aucun"              # fond d'écran par défaut
 
@@ -184,8 +163,6 @@ def background_css(t, name):
             f"{layer}, {t['bg']} !important; }}</style>{credit}")
 
 def theme_label(n):
-    if THEMES[n].get("multi"):
-        return ("Multicolore clair · " if _is_light(THEMES[n]) else "Multicolore · ") + n
     return ("Clair · " if _is_light(THEMES[n]) else "Sombre · ") + n
 
 # Thèmes multicolores : chaque page prend sa propre paire de couleurs dans la palette
@@ -212,31 +189,20 @@ def get_theme():
 # monthly  : "bar" | "lollipop" | "area"             (P&L mensuel)
 # ranking  : "hbar" | "lollipop"                     (classements actifs / stratégies)
 CHART_STYLES = {
-    "Classique": dict(equity="area", shape="linear", width=2.2, fill=0.10, markers=False,
-        winloss="donut", hole=0.65, monthly="bar", ranking="hbar", corner=4, bar_opacity=0.85,
-        bargap=0.25, grid="y", griddash="dot", font="Inter, sans-serif", hover="closest",
-        toolbar=False, transparent=False, heat="RdYlGn", legend_top=False),
-    "Néon": dict(equity="glow", shape="spline", width=3.0, fill=0.22, markers=False,
-        winloss="donut", hole=0.80, monthly="area", ranking="lollipop", corner=8, bar_opacity=0.95,
-        bargap=0.35, grid="none", griddash="solid", font="JetBrains Mono, monospace",
-        hover="x unified", toolbar=False, transparent=True, heat="Plasma", legend_top=True),
-    "Luxe": dict(equity="line", shape="spline", width=1.8, fill=0.0, markers=True,
-        winloss="gauge", hole=0.0, monthly="lollipop", ranking="lollipop", corner=0, bar_opacity=0.9,
-        bargap=0.45, grid="y", griddash="solid", font="Georgia, 'Times New Roman', serif",
-        hover="closest", toolbar=False, transparent=True, heat="Cividis", legend_top=False),
-    "Corporate": dict(equity="step", shape="hv", width=2.0, fill=0.06, markers=True,
-        winloss="pie", hole=0.0, monthly="bar", ranking="hbar", corner=0, bar_opacity=1.0,
-        bargap=0.15, grid="xy", griddash="solid", font="Arial, Helvetica, sans-serif",
-        hover="x unified", toolbar=True, transparent=False, heat="Blues", legend_top=True),
-    "Doux": dict(equity="area", shape="spline", width=2.6, fill=0.28, markers=False,
-        winloss="bar", hole=0.55, monthly="area", ranking="hbar", corner=12, bar_opacity=0.8,
-        bargap=0.30, grid="none", griddash="dot", font="Inter, sans-serif", hover="x unified",
-        toolbar=False, transparent=True, heat="Purples", legend_top=True),
+    "Cotation": dict(equity="area", shape="linear", width=1.8, fill=0.06, markers=False,
+        winloss="bar", hole=0.0, monthly="bar", ranking="hbar", corner=2, bar_opacity=0.9,
+        bargap=0.35, grid="y", griddash="dot", font="IBM Plex Sans, sans-serif", hover="x unified",
+        toolbar=False, transparent=True, heat="RdYlGn", legend_top=True),
+    "Classique": dict(equity="area", shape="linear", width=2.0, fill=0.08, markers=False,
+        winloss="donut", hole=0.72, monthly="bar", ranking="hbar", corner=2, bar_opacity=0.85,
+        bargap=0.25, grid="y", griddash="dot", font="IBM Plex Sans, sans-serif", hover="closest",
+        toolbar=False, transparent=True, heat="RdYlGn", legend_top=False),
+    "Corporate": dict(equity="step", shape="hv", width=1.8, fill=0.04, markers=False,
+        winloss="bar", hole=0.0, monthly="bar", ranking="hbar", corner=0, bar_opacity=1.0,
+        bargap=0.15, grid="xy", griddash="solid", font="IBM Plex Sans, sans-serif",
+        hover="x unified", toolbar=True, transparent=True, heat="Greys", legend_top=True),
 }
-THEME_CHART_STYLE = {
-    "Voltage": "Luxe", "Aurore Boréale": "Néon", "Coucher Tropical": "Doux",
-    "Safran Kente": "Luxe", "Pop Créatif": "Doux", "Verre Pastel": "Corporate",
-}
+THEME_CHART_STYLE = {"Graphite": "Cotation", "Papier": "Cotation"}
 CHART_STYLE_NAMES = list(CHART_STYLES.keys())
 
 def get_chart_style_name():
@@ -351,17 +317,20 @@ def winloss_figure(n_win, n_loss, wr_val, t, cs, height=260):
         return fig
     if kind == "bar":
         fig = go.Figure()
-        for lbl, v, col in (("Gagnants", n_win, t["win"]), ("Perdants", n_loss, t["loss"])):
-            fig.add_trace(go.Bar(y=["Trades"], x=[v], name=lbl, orientation="h",
-                marker=dict(color=col, opacity=cs["bar_opacity"]), text=[f"{lbl} · {v}"],
-                textposition="inside", insidetextanchor="middle",
-                textfont=dict(color="#ffffff", size=12),
-                hovertemplate=f"<b>{lbl}</b>: %{{x}} trades<extra></extra>"))
-        fig.update_layout(**chart_layout(t, cs, height=height, barmode="stack",
-                                         margin=dict(l=10, r=10, t=60, b=20)))
+        # une seule barre empilée fine : la part gagnante en couleur de gain, la part perdante en couleur de perte atténuée
+        for lbl, v, col in (("Gagnants", n_win, t["win"]), ("Perdants", n_loss, _hexa(t["loss"], 0.55))):
+            fig.add_trace(go.Bar(y=["Trades"], x=[v], name=lbl, orientation="h", width=0.34,
+                marker=dict(color=col, line=dict(width=0)),
+                hovertemplate=f"{lbl} : %{{x}} trades<extra></extra>"))
+        fig.update_layout(**chart_layout(t, cs, height=height, barmode="stack", bargap=0,
+                                         margin=dict(l=16, r=16, t=70, b=40)))
         fig.update_xaxes(visible=False); fig.update_yaxes(visible=False)
-        fig.add_annotation(text=f"<b>{wr_val:.0f}%</b> win rate", x=0.5, y=1.18, xref="paper",
-            yref="paper", showarrow=False, font=dict(size=26, color=t["win"], family=cs["font"]))
+        fig.add_annotation(text=f"{wr_val:.0f}%", x=0, xanchor="left", y=1.32, xref="paper", yref="paper",
+            showarrow=False, font=dict(size=30, color=t["text"], family="IBM Plex Mono, monospace"))
+        fig.add_annotation(text="de trades gagnants", x=0, xanchor="left", y=1.06, xref="paper", yref="paper",
+            showarrow=False, font=dict(size=13, color=t["muted"], family=cs["font"]))
+        fig.add_annotation(text=f"{n_win} gagnants · {n_loss} perdants", x=0, xanchor="left", y=-0.22,
+            xref="paper", yref="paper", showarrow=False, font=dict(size=12, color=t["muted"], family=cs["font"]))
         return fig
     hole = cs["hole"] if kind == "donut" else 0.0
     fig = go.Figure(go.Pie(
@@ -416,6 +385,108 @@ def category_figure(cats, vals, colors, t, cs, kind, orientation="v", texts=None
         k = -(-len(cats) // 8)
         fig.update_xaxes(tickmode="array", tickvals=list(cats)[::-1][::k][::-1])
     return fig
+
+def calm_css(t):
+    """Couche finale (skill unslop) : neutres, filets, un accent, IBM Plex, ni dégradés ni halos ni majuscules espacées."""
+    raised = t.get("raised", t["bg2"]); hair = t["border"]
+    light = _is_light(t)
+    return f"""<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+.stApp, .stApp *:not([data-testid="stIconMaterial"]):not([class*="fa-"]):not(i):not(code) {{
+    font-family:'IBM Plex Sans', system-ui, sans-serif; }}
+.stApp [style*="Mono"], .stApp [style*="monospace"], .stApp code, .kpi-value {{
+    font-family:'IBM Plex Mono', ui-monospace, monospace !important; font-variant-numeric:tabular-nums; }}
+.stApp {{ background:{t['bg']} !important; }}
+/* Typographie : casse normale, deux graisses, pas d'espacement forcé */
+.stApp [style*="text-transform:uppercase"], .stApp [style*="text-transform: uppercase"], .kpi-label,
+.tj-table th, label[data-testid="stWidgetLabel"] p {{ text-transform:none !important; letter-spacing:0 !important; }}
+.stApp [style*="letter-spacing"] {{ letter-spacing:0 !important; }}
+.stApp [style*="font-weight:800"], .stApp [style*="font-weight:900"], .stApp [style*="font-weight: 800"] {{ font-weight:600 !important; }}
+.stApp [style*="font-weight:700"], .stApp b, .stApp strong {{ font-weight:500 !important; }}
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5 {{ font-weight:500 !important; letter-spacing:0 !important;
+    background:none !important; -webkit-text-fill-color:currentColor; color:{t['text']} !important; }}
+.grad-accent {{ background:none !important; -webkit-text-fill-color:currentColor; color:inherit !important; }}
+/* Pas de halos ni d'animations décoratives */
+.stApp [style*="box-shadow"] {{ box-shadow:none !important; }}
+.stApp [style*="animation"] {{ animation:none !important; }}
+.st-key-tj_hdr, .st-key-tj_nav > div, .tj-cap {{ animation:none !important; }}
+/* En-tête : une surface, un filet */
+.st-key-tj_hdr {{ background:{t['card']} !important; border:1px solid {hair} !important; border-radius:16px !important;
+    box-shadow:none !important; backdrop-filter:none !important; padding:16px 20px 12px !important; }}
+.st-key-tj_hdr::before {{ display:none !important; }}
+.st-key-tj_nav {{ background:transparent !important; border:none !important; padding:4px 0 0 !important;
+    box-shadow:none !important; backdrop-filter:none !important; }}
+/* Navigation : onglet actif = marche de surface + repère ambre (signature) */
+div[class*="st-key-tjnav_"] .stButton > button, div[class*="st-key-tjmnav_"] .stButton > button {{
+    background:transparent !important; border:1px solid transparent !important; box-shadow:none !important;
+    border-radius:8px !important; min-height:32px !important; padding:4px 12px !important; text-shadow:none !important; }}
+div[class*="st-key-tjnav_"] .stButton > button[kind="primary"], div[class*="st-key-tjmnav_"] .stButton > button[kind="primary"] {{
+    background:{raised} !important; border-color:{hair} !important; box-shadow:inset 2px 0 0 {t['accent']} !important; }}
+div[class*="st-key-tjnav_"] .stButton > button[kind="primary"] p,
+div[class*="st-key-tjnav_"] .stButton > button[kind="primary"] [data-testid="stIconMaterial"],
+div[class*="st-key-tjmnav_"] .stButton > button[kind="primary"] p,
+div[class*="st-key-tjmnav_"] .stButton > button[kind="primary"] [data-testid="stIconMaterial"] {{ color:{t['text']} !important; }}
+/* Boutons : secondaire = surface relevée + filet ; principal = plein clair (ou foncé en thème clair) */
+.stButton > button, [data-testid="stDownloadButton"] > button, [data-testid="stPopover"] button {{
+    background:{raised} !important; color:{t['text']} !important; border:1px solid {hair} !important;
+    border-radius:8px !important; box-shadow:{'0 1px 2px rgba(0,0,0,.05)' if light else 'inset 0 1px 0 rgba(255,255,255,.06)'} !important;
+    font-weight:500 !important; text-shadow:none !important; filter:none !important;
+    transition:background-color .15s cubic-bezier(.22,1,.36,1), border-color .15s cubic-bezier(.22,1,.36,1) !important; }}
+.stButton > button p, [data-testid="stDownloadButton"] > button p, [data-testid="stPopover"] button p,
+.stButton > button [data-testid="stIconMaterial"] {{ color:{t['text']} !important; }}
+.stButton > button:hover, [data-testid="stPopover"] button:hover {{ border-color:{t['muted']}66 !important; transform:none !important; }}
+.stButton > button:active {{ transform:scale(.98) !important; }}
+.stButton > button[kind="primary"], [data-testid="stFormSubmitButton"] > button {{
+    background:{t['text']} !important; color:{t['bg']} !important; border-color:{t['text']} !important; box-shadow:none !important; }}
+.stButton > button[kind="primary"] p, .stButton > button[kind="primary"] [data-testid="stIconMaterial"],
+[data-testid="stFormSubmitButton"] > button p {{ color:{t['bg']} !important; }}
+.stButton > button:focus-visible, [data-testid="stPopover"] button:focus-visible {{ outline:2px solid {t['accent']} !important; outline-offset:2px; }}
+/* Cartes : mêmes rayons, filet, pas de relief */
+.kpi, .grad-card, [data-testid="stPlotlyChart"], div[data-testid="stExpander"] details,
+[data-testid="stPopoverBody"], .st-key-cd_sphere iframe {{ box-shadow:none !important; transform:none !important;
+    backdrop-filter:none !important; clip-path:none !important; }}
+.kpi {{ background:{t['card']} !important; border:1px solid {hair} !important; border-radius:12px !important;
+    padding:16px 20px !important; min-height:96px !important; }}
+.kpi::after, .grad-card::after {{ display:none !important; }}
+.kpi-bar, .kpi-ring, .kpi-icon {{ display:none !important; }}
+.kpi-label {{ font-size:13px !important; color:{t['muted']} !important; font-weight:400 !important; padding-right:0 !important; }}
+.kpi-value {{ font-size:clamp(20px, 1.75vw, 28px) !important; font-weight:500 !important; margin:8px 0 4px !important; }}
+.kpi-sub {{ font-size:12px !important; color:{t['muted']} !important; }}
+.grad-card {{ background:{t['card']} !important; border:1px solid {hair} !important; border-radius:12px !important; }}
+[data-testid="stPlotlyChart"] {{ background:{t['card']} !important; border:1px solid {hair} !important; border-radius:12px !important; }}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"] [data-testid="stPlotlyChart"] {{ border-radius:12px !important; }}
+div[data-testid="stExpander"] details {{ border-radius:12px !important; background:{t['card']} !important;
+    border:1px solid {hair} !important; }}
+[data-testid="stAlert"] > div {{ border-radius:8px !important; }}
+[data-testid="stPopoverBody"] {{ border-radius:12px !important; background:{t['card']} !important; border:1px solid {hair} !important; }}
+[data-testid="stDataFrame"], [data-testid="stTable"] {{ border-radius:12px !important; }}
+/* Onglets : texte, soulignement ambre sur l'actif */
+.stTabs [data-baseweb="tab"], [data-testid="stTab"] {{ border-radius:0 !important; background:transparent !important;
+    box-shadow:none !important; margin-right:0 !important; padding:0 12px !important; }}
+.stTabs [aria-selected="true"], [data-testid="stTab"][data-selected="true"] {{ background:transparent !important;
+    color:{t['text']} !important; box-shadow:inset 0 -2px 0 {t['accent']} !important; }}
+/* Champs et étiquettes de sélection */
+span[data-tag] {{ background:{raised} !important; color:{t['text']} !important; border:1px solid {hair} !important;
+    border-radius:6px !important; box-shadow:none !important; }}
+span[data-tag] * {{ color:{t['text']} !important; }}
+.tj-table th {{ font-size:12px !important; color:{t['muted']} !important; font-weight:400 !important; }}
+.tj-table td {{ font-variant-numeric:tabular-nums; }}
+/* Libellés des boutons : la règle prioritaire de l'ancien style est neutralisée */
+.stButton > button [data-testid="stMarkdownContainer"] p, [data-testid="stPopover"] button [data-testid="stMarkdownContainer"] p,
+[data-testid="stDownloadButton"] > button [data-testid="stMarkdownContainer"] p {{ color:{t['text']} !important; }}
+.stButton > button[kind="primary"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stFormSubmitButton"] > button [data-testid="stMarkdownContainer"] p {{ color:{t['bg']} !important; }}
+/* Badges de table : texte sobre, seule la direction garde sa couleur de sens */
+.badge {{ background:transparent !important; border:none !important; padding:0 !important; border-radius:0 !important;
+    font-size:13px !important; font-weight:400 !important; letter-spacing:0 !important; color:{t['text']} !important; }}
+.badge.b-mode, .badge.b-str {{ color:{t['muted']} !important; }}
+.badge.b-win {{ color:{t['win']} !important; }} .badge.b-loss {{ color:{t['loss']} !important; }}
+/* Conteneurs qui ne portent que du style : aucun espace dans la mise en page */
+[data-testid="stElementContainer"]:has([data-testid="stMarkdownContainer"] > style:only-child) {{ display:none !important; }}
+.block-container {{ padding-top:24px !important; }}
+/* Chronomètre : sans halo */
+.st-key-cd_sphere iframe {{ border-radius:50%; }}
+</style>"""
 
 def fx_css(t):
     """Couche visuelle des thèmes multicolores : fond en maillage de couleurs, cartes en relief
@@ -485,7 +556,7 @@ def build_css(t):
     """Génère le CSS complet en fonction du thème actif."""
     return f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
 .fa, .fas, .far, .fab, .fa-solid, .fa-regular {{ font-family: "Font Awesome 6 Free" !important; }}
 :root {{ --tj-bg:{t['bg']}; --tj-bg2:{t['bg2']}; --tj-card:{t['card']}; --tj-border:{t['border']};
@@ -561,7 +632,7 @@ div[data-baseweb="select"] > div {{
 .kpi-bar {{ position:absolute;top:0;left:0;right:0;height:3px; }}
 .kpi-icon {{ font-size:14px;margin-bottom:2px;float:right;opacity:.85; }}
 .kpi-label {{ font-size:10px;color:{t['muted']};letter-spacing:1.2px;text-transform:uppercase;font-weight:600; }}
-.kpi-value {{ font-size:21px;font-weight:800;font-family:"JetBrains Mono",monospace;margin:3px 0 1px; }}
+.kpi-value {{ font-size:21px;font-weight:800;font-family:"IBM Plex Mono",monospace;margin:3px 0 1px; }}
 /* Onglets du dashboard */
 .stTabs [data-baseweb="tab-list"], .stTabs [role="tablist"] {{ gap:6px; border-bottom:1px solid {t['border']}; }}
 .stTabs [data-baseweb="tab"], [data-testid="stTab"] {{ height:38px; padding:0 14px !important; border-radius:9px 9px 0 0;
@@ -713,9 +784,7 @@ def account_color(name):
     return "#8892a4"
 
 def mode_badge(name):
-    col = account_color(name)
-    return (f'<span class="badge" style="color:{col};background:{col}26;'
-            f'border:1px solid {col}4d">{name}</span>')
+    return f'<span class="badge b-mode">{name}</span>'
 # Mapping universel : nom broker → nom normalisé
 # Exness utilise le suffixe "m" (ex: XAUUSDm, BTCUSDm)
 _BASE_PAIRS = {
@@ -1287,30 +1356,12 @@ def period_filter(title, d_min, d_max, prefix):
     return min(start, d_max) if cur == "Tout" else start, max(d_max, today)
 
 def kpi(icon, label, value, sub, color, kind=None):
-    """Carte KPI dont la forme suit l'information : montant (feuille), ratio (capsule + jauge), risque (angles coupés)."""
-    import re as _rek
-    lab = str(label).lower()
-    if kind is None:
-        if any(w in lab for w in ("drawdown", "perte max", "risque", "perdants", "pire")):
-            kind = "risk"
-        elif any(w in lab for w in ("rate", "factor", "r:r", "ratio", "%", "taux", "réussite")) or str(value).strip().endswith(("%", "R")):
-            kind = "ratio"
-        else:
-            kind = "money"
-    deco = f'<div class="kpi-icon" style="color:{color}">{icon}</div>'
-    _m = _rek.match(r"^\s*([\d.,]+)\s*%\s*$", str(value))
-    if kind == "ratio" and _m:
-        try:
-            pv = max(0.0, min(100.0, float(_m.group(1).replace(",", "."))))
-            deco = (f'<div class="kpi-ring" style="background:conic-gradient({color} {pv:.0f}%,'
-                    f'var(--tj-border) 0)"></div>')
-        except Exception:
-            pass
-    st.markdown(f"""<div class="kpi kpi-{kind}">
-        <div class="kpi-bar" style="background:{color}"></div>
-        {deco}
+    """Carte KPI : un libellé, un chiffre, sa référence. La couleur ne sert qu'au sens (gain / perte)."""
+    _t = get_theme()
+    sem = color if color in (_t["win"], _t["loss"]) else _t["text"]
+    st.markdown(f"""<div class="kpi">
         <div class="kpi-label">{label}</div>
-        <div class="kpi-value" style="color:{color}">{value}</div>
+        <div class="kpi-value" style="color:{sem}">{value}</div>
         <div class="kpi-sub">{sub}</div></div>""", unsafe_allow_html=True)
 
 def badge(text, cls): return f'<span class="badge {cls}">{text}</span>'
@@ -1498,66 +1549,42 @@ def login_gate():
     _t = THEMES[LOGIN_THEME]          # design unique pour la page de connexion
     st.markdown(build_css(_t), unsafe_allow_html=True)
     st.markdown(fx_css(_t), unsafe_allow_html=True)
+    st.markdown(calm_css(_t), unsafe_allow_html=True)
     st.markdown(f"""<style>
-.block-container {{ padding-top:3rem; max-width:1100px; }}
-.stApp {{ background:
-    radial-gradient(1100px 520px at 12% -10%, {_t['accent']}2e, transparent 60%),
-    radial-gradient(900px 480px at 108% 8%, {_t['alt']}26, transparent 55%),
-    radial-gradient(700px 400px at 50% 115%, {_t['orange']}14, transparent 60%),
-    linear-gradient(160deg, {_t['bg']} 0%, {_t['bg2']} 60%, {_t['bg']} 100%) !important;
-    background-attachment:fixed; }}
-div[data-testid="stForm"] {{
-    background:linear-gradient(160deg, {_t['card']}f2, {_t['bg2']}f2);
-    border:1px solid {_t['border']}; border-radius:20px; padding:28px 30px 22px;
-    position:relative; overflow:hidden; backdrop-filter:blur(8px);
-    box-shadow:0 24px 70px rgba(0,0,0,.35), 0 0 0 1px {_t['accent']}14; }}
-div[data-testid="stForm"]::before {{ content:''; position:absolute; top:0; left:0; right:0;
-    height:4px; background:linear-gradient(90deg,{_t['accent']},{_t['alt']},{_t['orange']}); }}
-div[data-testid="stForm"] input {{ padding:12px 14px !important; border-radius:10px !important;
-    font-size:14px !important; }}
-div[data-testid="stForm"] button {{ padding:11px 0 !important; font-size:14px !important;
-    letter-spacing:.4px; margin-top:6px; }}
-.tj-feat {{ display:flex; gap:10px; align-items:flex-start; margin-bottom:16px; }}
-.tj-feat i {{ width:34px; height:34px; border-radius:10px; display:inline-flex; align-items:center;
-    justify-content:center; background:{_t['accent']}1f; color:{_t['accent']}; flex-shrink:0; }}
-.tj-feat b {{ color:{_t['text']}; font-size:13px; }}
-.tj-feat span {{ color:{_t['muted']}; font-size:12px; }}
+.block-container {{ padding-top:4rem; max-width:1040px; }}
+div[data-testid="stForm"] {{ background:{_t['card']}; border:1px solid {_t['border']}; border-radius:16px;
+    padding:28px 28px 20px; }}
+div[data-testid="stForm"] input {{ padding:10px 12px !important; border-radius:8px !important; font-size:14px !important; }}
+div[data-testid="stForm"] button {{ padding:10px 0 !important; font-size:14px !important; margin-top:8px; }}
+.tj-feat {{ padding:12px 0; border-top:1px solid {_t['border']}; }}
+.tj-feat:first-child {{ border-top:none; padding-top:0; }}
+.tj-feat b {{ display:block; color:{_t['text']}; font-size:14px; font-weight:500; margin-bottom:4px; }}
+.tj-feat span {{ color:{_t['muted']}; font-size:13px; line-height:1.5; }}
 </style>""", unsafe_allow_html=True)
 
     # En-tête de marque
     st.markdown(
-        f"<div style='text-align:center;padding:4px 0 26px'>"
-        f"<div style='display:inline-flex;align-items:center;justify-content:center;width:68px;"
-        f"height:68px;border-radius:20px;background:linear-gradient(135deg,{_t['accent']},{_t['alt']});"
-        f"box-shadow:0 14px 34px {_t['accent']}55;margin-bottom:14px'>"
-        + _logo_svg(_t['btn_text'], 30) + "</div>"
-        f"<div style='font-size:32px;font-weight:800;letter-spacing:-.6px;color:{_t['text']}'>"
-        f"Trading Journal <span class='grad-accent'>Pro</span></div>"
-        f"<div style='color:{_t['muted']};font-size:13px;margin-top:6px'>"
-        f"Performance, analytics et biais macro dans un seul poste de pilotage</div></div>",
+        f"<div style='display:flex;align-items:center;gap:12px;padding:0 0 32px'>"
+        + _logo_svg(_t['accent'], 24) +
+        f"<div><div style='font-size:24px;font-weight:500;color:{_t['text']}'>Trading Journal</div>"
+        f"<div style='color:{_t['muted']};font-size:14px;margin-top:4px'>"
+        f"Résultats, discipline et contexte macro de vos comptes de trading</div></div></div>",
         unsafe_allow_html=True)
 
     cleft, cright = st.columns([1.05, 1], gap="large")
     with cleft:
         st.markdown(
-            f"<div style='padding:18px 6px 0 6px'>"
-            f"<div class='tj-feat'><i class='fa-solid fa-gauge-high'></i><div><b>Dashboard temps réel</b><br>"
-            f"<span>P&amp;L, win rate, drawdown et courbe de capital par compte.</span></div></div>"
-            f"<div class='tj-feat'><i class='fa-solid fa-calendar-days'></i><div><b>Calendrier &amp; heatmaps</b><br>"
-            f"<span>Résultats par jour, semaine, mois et heure de prise de position.</span></div></div>"
-            f"<div class='tj-feat'><i class='fa-solid fa-newspaper'></i><div><b>Scorecard &amp; news</b><br>"
-            f"<span>Consensus vs publié et impact estimé sur vos actifs (GMT+1).</span></div></div>"
-            f"<div class='tj-feat'><i class='fa-solid fa-user-shield'></i><div><b>Accès multi-comptes</b><br>"
-            f"<span>Permissions par utilisateur, comptes démo, réels et institutionnels.</span></div></div>"
+            f"<div style='padding:8px 8px 0 0'>"
+            f"<div class='tj-feat'><b>Dashboard</b><span>P&amp;L, win rate, drawdown et courbe de capital par compte</span></div>"
+            f"<div class='tj-feat'><b>Calendrier</b><span>Résultats par jour, semaine, mois et heure d'ouverture</span></div>"
+            f"<div class='tj-feat'><b>Analyse et annonces</b><span>Consensus contre chiffre publié, impact sur vos actifs, heures GMT+1</span></div>"
+            f"<div class='tj-feat'><b>Plusieurs comptes</b><span>Accès par utilisateur aux comptes démo, réels et institutionnels</span></div>"
             f"</div>", unsafe_allow_html=True)
     with cright:
         with st.form("login_form"):
             st.markdown(
-                f"<div style='font-size:17px;font-weight:800;color:{_t['text']}'>"
-                f"<i class='fa-solid fa-lock' style='color:{_t['accent']};margin-right:8px'></i>"
-                f"Connexion sécurisée</div>"
-                f"<div style='font-size:12px;color:{_t['muted']};margin:2px 0 10px'>"
-                f"Identifiez-vous pour accéder à votre journal</div>", unsafe_allow_html=True)
+                f"<div style='font-size:18px;font-weight:500;color:{_t['text']};margin-bottom:16px'>Connexion</div>",
+                unsafe_allow_html=True)
             u = st.text_input("Utilisateur", placeholder="Nom d'utilisateur")
             p = st.text_input("Mot de passe", type="password", placeholder="••••••••")
             _keep = st.selectbox("Rester connecté", list(SESSION_CHOICES), index=1,
@@ -1913,7 +1940,7 @@ def render_countdown(groups, window_h, t):
  .rg{fill:none;stroke:var(--c);stroke-width:5;stroke-linecap:round;stroke-dasharray:282.7;transition:stroke-dashoffset 1s linear}
  .in{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
  .cc{font-size:10px;font-weight:800;letter-spacing:.6px;color:__TEXT__}
- .tm{font-family:"JetBrains Mono",Consolas,monospace;font-size:16px;font-weight:800;color:var(--c);line-height:1.15}
+ .tm{font-family:"IBM Plex Mono",Consolas,monospace;font-size:16px;font-weight:800;color:var(--c);line-height:1.15}
  .lb{font-size:8.5px;text-transform:uppercase;letter-spacing:.7px;font-weight:700;color:__MUTED__}
 </style>
 <script>
@@ -1998,8 +2025,7 @@ st.markdown(build_css(get_theme()), unsafe_allow_html=True)
 st.markdown(fx_css(get_theme()), unsafe_allow_html=True)
 if "bg_name" not in st.session_state:
     st.session_state.bg_name = DEFAULT_BG if DEFAULT_BG in BACKGROUNDS else "Aucun"
-if st.session_state.bg_name not in BACKGROUNDS:
-    st.session_state.bg_name = "Aucun"
+st.session_state.bg_name = "Aucun"                      # fond uni (les photos de fond sont retirées)
 st.markdown(background_css(get_theme(), st.session_state.bg_name), unsafe_allow_html=True)
 
 # ── EN-TÊTE MASQUABLE (panneau animé + navigation en onglets thémés) ─────────────
@@ -2125,19 +2151,18 @@ div[class*="st-key-tjnav_"] .stButton > button:not([kind="primary"]):hover [data
 .tj-cap {{ display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; padding:2px 2px 4px; animation:tjRise .5s .1s both; }}
 </style>""", unsafe_allow_html=True)
 
+st.markdown(calm_css(_t), unsafe_allow_html=True)      # couche finale : style sobre (skill unslop)
 _role_lbl = "Admin" if is_admin() else "Utilisateur"
 _brand = (f"<div style='display:flex;align-items:center;gap:10px'>"
-          f"<span style='display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;"
-          f"border-radius:10px;background:linear-gradient(135deg,{_t['accent']},{_t['alt']});"
-          f"box-shadow:0 6px 14px {_t['accent']}40'>" + _logo_svg(_t['btn_text'], 17) + "</span>"
-          f"<span style='line-height:1.15'><span style='font-size:15px;font-weight:800;color:{_t['text']}'>"
-          f"Trading Journal <span class='grad-accent'>Pro</span></span><br>"
+          + _logo_svg(_t['accent'], 18) +
+          f"<span style='line-height:1.2'><span style='font-size:15px;font-weight:600;color:{_t['text']}'>"
+          f"Trading Journal</span><br>"
           f"<span style='font-size:11px;color:{_t['muted']}'>{st.session_state.get('auth_user','')} · {_role_lbl}</span>"
           f"</span></div>")
 
 if st.session_state.hdr_open:
     with st.container(key="tj_hdr"):
-        _r = st.columns([1.75, 1.75, 1.45, 1.75, 0.4, 0.4, 0.4], vertical_alignment="center", gap="small")
+        _r = st.columns([2.6, 1.6, 1.6, 0.0001, 0.4, 0.4, 0.4], vertical_alignment="center", gap="small")
         with _r[0]:
             st.markdown(_brand, unsafe_allow_html=True)
         with _r[1]:
@@ -2153,20 +2178,12 @@ if st.session_state.hdr_open:
             _cur_cs = st.session_state.get("chart_style_override", "Auto")
             _sel_cs = st.selectbox("Graphiques", _cs_opts,
                 index=_cs_opts.index(_cur_cs) if _cur_cs in _cs_opts else 0,
-                format_func=lambda x: (f"Graphiques · auto" if x == "Auto" else f"Graphiques · {x}"),
+                format_func=lambda x: (f"Graphiques · Cotation" if x == "Auto" else f"Graphiques · {x}"),
                 key="chart_style_selector", label_visibility="collapsed",
                 help="Type et configuration des graphiques. Auto = suit le design choisi "
                      f"(actuellement {THEME_CHART_STYLE.get(st.session_state.theme_name, 'Classique')}).")
             if _sel_cs != _cur_cs:
                 st.session_state.chart_style_override = _sel_cs; st.rerun()
-        with _r[3]:
-            _sel_bg = st.selectbox("Fond", BG_NAMES,
-                index=BG_NAMES.index(st.session_state.bg_name) if st.session_state.bg_name in BG_NAMES else 0,
-                format_func=lambda n: "Fond · aucun" if n == "Aucun" else f"Fond · {n}",
-                key="bg_selector", label_visibility="collapsed",
-                help="Image de fond (photos libres de droits). « Aucun » pour un fond uni.")
-            if _sel_bg != st.session_state.bg_name:
-                st.session_state.bg_name = _sel_bg; st.rerun()
         with _r[4]:
             if st.button("", icon=":material/sync:", key="hdr_sync", help="Synchroniser", use_container_width=True):
                 force_reload(); st.rerun()
@@ -2180,9 +2197,8 @@ if st.session_state.hdr_open:
         with _c1:
             st.markdown(
                 f"<div class='tj-cap'>"
-                f"<span style='font-size:10.5px;color:{_t['muted']};text-transform:uppercase;letter-spacing:1.2px;"
-                f"font-weight:700'>Capital · {selection_label()}</span>"
-                f"<span style='font-size:20px;font-weight:800;color:{col_pnl};font-family:JetBrains Mono,monospace'>"
+                f"<span style='font-size:13px;color:{_t['muted']}'>Capital · {selection_label()}</span>"
+                f"<span style='font-size:20px;font-weight:500;color:{col_pnl};font-family:IBM Plex Mono,monospace'>"
                 f"{fmt(total)}</span>"
                 f"<span style='font-size:11.5px;color:{_t['muted']}'>{len(df_side)} trades · {wr:.0f}% win</span></div>",
                 unsafe_allow_html=True)
@@ -2205,7 +2221,7 @@ else:
             unsafe_allow_html=True)
         _render_nav("tjmnav")
         st.markdown(f"<span style='font-size:13px;font-weight:800;color:{col_pnl};"
-                    f"font-family:JetBrains Mono,monospace;padding:0 6px'>{fmt(total)}</span>",
+                    f"font-family:IBM Plex Mono,monospace;padding:0 6px'>{fmt(total)}</span>",
                     unsafe_allow_html=True)
         st.button("", icon=":material/keyboard_arrow_down:", key="hdr_show", help="Afficher le panneau",
                   on_click=_hdr_toggle)
@@ -3707,11 +3723,11 @@ if st.session_state.page == "dashboard":
         # ── KPIs ─────────────────────────────────────────────────────────────
         c1,c2,c3,c4,c5,c6 = st.columns(6)
         _W, _L, _O, _A = _tdb["win"], _tdb["loss"], _tdb["orange"], _tdb["alt"]
-        with c1: kpi('<i class="fa-solid fa-coins"></i>',          "P&L Net",      fmt(total),       f"{len(df)} trades",             _W if total>=0 else _L)
-        with c2: kpi('<i class="fa-solid fa-bullseye"></i>',       "Win Rate",     f"{wr_val:.1f}%", f"{len(wins)}W · {len(losses)}L",_W if wr_val>=50 else _L)
-        with c3: kpi('<i class="fa-solid fa-scale-balanced"></i>', "Profit Factor",f"{pf:.2f}" if pf else "—","Gain/Perte",          _W if (pf or 0)>=1.5 else _O)
-        with c4: kpi('<i class="fa-solid fa-arrow-trend-down"></i>',"Max Drawdown",f"${mdd:,.2f}",   "Perte cumulée max",             _L)
-        with c5: kpi('<i class="fa-solid fa-bolt"></i>',           "R:R Moyen",   f"{avg_rr:.2f}R" if avg_rr else "—","Risque/Récomp",_A)
+        with c1: kpi('<i class="fa-solid fa-coins"></i>',          "P&L net",      fmt(total),       f"{len(df)} trades",             _W if total>=0 else _L)
+        with c2: kpi('<i class="fa-solid fa-bullseye"></i>',       "Taux de réussite",f"{wr_val:.1f}%", f"{len(wins)}W · {len(losses)}L",_W if wr_val>=50 else _L)
+        with c3: kpi('<i class="fa-solid fa-scale-balanced"></i>', "Profit factor",f"{pf:.2f}" if pf else "—","Gain / perte",          _W if (pf or 0)>=1.5 else _O)
+        with c4: kpi('<i class="fa-solid fa-arrow-trend-down"></i>',"Drawdown max",f"${mdd:,.2f}",   "Perte cumulée max",             _L)
+        with c5: kpi('<i class="fa-solid fa-bolt"></i>',           "R:R moyen",   f"{avg_rr:.2f}R" if avg_rr else "—","Risque / récompense",_A)
         with c6: kpi('<i class="fa-solid fa-arrow-trend-up"></i>', "Gain moyen",   fmt(avg_w),       "Par trade gagnant",             _W)
 
         # Analyse comportementale : contexte calculé sur les comptes sélectionnés, stats sur les trades filtrés
@@ -3758,7 +3774,7 @@ if st.session_state.page == "dashboard":
                                f"border-left:3px solid {_cc};border-radius:9px;padding:4px 12px;"
                                f"margin:0 8px 6px 0;font-size:12px;color:{_tdb['muted']}'>"
                                f"<b style='color:{_tdb['text']}'>{_m}</b>"
-                               f"<b style='color:{_W if _pm>=0 else _L};font-family:JetBrains Mono,monospace'>{fmt(_pm)}</b>"
+                               f"<b style='color:{_W if _pm>=0 else _L};font-family:IBM Plex Mono,monospace'>{fmt(_pm)}</b>"
                                f"{len(_df_m)} trades · {_wr_m:.0f}% win</span>")
                 st.markdown(f"<div style='margin:6px 0 2px'>{_chips}</div>", unsafe_allow_html=True)
 
@@ -3792,8 +3808,7 @@ if st.session_state.page == "dashboard":
                         if subtitle else "")
             st.markdown(
                 f'<div style="margin:8px 0 6px;display:flex;align-items:center;gap:8px">'
-                f'<span style="font-size:13.5px;font-weight:700;color:{_theme["text"]};background:{accent}14;'
-                f'border-left:3px solid {accent};border-radius:3px 999px 999px 3px;padding:3px 14px 3px 10px">{title}</span>'
+                f'<span style="font-size:14px;font-weight:500;color:{_theme["text"]}">{title}</span>'
                 f'{sub_html}</div>',
                 unsafe_allow_html=True)
 
@@ -3920,8 +3935,10 @@ if st.session_state.page == "dashboard":
                           ("info", "à savoir", _T["accent"]), ("positif", "point(s) fort(s)", _T["win"])]
                 st.markdown(
                     "<div style='display:flex;gap:10px;flex-wrap:wrap;margin:4px 0 12px'>" + "".join(
-                        f"<span style='font-size:12.5px;font-weight:700;color:{c};background:{c}14;border:1px solid {c}40;"
-                        f"border-radius:9px;padding:4px 12px'><b style='font-size:15px'>{_cnt[k]}</b> {lab}</span>"
+                        f"<span style='display:inline-flex;align-items:center;gap:8px;font-size:13px;color:{_T['text']};margin-right:12px'>"
+                        f"<span style='width:8px;height:8px;border-radius:50%;background:{c};display:inline-block'></span>"
+                        f"<span style='font-family:IBM Plex Mono,monospace'>{_cnt[k]}</span>"
+                        f"<span style='color:{_T['muted']}'>{lab}</span></span>"
                         for k, lab, c in _chips) +
                     f"<span style='font-size:11.5px;color:{_T['muted']};align-self:center'>Calculé sur "
                     f"{_bh.get('n') or _risk.get('n', 0)} trades · comptes : {selection_label()} · filtres du dashboard appliqués</span></div>",
@@ -4983,7 +5000,7 @@ elif st.session_state.page == "add":
                         rr_v = round(abs(d_tp-d_entry)/risk,2)
                         rr_h = f" &nbsp;·&nbsp; <span style='color:#7c6aff'>R:R {rr_v}</span>"
                 st.markdown(f"""<div style="margin-top:26px;font-size:24px;font-weight:800;
-                    font-family:'JetBrains Mono',monospace;color:{color}">
+                    font-family:'IBM Plex Mono',monospace;color:{color}">
                     {sign} &nbsp; {fmt(d_pnl)}{rr_h}</div>""", unsafe_allow_html=True)
 
         d_notes = st.text_area("Notes & Analyse", value=ev("notes",""),
@@ -5727,7 +5744,7 @@ elif st.session_state.page == "analyse":
                 f"<div style='font-size:9px;letter-spacing:.5px;text-transform:uppercase;"
                 f"color:{_ta['muted']};font-weight:700'>{lbl}</div>"
                 f"<div style='font-size:{vfont};font-weight:800;color:{color};"
-                f"font-family:JetBrains Mono,monospace;line-height:1.3'>{val if val is not None else '—'}</div></div>")
+                f"font-family:IBM Plex Mono,monospace;line-height:1.3'>{val if val is not None else '—'}</div></div>")
 
     def _dir_chip(aset, d):
         if d > 0:   cc, ic = _ta["win"], "▲"
@@ -5891,7 +5908,7 @@ elif st.session_state.page == "analyse":
             f"<span style='font-size:10px;font-weight:700;color:{imp_col}'>● {imp_lbl}</span>"
             f"<span style='font-size:10px;color:{_ta['muted']}'>{cat_txt}</span>"
             f"<span style='font-size:11px;color:{_ta['muted']};margin-left:auto;"
-            f"font-family:JetBrains Mono,monospace'>{e['date']}</span></div>"
+            f"font-family:IBM Plex Mono,monospace'>{e['date']}</span></div>"
             # titre
             f"<div style='font-size:14px;font-weight:700;color:{_ta['text']};margin-bottom:8px'>"
             f"{e['title']}</div>"
@@ -5990,9 +6007,9 @@ elif st.session_state.page == "analyse":
                 _cmp.html("<script>setTimeout(()=>{try{const b=window.parent.document.querySelector("
                           "'.st-key-cal_auto button');if(b)b.click();}catch(e){}},60000);</script>", height=0)
         if _has_actual_src:
-            st.caption(f"✅ Source : {_src} — chiffres publiés (Actual) disponibles.")
+            st.caption(f"Source : {_src}, chiffres publiés disponibles")
         else:
-            st.warning(f"⚠️ Sources avec Actual (TradingView / ForexFactory) injoignables depuis "
+            st.warning(f"Sources avec Actual (TradingView / ForexFactory) injoignables depuis "
                        f"le serveur. Repli sur {_src} : seules les prévisions sont affichées.")
 
         df = pd.DataFrame(events)
@@ -6074,7 +6091,7 @@ elif st.session_state.page == "analyse":
                         f"border-radius:6px'>{_CLS_LABEL.get(cfg['cls'], '')}</span></div>"
                         f"<div style='display:flex;align-items:baseline;gap:8px;margin:6px 0 2px'>"
                         f"<span style='font-size:26px;font-weight:800;color:{col};"
-                        f"font-family:JetBrains Mono,monospace'>{s:+.0f}</span>"
+                        f"font-family:IBM Plex Mono,monospace'>{s:+.0f}</span>"
                         f"<span style='font-size:12px;font-weight:700;color:{col}'>{lbl}</span></div>"
                         f"<div style='position:relative;height:7px;border-radius:4px;margin:8px 0 4px;"
                         f"background:linear-gradient(90deg,{_ta['loss']}33,{_ta['muted']}22,{_ta['win']}33)'>"
@@ -6128,7 +6145,7 @@ elif st.session_state.page == "analyse":
         def _mx_wait():
             if not _mx_store()["running"]:
                 st.rerun(scope="app")
-            st.caption("⏳ Données macro en cours de chargement en arrière-plan (FRED, BIS, Yahoo Finance). "
+            st.caption("Données macro en cours de chargement en arrière-plan (FRED, BIS, Yahoo Finance). "
                        "Tu peux utiliser la page, elle se complète toute seule.")
         _mx_wait()
     try:
@@ -6158,6 +6175,7 @@ elif st.session_state.page == "analyse":
         return "—" if v is None else (f"{v:,.{d}f}".replace(",", " ").replace(".", ",") + suf)
 
     def _spark(s, color, w=110, h=30, n=60):
+        return ""                                   # pas de mini-courbe dans les cartes de chiffres
         if s is None or len(s) < 3:
             return ""
         v = list(s.iloc[-n:].astype(float))
@@ -6190,7 +6208,7 @@ elif st.session_state.page == "analyse":
                 f"border-radius:{shape};padding:10px 14px'>"
                 f"<div style='font-size:10px;letter-spacing:1px;text-transform:uppercase;color:{_ta['muted']};font-weight:700'>{label}</div>"
                 f"<div style='display:flex;align-items:flex-end;justify-content:space-between;gap:6px'>"
-                f"<div><div style='font-size:20px;font-weight:800;color:{_ta['text']};font-family:JetBrains Mono,monospace'>"
+                f"<div><div style='font-size:20px;font-weight:800;color:{_ta['text']};font-family:IBM Plex Mono,monospace'>"
                 f"{_nfr(v, d)}<span style='font-size:11px;color:{_ta['muted']}'> {unit}</span></div>"
                 f"<div style='font-size:11px;font-weight:700;color:{col}'>{'' if ch is None else ('▲ ' if ch > 0 else '▼ ') + _nfr(abs(ch), d)}</div></div>"
                 f"{_spark(s2, col if pos_good is not None else _ta['accent'])}</div></div>")
@@ -6209,7 +6227,7 @@ elif st.session_state.page == "analyse":
         f"border:1px solid {_rc}55;border-radius:30px 8px 30px 8px;padding:10px 16px'>"
         f"<div style='font-size:10px;letter-spacing:1px;text-transform:uppercase;color:{_ta['muted']};font-weight:700'>Régime de marché</div>"
         f"<div style='display:flex;align-items:baseline;gap:10px'><span style='font-size:22px;font-weight:800;color:{_rc}'>{_reg_lab}</span>"
-        f"<span style='font-family:JetBrains Mono,monospace;color:{_rc};font-weight:700'>{'' if _reg_sc is None else f'{_reg_sc:+.0f}'}</span></div>"
+        f"<span style='font-family:IBM Plex Mono,monospace;color:{_rc};font-weight:700'>{'' if _reg_sc is None else f'{_reg_sc:+.0f}'}</span></div>"
         f"{_gauge(_reg_sc, 'Risk-Off', 'Risk-On')}</div>"
         + _tile("Dollar (DXY)", _dxy, "", 2, None)
         + _tile("VIX", _vix, "", 1, False, shape="44px 12px 12px 44px")
@@ -6321,10 +6339,10 @@ elif st.session_state.page == "analyse":
             f"<span style='font-size:11.5px;font-weight:700;color:{_ta['text']}'>{label or lab_}</span>"
             f"<span style='font-size:10px;color:{_ta['muted']}'>{'' if dt_ is None else dt_.strftime('%m/%Y')}</span></div>"
             f"<div style='display:flex;align-items:flex-end;justify-content:space-between'>"
-            + (f"<div><span style='font-size:22px;font-weight:800;color:{_ta['text']};font-family:JetBrains Mono,monospace'>"
+            + (f"<div><span style='font-size:22px;font-weight:800;color:{_ta['text']};font-family:IBM Plex Mono,monospace'>"
                f"{_html.escape(v_txt)}</span><div style='font-size:11px;color:{_ta['muted']};font-weight:700'>préc. "
                f"{_html.escape(p_txt)} · source calendrier</div></div>" if _from_cal else
-               f"<div><span style='font-size:22px;font-weight:800;color:{_ta['text']};font-family:JetBrains Mono,monospace'>{_nfr(v, d)}</span>"
+               f"<div><span style='font-size:22px;font-weight:800;color:{_ta['text']};font-family:IBM Plex Mono,monospace'>{_nfr(v, d)}</span>"
                f"<span style='font-size:11px;color:{_ta['muted']}'> {unit}</span>"
                f"<div style='font-size:11px;color:{col};font-weight:700'>préc. {_nfr(p, d)} "
                f"{'' if ch is None else ('▲' if ch > 0 else '▼' if ch < 0 else '=')}</div></div>") +
@@ -6354,9 +6372,8 @@ elif st.session_state.page == "analyse":
                     f"<tbody>{rows}</tbody></table></div>", unsafe_allow_html=True)
 
     def _card_t(title, sub=""):
-        st.markdown(f"<div style='margin:6px 0 8px'><span style='font-size:13.5px;font-weight:700;color:{_ta['text']};"
-                    f"background:{_ta['accent']}14;border-left:3px solid {_ta['accent']};border-radius:3px 999px 999px 3px;"
-                    f"padding:3px 14px 3px 10px'>{title}</span>"
+        st.markdown(f"<div style='margin:8px 0 8px'><span style='font-size:14px;font-weight:500;color:{_ta['text']}'>"
+                    f"{title}</span>"
                     + (f" <span style='font-size:11px;color:{_ta['muted']}'>{sub}</span>" if sub else "") + "</div>",
                     unsafe_allow_html=True)
 
@@ -6457,7 +6474,7 @@ elif st.session_state.page == "analyse":
                         f"<div style='display:flex;align-items:center;gap:10px;padding:6px 12px;margin-bottom:6px;"
                         f"background:{_ta['card']};border:1px solid {_ta['border']};border-left:3px solid {vc};"
                         f"border-radius:4px 18px 18px 4px'>"
-                        f"<span style='font-family:JetBrains Mono,monospace;font-size:11.5px;color:{_ta['muted']};min-width:98px'>"
+                        f"<span style='font-family:IBM Plex Mono,monospace;font-size:11.5px;color:{_ta['muted']};min-width:98px'>"
                         f"{_fmt_local(r['date'])[0]}</span><b style='font-size:12px'>{r['country']}</b>"
                         f"<span style='font-size:12.5px;color:{_ta['text']};flex:1'>{_html.escape(str(r['title']))}</span>"
                         f"<span style='font-size:11px;color:{_ta['muted']}'>cons. {_html.escape(str(r['forecast']) or '—')}</span>"
@@ -6513,11 +6530,11 @@ elif st.session_state.page == "analyse":
                 "<div style='display:flex;gap:10px;flex-wrap:wrap'>"
                 f"<div style='flex:1;min-width:150px;background:{_ta['card']};border:1px solid {_ta['border']};border-radius:44px 12px 12px 44px;padding:10px 16px'>"
                 f"<div style='font-size:10px;text-transform:uppercase;letter-spacing:1px;color:{_ta['muted']};font-weight:700'>Fed funds futures</div>"
-                f"<div style='font-size:20px;font-weight:800;color:{_sgn_col(fb)};font-family:JetBrains Mono,monospace'>{'—' if fb is None else f'{fb:+.0f} pb'}</div>"
+                f"<div style='font-size:20px;font-weight:800;color:{_sgn_col(fb)};font-family:IBM Plex Mono,monospace'>{'—' if fb is None else f'{fb:+.0f} pb'}</div>"
                 f"<div style='font-size:11px;color:{_ta['muted']}'>taux implicite {_nfr(_fed.get('implied'), 2, ' %')} vs effectif {_nfr(_fed.get('effr'), 2, ' %')}</div></div>"
                 f"<div style='flex:1;min-width:150px;background:{_ta['card']};border:1px solid {_ta['border']};border-radius:12px 44px 44px 12px;padding:10px 16px'>"
                 f"<div style='font-size:10px;text-transform:uppercase;letter-spacing:1px;color:{_ta['muted']};font-weight:700'>US 2 ans - Fed</div>"
-                f"<div style='font-size:20px;font-weight:800;color:{_sgn_col(sp)};font-family:JetBrains Mono,monospace'>{'—' if sp is None else f'{sp:+.0f} pb'}</div>"
+                f"<div style='font-size:20px;font-weight:800;color:{_sgn_col(sp)};font-family:IBM Plex Mono,monospace'>{'—' if sp is None else f'{sp:+.0f} pb'}</div>"
                 f"<div style='font-size:11px;color:{_ta['muted']}'>positif : hausses anticipées · négatif : baisses</div></div></div>",
                 unsafe_allow_html=True)
             st.caption("Le contrat Fed funds le plus proche indique le taux moyen attendu sur son mois d'échéance. "
@@ -6804,7 +6821,7 @@ elif st.session_state.page == "calendar":
                             padding:8px;vertical-align:top;border:{border_today}">
                             <div style="font-size:10px;color:var(--tj-muted)">{day}</div>
                             <div style="font-size:13px;font-weight:800;color:{text_col};
-                                font-family:'JetBrains Mono',monospace;margin-top:6px">{fmt(pnl_v)}</div>
+                                font-family:'IBM Plex Mono',monospace;margin-top:6px">{fmt(pnl_v)}</div>
                             <div style="font-size:9px;color:var(--tj-muted);margin-top:3px">
                                 {trades_v} trade{"s" if trades_v>1 else ""}</div>
                         </td>'''
@@ -6824,7 +6841,7 @@ elif st.session_state.page == "calendar":
                     padding:8px;vertical-align:top;border:1px solid {wcol}33">
                     <div style="font-size:9px;color:var(--tj-muted);text-transform:uppercase">Total</div>
                     <div style="font-size:13px;font-weight:800;color:{wcol};
-                        font-family:'JetBrains Mono',monospace;margin-top:6px">{wpnl_txt}</div>
+                        font-family:'IBM Plex Mono',monospace;margin-top:6px">{wpnl_txt}</div>
                     <div style="font-size:9px;color:var(--tj-muted);margin-top:3px">
                         {week_trades} trade{"s" if week_trades!=1 else ""}</div>
                 </td>'''
@@ -6890,7 +6907,7 @@ elif st.session_state.page == "calendar":
                     st.markdown(
                         f"<div style='padding-top:8px'>"
                         f"<span style='color:var(--tj-muted)'>{_jn} {zoom_day:02d} · P&L : </span>"
-                        f"<b style='color:{zcol};font-family:JetBrains Mono,monospace'>{fmt(zpnl)}</b>"
+                        f"<b style='color:{zcol};font-family:IBM Plex Mono,monospace'>{fmt(zpnl)}</b>"
                         f"<span style='color:var(--tj-muted)'> · {ztrades} position"
                         f"{'s' if ztrades>1 else ''}</span></div>",
                         unsafe_allow_html=True)
@@ -6990,11 +7007,11 @@ elif st.session_state.page == "calendar":
                                 f"<div style='display:flex;gap:14px;align-items:center;"
                                 f"background:var(--tj-card);border:1px solid var(--tj-border);border-radius:8px;"
                                 f"padding:7px 14px;margin-bottom:5px;font-size:13px'>"
-                                f"<span style='color:var(--tj-muted);font-family:JetBrains Mono,monospace;"
+                                f"<span style='color:var(--tj-muted);font-family:IBM Plex Mono,monospace;"
                                 f"min-width:42px'>{zh}</span>"
                                 f"<span style='color:#e8ecf4;font-weight:600'>{zt['symbol']}</span>"
                                 f"<span style='color:var(--tj-muted)'>{zt['direction']}</span>"
-                                f"<span style='color:{zc};font-family:JetBrains Mono,monospace;"
+                                f"<span style='color:{zc};font-family:IBM Plex Mono,monospace;"
                                 f"font-weight:700;margin-left:auto'>{fmt(zt['pnl'])}</span>"
                                 f"</div>", unsafe_allow_html=True)
                 else:
@@ -7038,7 +7055,7 @@ elif st.session_state.page == "calendar":
                     border:1px solid rgba(255,255,255,0.04)">
                     <div style="font-size:9px;color:var(--tj-muted)">S{w}</div>
                     <div style="font-size:11px;font-weight:800;color:{text_col};
-                        font-family:'JetBrains Mono',monospace;margin-top:4px">{pnl_txt}</div>
+                        font-family:'IBM Plex Mono',monospace;margin-top:4px">{pnl_txt}</div>
                 </div>'''
             html += '</div>'
             st.markdown(html, unsafe_allow_html=True)
@@ -7083,7 +7100,7 @@ elif st.session_state.page == "calendar":
                     <div style="font-size:12px;color:var(--tj-muted);text-transform:uppercase;
                         letter-spacing:.5px">{mois_fr[m-1]} {year}</div>
                     <div style="font-size:22px;font-weight:800;color:{text_col};
-                        font-family:'JetBrains Mono',monospace;margin-top:8px">{pnl_txt}</div>
+                        font-family:'IBM Plex Mono',monospace;margin-top:8px">{pnl_txt}</div>
                     <div style="font-size:11px;color:var(--tj-muted);margin-top:6px">
                         {trades_v} trade{"s" if trades_v!=1 else ""}</div>
                 </div>'''
@@ -7121,7 +7138,7 @@ elif st.session_state.page == "calendar":
                     border:1px solid {border_col}">
                     <div style="font-size:13px;color:var(--tj-muted)">{int(r["_year"])}</div>
                     <div style="font-size:24px;font-weight:800;color:{text_col};
-                        font-family:'JetBrains Mono',monospace;margin-top:8px">{fmt(r["pnl"])}</div>
+                        font-family:'IBM Plex Mono',monospace;margin-top:8px">{fmt(r["pnl"])}</div>
                     <div style="font-size:11px;color:var(--tj-muted);margin-top:6px">
                         {int(r["trades"])} trade{"s" if r["trades"]!=1 else ""}</div>
                 </div>'''
@@ -7306,7 +7323,7 @@ elif st.session_state.page == "users":
                     f"<div style='background:{_t['card']};border:1px solid {_t['border']};"
                     f"border-radius:12px;padding:12px 16px;margin-bottom:4px'>"
                     f"<b style='color:{_t['text']}'>{uname}</b> "
-                    f"{'👑 admin' if is_adm else ''} "
+                    f"{'admin' if is_adm else ''} "
                     f"<span style='color:{status_col};font-size:12px'>"
                     f"● {'actif' if active else 'désactivé'}</span><br>"
                     f"<span style='color:{_t['muted']};font-size:12px'>Comptes : "
@@ -7432,7 +7449,7 @@ elif st.session_state.page == "sessions":
         f"<span style='font-size:12px;color:{_t['muted']};text-transform:uppercase;"
         f"letter-spacing:1px'>Heure locale (GMT+1)</span>"
         f"<span style='font-size:18px;font-weight:800;color:{_t['text']};"
-        f"font-family:JetBrains Mono,monospace'>{now_utc.astimezone(GMT1).strftime('%A %d/%m %H:%M')}</span>"
+        f"font-family:IBM Plex Mono,monospace'>{now_utc.astimezone(GMT1).strftime('%A %d/%m %H:%M')}</span>"
         f"<span style='background:{_mk_col}22;color:{_mk_col};border:1px solid {_mk_col}55;"
         f"border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700'>"
         f"{'Marché FERMÉ' if market_closed else 'Marché OUVERT'}</span>"
@@ -7448,17 +7465,17 @@ elif st.session_state.page == "sessions":
             if is_open:
                 body = (f"<div style='font-size:11px;color:{_t['muted']};margin-top:8px'>Ouverture</div>"
                         f"<div style='font-size:13px;font-weight:700;color:{_t['text']};"
-                        f"font-family:JetBrains Mono,monospace'>{_fmt(o_utc)}</div>"
+                        f"font-family:IBM Plex Mono,monospace'>{_fmt(o_utc)}</div>"
                         f"<div style='font-size:11px;color:{_t['muted']};margin-top:4px'>Fermeture</div>"
                         f"<div style='font-size:13px;font-weight:700;color:{_t['text']};"
-                        f"font-family:JetBrains Mono,monospace'>{_fmt(c_utc)}</div>")
+                        f"font-family:IBM Plex Mono,monospace'>{_fmt(c_utc)}</div>")
             else:
                 body = (f"<div style='font-size:11px;color:{_t['muted']};margin-top:8px'>Prochaine ouverture</div>"
                         f"<div style='font-size:13px;font-weight:700;color:{_t['muted']};"
-                        f"font-family:JetBrains Mono,monospace'>{_fmt(o_utc)}</div>"
+                        f"font-family:IBM Plex Mono,monospace'>{_fmt(o_utc)}</div>"
                         f"<div style='font-size:11px;color:{_t['muted']};margin-top:4px'>Clôture prévue</div>"
                         f"<div style='font-size:12px;color:{_t['muted']};"
-                        f"font-family:JetBrains Mono,monospace'>{_fmt(c_utc)}</div>")
+                        f"font-family:IBM Plex Mono,monospace'>{_fmt(c_utc)}</div>")
             st.markdown(
                 f"<div class='grad-card' style='border-top:3px solid {col}'>"
                 f"<div style='display:flex;align-items:center;justify-content:space-between'>"
@@ -7601,7 +7618,7 @@ elif st.session_state.page == "captures":
             _pg = min(st.session_state.get("fc_page", 0), _np - 1)
             _page = _sel[_pg * _PER:(_pg + 1) * _PER]
             st.markdown(f"<div style='color:{_t['muted']};font-size:13px;margin:6px 0 10px'>"
-                        f"<b style='color:{_t['accent']};font-family:JetBrains Mono,monospace'>{len(_sel)}</b> "
+                        f"<b style='color:{_t['accent']};font-family:IBM Plex Mono,monospace'>{len(_sel)}</b> "
                         f"image(s) · page {_pg + 1} / {_np} · coche des images pour les commenter ensemble</div>",
                         unsafe_allow_html=True)
 
@@ -7754,7 +7771,7 @@ elif st.session_state.page == "captures":
 
             st.markdown(
                 f"<div style='color:{_t['muted']};font-size:13px;margin:6px 0 12px'>"
-                f"<b style='color:{_t['accent']};font-family:JetBrains Mono,monospace'>"
+                f"<b style='color:{_t['accent']};font-family:IBM Plex Mono,monospace'>"
                 f"{len(_filtered)}</b> capture(s) sur la période.</div>",
                 unsafe_allow_html=True)
 
@@ -7772,7 +7789,7 @@ elif st.session_state.page == "captures":
                             f"{tr.get('time','') or ''}</b> · "
                             f"<span style='color:{_t['muted']}'>{tr.get('symbol','')} "
                             f"{tr.get('direction','')}</span> · "
-                            f"<span style='color:{_pc};font-family:JetBrains Mono,monospace'>"
+                            f"<span style='color:{_pc};font-family:IBM Plex Mono,monospace'>"
                             f"{fmt(_pnl)}</span></div>",
                             unsafe_allow_html=True)
                         st.markdown(
