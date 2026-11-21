@@ -96,13 +96,20 @@ THEMES = {
         "loss":"#dc2626","alt":"#6b7280","orange":"#c2410c","sidebar":"#ffffff","btn_text":"#ffffff",
         "raised":"#f1f1f3",
     },
+    # Noir, blanc, vert : surfaces noires, texte blanc, accent vert (pastille sans nom)
+    "Noir Vert": {
+        "bg":"#080a09","bg2":"#040504","card":"#0e1210","border":"#1f2b24",
+        "text":"#fafafa","muted":"#8b958f","accent":"#1ed47c","win":"#1ed47c",
+        "loss":"#f04848","alt":"#d4d4d4","orange":"#e3a33b","sidebar":"#040504","btn_text":"#060806",
+        "raised":"#16201a", "vivid":True,
+    },
 }
 def _is_light(t):
     h = t["bg"].lstrip("#"); r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return (0.299 * r + 0.587 * g + 0.114 * b) > 150
 
 # Designs clairs d'abord (fond non noir par défaut), puis les sombres, au choix
-THEME_NAMES = ["Graphite", "Papier"]
+THEME_NAMES = ["Graphite", "Papier", "Noir Vert"]
 DEFAULT_THEME = "Graphite"         # design par défaut
 LOGIN_THEME   = "Graphite"         # design de la page de connexion
 DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
@@ -202,7 +209,7 @@ CHART_STYLES = {
         bargap=0.15, grid="xy", griddash="solid", font="IBM Plex Sans, sans-serif",
         hover="x unified", toolbar=True, transparent=True, heat="Greys", legend_top=True),
 }
-THEME_CHART_STYLE = {"Graphite": "Cotation", "Papier": "Cotation"}
+THEME_CHART_STYLE = {"Graphite": "Cotation", "Papier": "Cotation", "Noir Vert": "Cotation"}
 CHART_STYLE_NAMES = list(CHART_STYLES.keys())
 
 def get_chart_style_name():
@@ -522,6 +529,205 @@ div[data-testid="stTextInputRootElement"], [data-testid="stDateInputField"], [da
 /* Chronomètre : sans halo */
 .st-key-cd_sphere iframe {{ border-radius:50%; }}
 </style>"""
+
+def app_css(t, page):
+    """Couche application : écran d'accueil en tuiles, barre de retour, thèmes en pastilles, transitions.
+    Les animations n'utilisent que opacity/transform et respectent prefers-reduced-motion."""
+    light = _is_light(t); raised = t.get("raised", t["bg2"]); hair = t["border"]
+    ease = "cubic-bezier(.2,.8,.2,1)"
+    shadow_h = "0 18px 40px -18px rgba(0,0,0,.28)" if light else "0 22px 48px -20px rgba(0,0,0,.85)"
+    pg = "".join(ch for ch in page if ch.isalnum())
+    # pastilles de thème : trois parts (fond, accent, texte)
+    sw = []
+    for i, n in enumerate(THEME_NAMES):
+        th = THEMES[n]
+        sw.append(f".st-key-thm_{i} button {{ background:conic-gradient(from 210deg, {th['bg']} 0 33.4%, "
+                  f"{th['accent']} 0 66.7%, {th['text']} 0) !important; }}")
+        if n == st.session_state.get("theme_name"):
+            sw.append(f"[class*='st-key-thm_'].st-key-thm_{i} .stButton > button, [class*='st-key-thm_'].st-key-thm_{i} button "
+                      f"{{ box-shadow:0 0 0 2px {t['bg']}, 0 0 0 3.5px {t['text']} !important; }}")
+    stagger = "".join(
+        f'[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > :nth-child({i}){{animation-delay:{(i-1)*28}ms}}'
+        for i in range(1, 11))
+    tiles = "".join(f".st-key-tile_{k}{{animation-delay:{80 + j*45}ms}}" for j, k in enumerate(
+        ["dashboard", "journal", "analyse", "calendar", "sessions", "captures", "add", "import", "users"]))
+    vivid = ""
+    if t.get("vivid"):   # design noir · blanc · vert : le vert porte la marque, les icônes et l'heure
+        vivid = (f".tj-mark{{background:{t['accent']}}} .tj-mark svg{{stroke:{t['btn_text']}}} "
+                 f".tj-t-ic{{background:{t['accent']}1f;border-color:{t['accent']}55;color:{t['accent']}}} "
+                 f".tj-clock{{color:{t['accent']}}} .tj-now{{background:{t['accent']}}} "
+                 f".tj-hero-l{{color:{t['accent']}}} .tj-pill{{border-color:{t['accent']}55}} "
+                 f".st-key-tj_bar{{border-bottom-color:{t['accent']}55}} "
+                 f".stButton > button[kind='primary']{{background:{t['accent']} !important;border-color:{t['accent']} !important}} "
+                 f".stButton > button[kind='primary'] p, .stButton > button[kind='primary'] [data-testid='stMarkdownContainer'] p"
+                 f"{{color:{t['btn_text']} !important}} "
+                 f".stTabs [aria-selected='true'], [data-testid='stTab'][data-selected='true']{{color:{t['accent']} !important}}")
+    return f"""<style>
+@keyframes tjPage_{pg} {{ from {{ opacity:0; transform:translateY(10px); }} to {{ opacity:1; transform:none; }} }}
+@keyframes tjTile {{ from {{ opacity:0; transform:translateY(16px) scale(.985); }} to {{ opacity:1; transform:none; }} }}
+@keyframes tjDraw {{ from {{ stroke-dashoffset:1; }} to {{ stroke-dashoffset:0; }} }}
+@keyframes tjFade {{ from {{ opacity:0; }} to {{ opacity:1; }} }}
+@keyframes tjPulse {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:.35; }} }}
+
+/* Plus de panneau latéral */
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {{ display:none !important; }}
+[data-testid="stMainBlockContainer"] {{ padding-top:28px !important; max-width:1440px; }}
+
+/* Changement de page : le contenu entre en douceur, élément par élément */
+[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > :not(:has(.st-key-cd_sphere)):not(:has(.st-key-tj_watchdog)):not(:has(.st-key-tj_scroll)):not(.st-key-cd_sphere):not(.st-key-tj_watchdog) {{
+    animation:tjPage_{pg} .42s {ease} both; }}
+{stagger}
+
+/* Transitions de thème */
+.stApp, .kpi, .grad-card, [data-testid="stPlotlyChart"], [class*="st-key-tile_"], div[data-testid="stExpander"] details {{
+    transition:background-color .35s ease, border-color .35s ease, color .35s ease; }}
+
+/* Barre de page */
+.st-key-tj_bar {{ margin:-6px 0 0; padding:0 0 12px; border-bottom:1px solid {hair}; }}
+.st-key-tj_bar_r {{ flex:1 1 auto; }}
+.st-key-tj_bar_r > div {{ width:auto !important; flex:0 0 auto !important; }}
+.st-key-go_home button {{ background:transparent !important; border-color:transparent !important; padding:4px 10px 4px 6px !important;
+    min-height:34px !important; }}
+.st-key-go_home button:hover {{ background:{raised} !important; border-color:{hair} !important; }}
+.st-key-go_home button [data-testid="stIconMaterial"] {{ transition:transform .25s {ease}; }}
+.st-key-go_home button:hover [data-testid="stIconMaterial"] {{ transform:translateX(-3px); }}
+.st-key-go_home button p {{ color:{t['muted']} !important; font-size:13px !important; }}
+.st-key-go_home button:hover p {{ color:{t['text']} !important; }}
+.tj-bar-title {{ font-size:19px; font-weight:500; color:{t['text']}; padding-left:10px; margin-left:2px;
+    border-left:1px solid {hair}; line-height:1.2; white-space:nowrap; }}
+.st-key-hdr_sync button, .st-key-hdr_logout button {{ background:{raised} !important; border:1px solid {hair} !important;
+    color:{t['text']} !important; min-height:34px !important; border-radius:10px !important; }}
+.st-key-hdr_sync button *, .st-key-hdr_logout button * {{ color:{t['text']} !important; }}
+.st-key-hdr_sync button:hover, .st-key-hdr_logout button:hover {{ border-color:{t['muted']}88 !important; }}
+.st-key-hdr_sync button [data-testid="stIconMaterial"] {{ transition:transform .5s {ease}; }}
+.st-key-hdr_sync button:hover [data-testid="stIconMaterial"] {{ transform:rotate(180deg); }}
+.tj-pop-h {{ font-size:13px; color:{t['muted']}; margin:0 0 8px; }}
+
+/* Pastilles de thème */
+.st-key-tj_themes {{ gap:10px !important; padding:2px 0 6px; }}
+.st-key-tj_themes > div {{ width:auto !important; flex:0 0 auto !important; }}
+[class*="st-key-thm_"] .stButton > button, [class*="st-key-thm_"] button {{
+    width:26px !important; height:26px !important; min-height:26px !important; min-width:26px !important; padding:0 !important;
+    border-radius:50% !important; border:1px solid {hair} !important; box-shadow:0 0 0 0 transparent !important;
+    transition:transform .25s {ease}, box-shadow .25s {ease} !important; }}
+[class*="st-key-thm_"] .stButton > button:hover {{ transform:scale(1.14) !important; }}
+[class*="st-key-thm_"] .stButton > button:active {{ transform:scale(.92) !important; }}
+[class*="st-key-thm_"] button p {{ display:none; }}
+{''.join(sw)}
+
+/* ── ACCUEIL ── */
+.tj-home-top {{ display:flex; align-items:center; gap:12px; }}
+.tj-mark {{ width:34px; height:34px; border-radius:10px; display:grid; place-items:center; background:{t['text']}; }}
+.tj-brand {{ font-size:15px; font-weight:500; color:{t['text']}; line-height:1.15; }}
+.tj-brand small {{ display:block; font-size:12px; color:{t['muted']}; font-weight:400; }}
+.st-key-home_top {{ margin-bottom:30px; }}
+.st-key-home_top_r {{ flex:1 1 auto; }}
+.st-key-home_top_r > div {{ width:auto !important; flex:0 0 auto !important; }}
+.tj-hello {{ font-size:clamp(26px,3vw,38px); font-weight:500; color:{t['text']}; line-height:1.1; letter-spacing:-.01em; margin:0; }}
+.tj-hello-sub {{ font-size:14px; color:{t['muted']}; margin-top:8px; }}
+.tj-cap-l {{ font-size:12.5px; color:{t['muted']}; text-align:right; }}
+.tj-cap-v {{ font-size:clamp(24px,2.6vw,34px); font-family:'IBM Plex Mono',monospace; font-variant-numeric:tabular-nums;
+    text-align:right; line-height:1.15; margin-top:4px; }}
+.tj-cap-s {{ font-size:12.5px; color:{t['muted']}; text-align:right; margin-top:4px; }}
+.st-key-home_hero {{ margin-bottom:22px; }}
+.tj-section {{ font-size:13px; color:{t['muted']}; margin:6px 0 10px 2px; }}
+
+/* Tuiles : toute la surface est cliquable (le bouton Streamlit est posé dessus, invisible) */
+[class*="st-key-tile_"] {{ position:relative; background:{t['card']}; border:1px solid {hair}; border-radius:16px;
+    padding:20px 20px 18px; overflow:hidden; min-height:184px; gap:0 !important; cursor:pointer;
+    animation:tjTile .55s {ease} both;
+    transition:transform .35s {ease}, border-color .25s ease, box-shadow .35s {ease}, background-color .35s ease; }}
+{tiles}
+[class*="st-key-tile_"]:hover {{ transform:translateY(-4px); border-color:{t['accent']}80; box-shadow:{shadow_h}; }}
+[class*="st-key-tile_"]:active {{ transform:translateY(-1px) scale(.992); transition-duration:.12s; }}
+[class*="st-key-tile_"]:has(button:focus-visible) {{ outline:2px solid {t['accent']}; outline-offset:3px; }}
+[class*="st-key-tile_"] [class*="st-key-open_"] {{ position:absolute !important; inset:0; z-index:5; margin:0 !important; width:100% !important; }}
+[class*="st-key-tile_"] [class*="st-key-open_"] .stButton, [class*="st-key-tile_"] [class*="st-key-open_"] button {{
+    width:100% !important; height:100% !important; opacity:0 !important; cursor:pointer; border-radius:16px !important; }}
+.st-key-tile_dashboard, .st-key-tile_journal {{ min-height:268px; }}
+.st-key-tile_add, .st-key-tile_import, .st-key-tile_users {{ min-height:0; padding:16px 18px; }}
+.tj-t-head {{ display:flex; align-items:flex-start; justify-content:space-between; }}
+.tj-t-ic {{ width:40px; height:40px; border-radius:12px; display:grid; place-items:center; background:{raised};
+    border:1px solid {hair}; color:{t['text']}; transition:background-color .3s ease, color .3s ease, transform .45s {ease}; }}
+.tj-t-ic svg {{ width:19px; height:19px; }}
+[class*="st-key-tile_"]:hover .tj-t-ic {{ background:{t['accent']}; color:{t['btn_text']}; border-color:{t['accent']}; transform:rotate(-6deg) scale(1.04); }}
+.tj-t-go {{ color:{t['muted']}; opacity:.0; transform:translate(-6px,6px); transition:all .35s {ease}; }}
+.tj-t-go svg {{ width:18px; height:18px; }}
+[class*="st-key-tile_"]:hover .tj-t-go {{ opacity:1; transform:none; color:{t['text']}; }}
+.tj-t-name {{ font-size:16px; font-weight:500; color:{t['text']}; margin-top:18px; }}
+.tj-t-desc {{ font-size:13px; color:{t['muted']}; margin-top:4px; line-height:1.45; }}
+.tj-t-stat {{ margin-top:16px; font-size:13px; color:{t['muted']}; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }}
+.tj-t-stat b {{ font-family:'IBM Plex Mono',monospace; font-variant-numeric:tabular-nums; font-size:20px; font-weight:500 !important; color:{t['text']}; }}
+.tj-row {{ display:flex; align-items:center; gap:14px; }}
+.tj-row .tj-t-name {{ margin-top:0; font-size:14.5px; }}
+.tj-row .tj-t-desc {{ margin-top:2px; font-size:12.5px; }}
+.tj-row .tj-t-go {{ margin-left:auto; }}
+.tj-spark {{ margin-top:14px; height:78px; }}
+@keyframes tjReveal {{ from {{ clip-path:inset(0 100% 0 0); }} to {{ clip-path:inset(0 0 0 0); }} }}
+.tj-spark {{ animation:tjReveal 1.2s .3s {ease} both; }}
+.tj-list {{ margin-top:14px; display:flex; flex-direction:column; }}
+.tj-list div {{ display:flex; justify-content:space-between; font-size:13px; padding:7px 0; border-top:1px solid {hair}; color:{t['muted']}; }}
+.tj-list div span:last-child {{ font-family:'IBM Plex Mono',monospace; font-variant-numeric:tabular-nums; }}
+.tj-days {{ display:grid; grid-template-columns:repeat(10, 1fr); gap:4px; margin-top:14px; }}
+.tj-days i {{ display:block; height:10px; border-radius:3px; background:{raised}; animation:tjFade .4s ease both; }}
+.tj-live {{ display:inline-block; width:7px; height:7px; border-radius:50%; background:{t['accent']}; animation:tjPulse 1.6s ease-in-out infinite; }}
+
+/* Bandeau vivant de l'accueil */
+.st-key-tj_scroll, .st-key-tj_hb {{ position:fixed !important; left:-10000px; width:1px; height:1px; overflow:hidden; }}
+@keyframes tjNow {{ from {{ left:var(--a); }} to {{ left:var(--b); }} }}
+.tj-live-card {{ background:{t['card']}; border:1px solid {hair}; border-radius:16px; padding:16px 20px 14px; margin:0 0 26px;
+    animation:tjTile .55s {ease} both; }}
+.tj-live-h {{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }}
+.tj-clock {{ font-family:'IBM Plex Mono',monospace; font-size:20px; color:{t['text']}; font-variant-numeric:tabular-nums; }}
+.tj-live-k {{ font-size:12.5px; color:{t['muted']}; }}
+.tj-live-v {{ font-size:13px; color:{t['text']}; }}
+.tj-live-next {{ margin-left:auto; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }}
+.tj-ses-wrap {{ position:relative; }}
+.tj-ses {{ display:grid; grid-template-columns:78px 1fr 64px; align-items:center; gap:12px; padding:4px 0; }}
+.tj-ses-n {{ font-size:12.5px; color:{t['muted']}; }}
+.tj-ses-t {{ position:relative; height:8px; border-radius:4px; background:{raised}; }}
+.tj-ses-bar {{ position:absolute; top:0; bottom:0; border-radius:4px; background:{t['muted']}; opacity:.35;
+    transform-origin:left; animation:tjGrow .9s {ease} both; }}
+.tj-ses-bar.on {{ background:{t['accent']}; opacity:1; }}
+.tj-ses-s {{ font-size:12px; color:{t['muted']}; text-align:right; }}
+.tj-ses-s.on {{ color:{t['accent']}; }}
+@keyframes tjGrow {{ from {{ transform:scaleX(0); }} to {{ transform:scaleX(1); }} }}
+.tj-ses-axis {{ position:relative; height:16px; margin:2px 76px 0 90px; }}
+.tj-ses-axis span {{ position:absolute; font-size:10.5px; color:{t['muted']}; transform:translateX(-50%); top:2px; }}
+.tj-live-card.still, .tj-live-card.still .tj-ses-bar {{ animation:none !important; }}
+.tj-ses-over {{ position:absolute; top:0; bottom:16px; left:90px; right:76px; pointer-events:none; }}
+.tj-now {{ position:absolute; top:0; bottom:0; width:2px; margin-left:-1px; border-radius:1px; background:{t['text']};
+    left:var(--a); animation:tjNow 30s linear forwards; pointer-events:none; }}
+/* Accueil façon page web : héro centré, sections, pied de page */
+.tj-hero {{ text-align:center; padding:34px 0 8px; }}
+.tj-pill {{ display:inline-flex; align-items:center; gap:8px; font-size:12.5px; color:{t['muted']};
+    border:1px solid {hair}; background:{t['card']}; border-radius:999px; padding:5px 14px; animation:tjTile .6s {ease} both; }}
+.tj-hero-l {{ font-size:14px; color:{t['muted']}; margin-top:26px; animation:tjTile .6s .08s {ease} both; }}
+.tj-hero-v {{ font-family:'IBM Plex Mono',monospace; font-variant-numeric:tabular-nums; font-size:clamp(44px,7vw,84px);
+    line-height:1.02; letter-spacing:-.02em; margin-top:6px; animation:tjTile .7s .14s {ease} both; }}
+.tj-hero-m {{ display:flex; justify-content:center; flex-wrap:wrap; margin:28px auto 8px; max-width:760px;
+    border-top:1px solid {hair}; border-bottom:1px solid {hair}; animation:tjTile .7s .22s {ease} both; }}
+.tj-hero-m > div {{ flex:1 1 150px; padding:14px 10px; display:flex; flex-direction:column; gap:3px; }}
+.tj-hero-m > div + div {{ border-left:1px solid {hair}; }}
+.tj-hero-m b {{ font-size:18px; font-weight:500 !important; color:{t['text']}; font-variant-numeric:tabular-nums; }}
+.tj-hero-m span {{ font-size:12px; color:{t['muted']}; }}
+.st-key-home_hero {{ margin-bottom:40px; }}
+.tj-h2 {{ font-size:22px; font-weight:500; color:{t['text']}; margin:20px 0 4px; }}
+.tj-h2-sub {{ font-size:13.5px; color:{t['muted']}; margin-bottom:16px; }}
+.tj-foot {{ display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:46px; padding:18px 0 6px;
+    border-top:1px solid {hair}; font-size:12.5px; color:{t['muted']}; }}
+.tj-foot span {{ display:inline-flex; align-items:center; gap:8px; }}
+@media (max-width: 640px) {{ .tj-hero-m > div {{ flex-basis:45%; }} .tj-hero-m > div:nth-child(3) {{ border-left:none; }} }}
+{vivid}
+@media (max-width: 640px) {{
+  [class*="st-key-tile_"] {{ min-height:0 !important; }}
+  .tj-cap-l, .tj-cap-v, .tj-cap-s {{ text-align:left; }}
+}}
+@media (prefers-reduced-motion: reduce) {{
+  *, *::before, *::after {{ animation-duration:1ms !important; animation-delay:0ms !important; transition-duration:1ms !important; }}
+}}
+</style>"""
+
 
 def fx_css(t):
     """Couche visuelle des thèmes multicolores : fond en maillage de couleurs, cartes en relief
@@ -1035,10 +1241,10 @@ def force_reload():
 # ── INIT SESSION ────────────────────────────────────────────────────────────
 if "trades" not in st.session_state:
     st.session_state.trades = load_and_migrate()
-_VALID_PAGES = ("dashboard", "journal", "add", "import", "analyse", "calendar", "sessions", "captures", "users")
+_VALID_PAGES = ("home", "dashboard", "journal", "add", "import", "analyse", "calendar", "sessions", "captures", "users")
 if "page"        not in st.session_state:
-    _qp = st.query_params.get("p", "dashboard")
-    st.session_state.page = _qp if _qp in _VALID_PAGES and _qp not in ("add",) else "dashboard"
+    _qp = st.query_params.get("p", "home")
+    st.session_state.page = _qp if _qp in _VALID_PAGES and _qp not in ("add",) else "home"
 if "edit_id"     not in st.session_state: st.session_state.edit_id     = None
 if "theme_name"  not in st.session_state: st.session_state.theme_name  = DEFAULT_THEME
 if st.session_state.theme_name not in THEMES: st.session_state.theme_name = DEFAULT_THEME
@@ -2064,22 +2270,20 @@ if st.session_state.bg_name not in BACKGROUNDS:
     st.session_state.bg_name = DEFAULT_BG if DEFAULT_BG in BACKGROUNDS else "Aucun"
 st.markdown(background_css(get_theme(), st.session_state.bg_name), unsafe_allow_html=True)
 
-# ── EN-TÊTE MASQUABLE (panneau animé + navigation en onglets thémés) ─────────────
+# ── NAVIGATION : accueil façon application web, une barre de retour sur chaque page ──
 _thd = get_theme()
 df_side = get_df()
 total   = df_side["pnl"].sum() if not df_side.empty else 0
 wr      = (len(df_side[df_side["pnl"]>0])/len(df_side)*100) if not df_side.empty else 0
 col_pnl = _thd["win"] if total >= 0 else _thd["loss"]
-if "hdr_open" not in st.session_state:
-    st.session_state.hdr_open = True
 
 _NAV = [
-    ("dashboard", "Dashboard",  ":material/space_dashboard:"),
+    ("dashboard", "Tableau de bord", ":material/space_dashboard:"),
     ("journal",   "Journal",    ":material/table_rows:"),
 ]
 if is_admin():
     _NAV += [
-        ("add",     "Nouveau",    ":material/add_circle:"),
+        ("add",     "Nouveau trade", ":material/add_circle:"),
         ("import",  "Import MT5", ":material/upload_file:"),
     ]
 _NAV += [
@@ -2090,14 +2294,15 @@ _NAV += [
 ]
 if is_admin():
     _NAV += [("users", "Utilisateurs", ":material/manage_accounts:")]
+_NAV_LBL = {k: l for k, l, _ in _NAV}
 
-# Garde-fou : une page réservée admin demandée par un non-admin retombe sur dashboard
+# Garde-fou : une page réservée admin demandée par un non-admin retombe sur l'accueil
 if not is_admin() and st.session_state.page in ("add", "import", "users"):
-    st.session_state.page = "dashboard"
-if st.session_state.page not in [k for k, _, _ in _NAV]:
-    st.session_state.page = "dashboard"
+    st.session_state.page = "home"
+if st.session_state.page != "home" and st.session_state.page not in _NAV_LBL:
+    st.session_state.page = "home"
 
-# Comptes autorisés : nettoyage de la sélection, que le panneau soit ouvert ou non
+# Comptes autorisés : nettoyage de la sélection
 _allowed = allowed_accounts()
 if "mode_selection" not in st.session_state:
     st.session_state.mode_selection = [a for a in _allowed if a == DEFAULT_ACCOUNT]
@@ -2108,165 +2313,69 @@ if len(_allowed) <= 1:
 def _nav_go(k):
     st.session_state.page = k
     st.session_state.edit_id = None
+    st.session_state["_nav_n"] = st.session_state.get("_nav_n", 0) + 1
 
-def _hdr_toggle():
-    st.session_state.hdr_open = not st.session_state.hdr_open
+def _scroll_top():
+    """Chaque changement de page repart du haut, comme une vraie application."""
+    import streamlit.components.v1 as _cs
+    n = st.session_state.get("_nav_n", 0)
+    with st.container(key="tj_scroll"):
+        _cs.html(f"<script>/*{n}-{st.session_state.page}*/try{{var D=window.parent.document;"
+                 "['[data-testid=\"stMain\"]','[data-testid=\"stAppViewContainer\"]','section.main'].forEach(function(q){"
+                 "var e=D.querySelector(q);if(e&&e.scrollTo)e.scrollTo({top:0,behavior:'instant'});});"
+                 "window.parent.scrollTo(0,0);}catch(e){}</script>", height=0)
 
-def _render_nav(prefix):
-    for k, lbl, ic in _NAV:
-        st.button(lbl, key=f"{prefix}_{k}", icon=ic, on_click=_nav_go, args=(k,),
-                  type=("primary" if k == st.session_state.page else "secondary"))
+def _set_theme(n):
+    st.session_state.theme_name = n
 
 _t = _thd
-_nav_btn = '[class*="st-key-tjnav_"] button, [class*="st-key-tjmnav_"] button'
-_stagger = "".join(f".st-key-tj_nav > div:nth-child({i}){{animation-delay:{0.06 + i*0.035:.3f}s}}"
-                   for i in range(1, 13))
-st.markdown(f"""<style>
-@keyframes tjDrop {{ 0% {{opacity:0; transform:translateY(-18px) scale(.985); filter:blur(3px)}}
-                     100% {{opacity:1; transform:none; filter:none}} }}
-@keyframes tjRise {{ 0% {{opacity:0; transform:translateY(10px)}} 100% {{opacity:1; transform:none}} }}
-@keyframes tjSweep {{ 0% {{background-position:200% 0}} 100% {{background-position:0 0}} }}
-@keyframes tjPop {{ 0% {{opacity:0; transform:scale(.6)}} 100% {{opacity:1; transform:none}} }}
-.st-key-tj_hdr {{
-  position:relative; overflow:hidden; border-radius:30px 30px 30px 8px; padding:14px 18px 12px;
-  background:linear-gradient(145deg,{_t['card']},{_t['bg2']}); border:1px solid {_t['border']};
-  box-shadow:0 1px 2px rgba(0,0,0,.06), 0 14px 34px rgba(0,0,0,.10);
-  animation:tjDrop .55s cubic-bezier(.22,1,.36,1) both; }}
-.st-key-tj_hdr::before {{ content:""; position:absolute; top:0; left:0; right:0; height:3px;
-  background:linear-gradient(90deg,{_t['accent']},{_t['alt']},{_t['orange']},{_t['accent']});
-  background-size:200% 100%; animation:tjSweep 1.4s ease-out both; }}
-.st-key-tj_hdr_min {{
-  border-radius:14px; padding:6px 8px; background:{_t['card']}; border:1px solid {_t['border']};
-  box-shadow:0 6px 18px rgba(0,0,0,.07); animation:tjRise .35s cubic-bezier(.22,1,.36,1) both; }}
-/* Piste d'onglets segmentée */
-.st-key-tj_nav {{ background:{_t['bg2']}; border:1px solid {_t['border']}; border-radius:14px;
-  padding:5px; gap:4px !important; margin-top:4px; }}
-.st-key-tj_nav > div {{ animation:tjRise .45s cubic-bezier(.22,1,.36,1) both; }}
-{_stagger}
-{_nav_btn} {{
-  background:transparent !important; border:1px solid transparent !important; box-shadow:none !important;
-  color:{_t['muted']} !important; border-radius:10px !important; min-height:36px !important;
-  padding:5px 13px !important; font-weight:600 !important; transition:all .18s ease !important; }}
-{_nav_btn.replace(' button', ' button:hover')} {{
-  background:{_t['accent']}14 !important; border-color:{_t['accent']}33 !important;
-  color:{_t['text']} !important; transform:translateY(-1px); filter:none !important; }}
-[class*="st-key-tjnav_"] button[kind="primary"], [class*="st-key-tjmnav_"] button[kind="primary"] {{
-  background:linear-gradient(135deg,{_t['accent']},{_t['alt']}) !important; color:{_t['btn_text']} !important;
-  box-shadow:0 6px 16px {_t['accent']}40 !important; animation:tjPop .3s ease-out both; }}
-[class*="st-key-tjnav_"] button p, [class*="st-key-tjmnav_"] button p {{
-  font-size:13px !important; color:inherit !important; margin:0 !important; }}
-[class*="st-key-tjnav_"] button [data-testid="stIconMaterial"], [class*="st-key-tjmnav_"] button [data-testid="stIconMaterial"] {{
-  font-size:18px !important; color:inherit !important; }}
-[class*="st-key-tjnav_"] button[kind="primary"] *, [class*="st-key-tjmnav_"] button[kind="primary"] * {{
-  color:{_t['btn_text']} !important; }}
-div[class*="st-key-tjnav_"] .stButton > button:not([kind="primary"]),
-div[class*="st-key-tjmnav_"] .stButton > button:not([kind="primary"]) {{
-  background:transparent !important; box-shadow:none !important; text-shadow:none !important; }}
-div[class*="st-key-tjnav_"] .stButton > button:not([kind="primary"]) p,
-div[class*="st-key-tjnav_"] .stButton > button:not([kind="primary"]) [data-testid="stIconMaterial"],
-div[class*="st-key-tjmnav_"] .stButton > button:not([kind="primary"]) p,
-div[class*="st-key-tjmnav_"] .stButton > button:not([kind="primary"]) [data-testid="stIconMaterial"] {{
-  color:{_t['muted']} !important; }}
-div[class*="st-key-tjnav_"] .stButton > button:not([kind="primary"]):hover p,
-div[class*="st-key-tjnav_"] .stButton > button:not([kind="primary"]):hover [data-testid="stIconMaterial"] {{
-  color:{_t['text']} !important; }}
-/* Boutons d'action ronds (synchro, déconnexion, masquer/afficher) */
-.st-key-hdr_sync button, .st-key-hdr_logout button, .st-key-hdr_toggle button, .st-key-hdr_show button {{
-  background:{_t['bg2']} !important; color:{_t['muted']} !important; border:1px solid {_t['border']} !important;
-  box-shadow:none !important; border-radius:11px !important; min-height:38px !important; padding:4px 10px !important;
-  transition:all .18s ease !important; }}
-.st-key-hdr_sync button:hover, .st-key-hdr_logout button:hover, .st-key-hdr_toggle button:hover, .st-key-hdr_show button:hover {{
-  color:{_t['accent']} !important; border-color:{_t['accent']}66 !important; transform:translateY(-1px); }}
-.st-key-hdr_show button {{ background:linear-gradient(135deg,{_t['accent']},{_t['alt']}) !important;
-  color:{_t['btn_text']} !important; border:none !important; }}
-.st-key-hdr_show button * {{ color:{_t['btn_text']} !important; }}
-.st-key-tj_hdr_min [class*="st-key-tjmnav_"] button {{ padding:3px 9px !important; min-height:32px !important; }}
-.st-key-tj_hdr_min [class*="st-key-tjmnav_"] button p {{ font-size:12px !important; }}
-.st-key-tj_hdr_min [class*="st-key-tjmnav_"] button [data-testid="stIconMaterial"] {{ font-size:16px !important; }}
-.st-key-tj_hdr_min {{ gap:2px !important; }}
-.tj-cap {{ display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; padding:2px 2px 4px; animation:tjRise .5s .1s both; }}
-</style>""", unsafe_allow_html=True)
+_PG = st.session_state.page
+_scroll_top()
+st.markdown(calm_css(_t), unsafe_allow_html=True)      # couche sobre (skill unslop)
+st.markdown(app_css(_t, _PG), unsafe_allow_html=True)   # couche application : accueil, transitions
 
-st.markdown(calm_css(_t), unsafe_allow_html=True)      # couche finale : style sobre (skill unslop)
-_role_lbl = "Admin" if is_admin() else "Utilisateur"
-_brand = (f"<div style='display:flex;align-items:center;gap:10px'>"
-          + _logo_svg(_t['accent'], 18) +
-          f"<span style='line-height:1.2'><span style='font-size:15px;font-weight:600;color:{_t['text']}'>"
-          f"Trading Journal</span><br>"
-          f"<span style='font-size:11px;color:{_t['muted']}'>{st.session_state.get('auth_user','')} · {_role_lbl}</span>"
-          f"</span></div>")
+def _theme_buttons():
+    """Thèmes en pastilles : un clic applique le design, aucun nom affiché."""
+    with st.container(horizontal=True, key="tj_themes", gap="small", vertical_alignment="center"):
+        for i, n in enumerate(THEME_NAMES):
+            st.button(" ", key=f"thm_{i}", on_click=_set_theme, args=(n,))
 
-if st.session_state.hdr_open:
-    with st.container(key="tj_hdr"):
-        _r = st.columns([5.2, 0.4, 0.4, 0.4, 0.4], vertical_alignment="center", gap="small")
-        with _r[0]:
-            st.markdown(_brand, unsafe_allow_html=True)
-        with _r[1]:
-            with st.popover("", icon=":material/tune:", help="Réglages d'affichage : design, graphiques, fond",
-                            use_container_width=True):
-                st.markdown(f"<div style='font-size:14px;font-weight:500;color:{_t['text']};margin-bottom:8px'>Affichage</div>",
-                            unsafe_allow_html=True)
-                _sel_theme = st.selectbox("Design", THEME_NAMES,
-                    index=THEME_NAMES.index(st.session_state.theme_name)
-                          if st.session_state.theme_name in THEME_NAMES else 0,
-                    key="theme_selector", format_func=theme_label)
-                if _sel_theme != st.session_state.theme_name:
-                    st.session_state.theme_name = _sel_theme; st.rerun()
-                _cs_opts = ["Auto"] + CHART_STYLE_NAMES
-                _cur_cs = st.session_state.get("chart_style_override", "Auto")
-                _sel_cs = st.selectbox("Graphiques", _cs_opts,
-                    index=_cs_opts.index(_cur_cs) if _cur_cs in _cs_opts else 0,
-                    format_func=lambda x: ("Cotation (par défaut)" if x == "Auto" else x),
-                    key="chart_style_selector")
-                if _sel_cs != _cur_cs:
-                    st.session_state.chart_style_override = _sel_cs; st.rerun()
-                _sel_bg = st.selectbox("Fond", BG_NAMES,
-                    index=BG_NAMES.index(st.session_state.bg_name) if st.session_state.bg_name in BG_NAMES else 0,
-                    format_func=lambda n: "Aucun (uni)" if n == "Aucun" else n, key="bg_selector")
-                if _sel_bg != st.session_state.bg_name:
-                    st.session_state.bg_name = _sel_bg; st.rerun()
-        with _r[2]:
-            if st.button("", icon=":material/sync:", key="hdr_sync", help="Synchroniser", use_container_width=True):
+def _display_menu(themes=False):
+    """Réglages rarement utilisés (type de graphique, fond) : rangés derrière une icône."""
+    with st.popover("", icon=":material/tune:", help="Graphiques et fond d'écran"):
+        st.markdown(f"<div class='tj-pop-h'>Apparence</div>", unsafe_allow_html=True)
+        if themes:
+            _theme_buttons()
+        _cs_opts = ["Auto"] + CHART_STYLE_NAMES
+        _cur_cs = st.session_state.get("chart_style_override", "Auto")
+        _sel_cs = st.selectbox("Graphiques", _cs_opts,
+            index=_cs_opts.index(_cur_cs) if _cur_cs in _cs_opts else 0,
+            format_func=lambda x: ("Cotation (par défaut)" if x == "Auto" else x),
+            key="chart_style_selector")
+        if _sel_cs != _cur_cs:
+            st.session_state.chart_style_override = _sel_cs; st.rerun()
+        _sel_bg = st.selectbox("Fond", BG_NAMES,
+            index=BG_NAMES.index(st.session_state.bg_name) if st.session_state.bg_name in BG_NAMES else 0,
+            format_func=lambda n: "Aucun (uni)" if n == "Aucun" else n, key="bg_selector")
+        if _sel_bg != st.session_state.bg_name:
+            st.session_state.bg_name = _sel_bg; st.rerun()
+
+def _accounts_filter():
+    if len(_allowed) > 1:
+        check_filter("Comptes", _allowed, "mode_selection", "hacc", all_label="tous les comptes",
+                     icon=":material/account_balance_wallet:")
+
+if _PG != "home":
+    # Barre de page : retour à l'accueil, titre, comptes, réglages. Pas de panneau ni d'onglets.
+    with st.container(horizontal=True, key="tj_bar", gap="small", vertical_alignment="center"):
+        st.button("Accueil", key="go_home", icon=":material/arrow_back:", on_click=_nav_go, args=("home",),
+                  help="Revenir à l'accueil")
+        with st.container(horizontal=True, key="tj_bar_r", gap="small", vertical_alignment="center",
+                          horizontal_alignment="right"):
+            _accounts_filter()
+            _display_menu()
+            if st.button("", icon=":material/sync:", key="hdr_sync", help="Synchroniser"):
                 force_reload(); st.rerun()
-        with _r[3]:
-            if st.button("", icon=":material/logout:", key="hdr_logout", help="Déconnexion", use_container_width=True):
-                logout()
-        with _r[4]:
-            st.button("", icon=":material/keyboard_arrow_up:", key="hdr_toggle", help="Masquer le panneau",
-                      on_click=_hdr_toggle, use_container_width=True)
-        _c1, _c2 = st.columns([3, 2.2], vertical_alignment="center", gap="small")
-        with _c1:
-            st.markdown(
-                f"<div class='tj-cap'>"
-                f"<span style='font-size:13px;color:{_t['muted']}'>Capital · {selection_label()}</span>"
-                f"<span style='font-size:20px;font-weight:500;color:{col_pnl};font-family:IBM Plex Mono,monospace'>"
-                f"{fmt(total)}</span>"
-                f"<span style='font-size:11.5px;color:{_t['muted']}'>{len(df_side)} trades · {wr:.0f}% win</span></div>",
-                unsafe_allow_html=True)
-        with _c2:
-            if len(_allowed) <= 1:
-                st.markdown(f"<div style='font-size:12px;color:{_t['muted']}'>Compte : "
-                            f"<b style='color:{_t['text']}'>{(_allowed[0] if _allowed else '—')}</b></div>",
-                            unsafe_allow_html=True)
-            else:
-                check_filter("Comptes", _allowed, "mode_selection", "hacc", all_label="tous les comptes",
-                             icon=":material/account_balance_wallet:")
-        with st.container(horizontal=True, key="tj_nav", gap="small"):
-            _render_nav("tjnav")
-else:
-    with st.container(horizontal=True, key="tj_hdr_min", gap="small", vertical_alignment="center"):
-        st.markdown(
-            f"<span style='display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;"
-            f"border-radius:9px;background:linear-gradient(135deg,{_t['accent']},{_t['alt']})'>"
-            + _logo_svg(_t['btn_text'], 15) + "</span>",
-            unsafe_allow_html=True)
-        _render_nav("tjmnav")
-        st.markdown(f"<span style='font-size:13px;font-weight:800;color:{col_pnl};"
-                    f"font-family:IBM Plex Mono,monospace;padding:0 6px'>{fmt(total)}</span>",
-                    unsafe_allow_html=True)
-        st.button("", icon=":material/keyboard_arrow_down:", key="hdr_show", help="Afficher le panneau",
-                  on_click=_hdr_toggle)
-st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
 # ── CHRONOMÈTRE GLOBAL : prochaine annonce majeure, visible quelle que soit la page ──
 if "_alert_prefs" not in st.session_state:
@@ -3698,6 +3807,225 @@ def export_dialog():
     csv = xf.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
     st.download_button("Télécharger le fichier CSV", csv, file_name=f"trades_{stamp}.csv", mime="text/csv",
                        type="primary", icon=":material/download:", use_container_width=True)
+
+# ── ACCUEIL : lanceur d'application ───────────────────────────────────────────
+_ICONS = {
+    "dashboard": "<rect x='3' y='3' width='7' height='9' rx='1.5'/><rect x='14' y='3' width='7' height='5' rx='1.5'/><rect x='14' y='12' width='7' height='9' rx='1.5'/><rect x='3' y='16' width='7' height='5' rx='1.5'/>",
+    "journal":   "<path d='M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01'/>",
+    "add":       "<circle cx='12' cy='12' r='9'/><path d='M12 8v8M8 12h8'/>",
+    "import":    "<path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><path d='M17 8l-5-5-5 5'/><path d='M12 3v12'/>",
+    "analyse":   "<circle cx='12' cy='12' r='9'/><path d='M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18'/>",
+    "calendar":  "<rect x='3' y='4' width='18' height='17' rx='2'/><path d='M16 2.5v3M8 2.5v3M3 10h18'/>",
+    "sessions":  "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
+    "captures":  "<rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/>",
+    "users":     "<path d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/>",
+    "go":        "<path d='M7 17 17 7M8 7h9v9'/>",
+}
+def _svg(k):
+    return (f"<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' "
+            f"stroke-linecap='round' stroke-linejoin='round'>{_ICONS[k]}</svg>")
+
+_FR_DAYS   = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+_FR_MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
+              "septembre", "octobre", "novembre", "décembre"]
+_TZ_OFF = 1          # heure affichée : UTC+1 (Yaoundé)
+
+def _equity_svg(df, t):
+    if df.empty or len(df) < 2:
+        return "<div class='tj-t-desc' style='margin-top:30px'>La courbe apparaîtra après quelques trades.</div>"
+    d = df.sort_values("date")
+    ys = [0.0] + d["pnl"].cumsum().tolist()
+    if len(ys) > 240:                                   # léger, même avec des milliers de trades
+        step = len(ys) / 240
+        ys = [ys[int(i * step)] for i in range(240)] + [ys[-1]]
+    lo, hi = min(ys), max(ys); rng = (hi - lo) or 1.0; n = len(ys)
+    pts = [(i / (n - 1) * 100, 4 + (1 - (v - lo) / rng) * 70) for i, v in enumerate(ys)]
+    line = "M" + " L".join(f"{x:.2f},{y:.2f}" for x, y in pts)
+    col = t["win"] if ys[-1] >= 0 else t["loss"]
+    return (f"<svg class='tj-spark' viewBox='0 0 100 78' preserveAspectRatio='none' width='100%'>"
+            f"<path class='a' d='{line} L100,78 L0,78 Z' fill='{col}' fill-opacity='.09'/>"
+            f"<path class='l' d='{line}' fill='none' stroke='{col}' stroke-width='1.7' "
+            f"vector-effect='non-scaling-stroke'/></svg>")
+
+def _tile(k, name, desc, body="", compact=False):
+    with st.container(key=f"tile_{k}"):
+        n, ds = _html.escape(name), _html.escape(desc)
+        if compact:
+            h = (f"<div class='tj-row'><div class='tj-t-ic'>{_svg(k)}</div><div><div class='tj-t-name'>{n}</div>"
+                 f"<div class='tj-t-desc'>{ds}</div></div><div class='tj-t-go'>{_svg('go')}</div></div>")
+        else:
+            h = (f"<div class='tj-t-head'><div class='tj-t-ic'>{_svg(k)}</div><div class='tj-t-go'>{_svg('go')}</div></div>"
+                 f"<div class='tj-t-name'>{n}</div><div class='tj-t-desc'>{ds}</div>{body}")
+        st.markdown(h, unsafe_allow_html=True)
+        st.button(name, key=f"open_{k}", on_click=_nav_go, args=(k,))
+
+_SESSIONS = [("Sydney", 21, 6), ("Tokyo", 0, 9), ("Londres", 8, 17), ("New York", 13, 22)]
+
+def _in_session(h, a, b):
+    return (a <= h < b) if a < b else (h >= a or h < b)
+
+@st.fragment(run_every=30)
+def _home_live():
+    """Bandeau vivant : horloge, sessions de marché, prochaine annonce. Rafraîchi toutes les 30 s,
+    il garde la connexion avec le serveur active tant que l'accueil est ouvert."""
+    t = get_theme()
+    now = datetime.utcnow()
+    h = now.hour + now.minute / 60 + now.second / 3600
+    wd = now.weekday()
+    closed = wd == 5 or (wd == 6 and h < 21) or (wd == 4 and h >= 22)
+    loc = now + timedelta(hours=_TZ_OFF)
+    rows = []
+    for name, a, b in _SESSIONS:
+        segs = [(a, b)] if a < b else [(a, 24), (0, b)]
+        on = (not closed) and _in_session(h, a, b)
+        bars = "".join(f"<span class='tj-ses-bar{' on' if on else ''}' style='left:{s/24*100:.3f}%;"
+                       f"width:{(e-s)/24*100:.3f}%'></span>" for s, e in segs)
+        st_txt = "ouverte" if on else "fermée"
+        rows.append(f"<div class='tj-ses'><span class='tj-ses-n'>{name}</span><span class='tj-ses-t'>{bars}</span>"
+                    f"<span class='tj-ses-s{' on' if on else ''}'>{st_txt}</span></div>")
+    p0 = h / 24 * 100; p1 = min(100.0, (h + 30 / 3600) / 24 * 100)
+    marker = f"<span class='tj-now' style='--a:{p0:.4f}%;--b:{p1:.4f}%'></span>"
+    ticks = "".join(f"<span style='left:{(x - _TZ_OFF) % 24 / 24 * 100:.3f}%'>{x:02d}h</span>" for x in (0, 6, 12, 18))
+    # prochaine annonce majeure
+    nxt = ""
+    now_ms = int((now - datetime(1970, 1, 1)).total_seconds() * 1000)
+    g = next((g for g in (st.session_state.get("_cd_groups") or []) if g.get("t", 0) > now_ms), None)
+    if g:
+        mins = int((g["t"] - now_ms) / 60000)
+        when = f"dans {mins} min" if mins < 60 else (f"dans {mins // 60} h {mins % 60:02d}" if mins < 1440
+                                                       else f"dans {mins // 1440} j")
+        title = _html.escape(", ".join(g.get("titles", [])[:2]))
+        nxt = (f"<div class='tj-live-next'><span class='tj-live-k'>Prochaine annonce</span>"
+               f"<span class='tj-live-v'>{title}</span><span class='tj-live-k'>{when}</span></div>")
+    state = ("<span class='tj-live-k'>Marché des changes fermé · week-end</span>" if closed else
+             f"<span class='tj-live-k'>{sum(1 for _, a, b in _SESSIONS if _in_session(h, a, b))} session(s) ouverte(s)</span>")
+    still = "" if st.session_state.pop("_live_first", False) else " still"   # pas de ré-animation à chaque rafraîchissement
+    st.markdown(
+        f"<div class='tj-live-card{still}'><div class='tj-live-h'><span class='tj-live'></span>"
+        f"<span class='tj-clock'>{loc:%H:%M}</span><span class='tj-live-k'>UTC+1</span>{state}{nxt}</div>"
+        f"<div class='tj-ses-wrap'>{''.join(rows)}<div class='tj-ses-axis'>{ticks}</div>"
+        f"<div class='tj-ses-over'>{marker}</div></div></div>",
+        unsafe_allow_html=True)
+
+def render_home():
+    t = get_theme()
+    user = st.session_state.get("auth_user", "")
+    loc = datetime.utcnow() + timedelta(hours=_TZ_OFF)
+    today = f"{_FR_DAYS[loc.weekday()].capitalize()} {loc.day} {_FR_MONTHS[loc.month - 1]} {loc.year}"
+
+    with st.container(horizontal=True, key="home_top", vertical_alignment="center", gap="small"):
+        st.markdown(f"<div class='tj-home-top'><div class='tj-mark'>{_logo_svg(t['bg'], 18)}</div>"
+                    f"<div class='tj-brand'>Trading Journal<small>{_html.escape(user)} · "
+                    f"{'Admin' if is_admin() else 'Utilisateur'}</small></div></div>", unsafe_allow_html=True)
+        with st.container(horizontal=True, key="home_top_r", vertical_alignment="center", gap="small",
+                          horizontal_alignment="right"):
+            _theme_buttons()
+            _display_menu(themes=False)
+            if st.button("", icon=":material/sync:", key="hdr_sync", help="Synchroniser"):
+                force_reload(); st.rerun()
+            if st.button("", icon=":material/logout:", key="hdr_logout", help="Déconnexion"):
+                logout()
+
+    with st.container(key="home_hero"):
+        pf = ""
+        if not df_side.empty:
+            _gp = df_side.loc[df_side["pnl"] > 0, "pnl"].sum(); _gl = -df_side.loc[df_side["pnl"] < 0, "pnl"].sum()
+            pf = f"{_gp / _gl:.2f}" if _gl > 0 else "—"
+        best = "—"
+        if not df_side.empty:
+            _m = df_side.assign(_m=df_side["date"].astype(str).str[:7]).groupby("_m")["pnl"].sum()
+            if len(_m):
+                _bm = _m.idxmax(); best = f"{_FR_MONTHS[int(_bm[5:7]) - 1].capitalize()} {_bm[:4]}"
+        st.markdown(
+            f"<div class='tj-hero'>"
+            f"<div class='tj-pill'><span class='tj-live'></span>{today} · {_html.escape(selection_label())}</div>"
+            f"<div class='tj-hero-l'>Capital net</div>"
+            f"<div class='tj-hero-v' style='color:{col_pnl}'>{fmt(total)}</div>"
+            f"<div class='tj-hero-m'>"
+            f"<div><b>{len(df_side)}</b><span>trades</span></div>"
+            f"<div><b>{wr:.0f} %</b><span>taux de réussite</span></div>"
+            f"<div><b>{pf or '—'}</b><span>profit factor</span></div>"
+            f"<div><b>{best}</b><span>meilleur mois</span></div>"
+            f"</div></div>", unsafe_allow_html=True)
+        if len(_allowed) > 1:
+            _a, _b, _c = st.columns([1, 1, 1])
+            with _b:
+                _accounts_filter()
+
+    st.session_state["_live_first"] = True
+    _home_live()
+
+    st.markdown("<div class='tj-h2'>Espaces de travail</div>"
+                "<div class='tj-h2-sub'>Choisis un espace. Le bouton Accueil, en haut de chaque page, ramène ici.</div>",
+                unsafe_allow_html=True)
+    # Ligne 1 : tableau de bord (large, courbe de capital) + journal (derniers trades)
+    r1 = st.columns([2, 1], gap="medium")
+    with r1[0]:
+        pf_txt = ""
+        if not df_side.empty:
+            gp = df_side.loc[df_side["pnl"] > 0, "pnl"].sum(); gl = -df_side.loc[df_side["pnl"] < 0, "pnl"].sum()
+            pf_txt = f" · profit factor {gp / gl:.2f}" if gl > 0 else ""
+        _tile("dashboard", "Tableau de bord", "Performance, courbe de capital et discipline",
+              f"<div class='tj-t-stat'><b style='color:{col_pnl}'>{fmt(total)}</b>"
+              f"<span>{wr:.0f} % gagnants{pf_txt}</span></div>" + _equity_svg(df_side, t))
+    with r1[1]:
+        lst = ""
+        if not df_side.empty:
+            last = df_side.sort_values("date", ascending=False).head(4)
+            lst = "<div class='tj-list'>" + "".join(
+                f"<div><span>{_html.escape(str(r.get('symbol', '')))} · {_html.escape(str(r.get('date', ''))[5:])}</span>"
+                f"<span style='color:{t['win'] if r['pnl'] >= 0 else t['loss']}'>{fmt(r['pnl'])}</span></div>"
+                for _, r in last.iterrows()) + "</div>"
+        _tile("journal", "Journal", f"{len(df_side)} trades · recherche et export", lst)
+
+    # Ligne 2 : analyse, calendrier, sessions, captures
+    r2 = st.columns(4, gap="medium")
+    with r2[0]:
+        _tile("analyse", "Analyse & News", "Calendrier macro, biais de marché et surprises",
+              "<div class='tj-t-stat'><span class='tj-live'></span><span>Données mises à jour en continu</span></div>")
+    with r2[1]:
+        days = ""
+        if not df_side.empty:
+            dd = df_side.groupby("date")["pnl"].sum().sort_index().tail(20)
+            mx = max(1.0, dd.abs().max())
+            days = "<div class='tj-days'>" + "".join(
+                f"<i title='{d}: {fmt(v)}' style='background:{t['win'] if v >= 0 else t['loss']};"
+                f"opacity:{0.25 + 0.75 * abs(v) / mx:.2f};animation-delay:{300 + j * 25}ms'></i>"
+                for j, (d, v) in enumerate(dd.items())) + "</div>"
+            mpre = loc.strftime("%Y-%m")
+            mp = df_side.loc[df_side["date"].astype(str).str.startswith(mpre), "pnl"].sum()
+            days = (f"<div class='tj-t-stat'><b style='color:{t['win'] if mp >= 0 else t['loss']}'>{fmt(mp)}</b>"
+                    f"<span>ce mois-ci</span></div>") + days
+        _tile("calendar", "Calendrier", "P&L jour par jour", days)
+    with r2[2]:
+        _tile("sessions", "Sessions", "Résultats selon l'heure et la session de marché")
+    with r2[3]:
+        _tile("captures", "Captures", "Images, groupes et commentaires")
+
+    if is_admin():
+        st.markdown("<div class='tj-section' style='margin-top:18px'>Gestion</div>", unsafe_allow_html=True)
+        r3 = st.columns(3, gap="medium")
+        with r3[0]:
+            _tile("add", "Nouveau trade", "Saisir une position", compact=True)
+        with r3[1]:
+            _tile("import", "Import MT5", "Historique MetaTrader 5", compact=True)
+        with r3[2]:
+            _tile("users", "Utilisateurs", "Comptes et droits", compact=True)
+
+    st.markdown(f"<footer class='tj-foot'><span>{_logo_svg(t['muted'], 14)} Trading Journal</span>"
+                f"<span>Synchronisé à {loc:%H:%M} · UTC+1</span></footer>", unsafe_allow_html=True)
+
+@st.fragment(run_every=45)
+def _heartbeat():
+    """Signal discret sur les pages autres que l'accueil : la session reste active."""
+    st.markdown(f"<span data-hb='{int(datetime.utcnow().timestamp())}'></span>", unsafe_allow_html=True)
+
+if st.session_state.page == "home":
+    render_home()
+else:
+    with st.container(key="tj_hb"):
+        _heartbeat()
+
 
 if st.session_state.page == "dashboard":
     _tdb = get_theme()
