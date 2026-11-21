@@ -180,9 +180,19 @@ def _lum(hexc):
     h = hexc.lstrip("#"); r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return 0.299 * r + 0.587 * g + 0.114 * b
 
+# 3e design sans photo : fond partagé blanc | vert (aplats nets), surfaces blanches, texte noir
+NV_SPLIT = {
+    "bg":"#ffffff","bg2":"#f3f6f4","card":"#ffffff","border":"#dfe5e1",
+    "text":"#0a0a0a","muted":"#2f3833","accent":"#0a9a55","win":"#0a9a55",
+    "loss":"#d32f2f","alt":"#3d4540","orange":"#b8620a","sidebar":"#ffffff","btn_text":"#ffffff",
+    "raised":"#f1f4f2", "vivid":True, "split":"#1ed47c",
+}
+
 def get_theme():
     name = st.session_state.get("theme_name", DEFAULT_THEME)
     t = THEMES.get(name, THEMES[DEFAULT_THEME])
+    if name == "Noir Vert" and st.session_state.get("bg_name") == "Aucun":
+        return NV_SPLIT
     if t.get("multi"):
         m = t["multi"]; i = _PAGE_HUE.get(st.session_state.get("page", "dashboard"), 0) % len(m)
         t = dict(t)
@@ -552,8 +562,13 @@ def app_css(t, page):
     tiles = "".join(f".st-key-tile_{k}{{animation-delay:{80 + j*45}ms}}" for j, k in enumerate(
         ["dashboard", "journal", "analyse", "calendar", "sessions", "captures", "add", "import", "users"]))
     vivid = ""
+    if t.get("split"):   # deux aplats nets, sans dégradé : blanc puis vert en biais
+        vivid += (f".stApp{{background:linear-gradient(112deg,#ffffff 0 64%,{t['split']} 64% 100%) fixed !important}} "
+                  f".tj-hero-v, .tj-hero-l{{color:{t['text']} !important}} "
+                  f"[class*='st-key-tile_'], .kpi, [data-testid='stPlotlyChart'], div[data-testid='stExpander'] details"
+                  f"{{box-shadow:0 1px 2px rgba(0,0,0,.06)}} ")
     if t.get("vivid"):   # design noir · blanc · vert : le vert porte la marque, les icônes et l'heure
-        vivid = (f".tj-mark{{background:{t['accent']}}} .tj-mark svg{{stroke:{t['btn_text']}}} "
+        vivid += (f".tj-mark{{background:{t['accent']}}} .tj-mark svg{{stroke:{t['btn_text']}}} "
                  f".tj-t-ic{{background:{t['accent']}1f;border-color:{t['accent']}55;color:{t['accent']}}} "
                  f".tj-clock{{color:{t['accent']}}} .tj-now{{background:{t['accent']}}} "
                  f".tj-hero-l{{color:{t['accent']}}} .tj-pill{{border-color:{t['accent']}55}} "
@@ -562,6 +577,8 @@ def app_css(t, page):
                  f".stButton > button[kind='primary'] p, .stButton > button[kind='primary'] [data-testid='stMarkdownContainer'] p"
                  f"{{color:{t['btn_text']} !important}} "
                  f".stTabs [aria-selected='true'], [data-testid='stTab'][data-selected='true']{{color:{t['accent']} !important}}")
+    if t.get("split"):   # sur le damier, le texte posé à même le fond reste noir
+        vivid += f" .tj-hero-v, .tj-hero-l{{color:{t['text']} !important}}"
     return f"""<style>
 @keyframes tjPage_{pg} {{ from {{ opacity:0; transform:translateY(10px); }} to {{ opacity:1; transform:none; }} }}
 @keyframes tjTile {{ from {{ opacity:0; transform:translateY(16px) scale(.985); }} to {{ opacity:1; transform:none; }} }}
@@ -574,7 +591,7 @@ def app_css(t, page):
 [data-testid="stMainBlockContainer"] {{ padding-top:28px !important; max-width:1440px; }}
 
 /* Changement de page : le contenu entre en douceur, élément par élément */
-[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > :not(:has(.st-key-cd_sphere)):not(:has(.st-key-tj_watchdog)):not(:has(.st-key-tj_scroll)):not(.st-key-cd_sphere):not(.st-key-tj_watchdog) {{
+[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > :not(:has(.st-key-cd_sphere)):not(:has(.st-key-tj_watchdog)):not(:has(.st-key-tj_scroll)):not(:has(.st-key-go_home)):not(.st-key-cd_sphere):not(.st-key-tj_watchdog) {{
     animation:tjPage_{pg} .42s {ease} both; }}
 {stagger}
 
@@ -583,16 +600,20 @@ def app_css(t, page):
     transition:background-color .35s ease, border-color .35s ease, color .35s ease; }}
 
 /* Barre de page */
-.st-key-tj_bar {{ margin:-6px 0 0; padding:0 0 12px; border-bottom:1px solid {hair}; }}
-.st-key-tj_bar_r {{ flex:1 1 auto; }}
-.st-key-tj_bar_r > div {{ width:auto !important; flex:0 0 auto !important; }}
-.st-key-go_home button {{ background:transparent !important; border-color:transparent !important; padding:4px 10px 4px 6px !important;
-    min-height:34px !important; }}
-.st-key-go_home button:hover {{ background:{raised} !important; border-color:{hair} !important; }}
-.st-key-go_home button [data-testid="stIconMaterial"] {{ transition:transform .25s {ease}; }}
-.st-key-go_home button:hover [data-testid="stIconMaterial"] {{ transform:translateX(-3px); }}
-.st-key-go_home button p {{ color:{t['muted']} !important; font-size:13px !important; }}
-.st-key-go_home button:hover p {{ color:{t['text']} !important; }}
+.st-key-tj_bar {{ height:0; margin:0 !important; }}
+.st-key-go_home {{ position:fixed !important; top:18px; left:18px; z-index:999990; width:auto !important; }}
+.st-key-go_home button {{ min-height:44px !important; height:44px; min-width:44px; padding:0 13px !important; border-radius:22px !important;
+    background:{t['text']} !important; border:1px solid {t['text']} !important; gap:0 !important;
+    box-shadow:0 6px 18px -6px rgba(0,0,0,.45) !important; transition:padding .3s {ease}, transform .2s {ease} !important; }}
+.st-key-go_home .stButton > button [data-testid="stIconMaterial"], .st-key-go_home button [data-testid="stIconMaterial"] {{ color:{t['bg']} !important; font-size:20px !important; margin:0 !important;
+    transition:transform .3s {ease}; }}
+.st-key-go_home button [data-testid="stMarkdownContainer"] {{ max-width:0; opacity:0; overflow:hidden; white-space:nowrap;
+    transition:max-width .35s {ease}, opacity .25s ease, margin .35s {ease}; }}
+.st-key-go_home .stButton > button [data-testid="stMarkdownContainer"] p, .st-key-go_home button p {{ color:{t['bg']} !important; font-size:13.5px !important; font-weight:500 !important; }}
+.st-key-go_home button:hover {{ padding:0 16px 0 13px !important; }}
+.st-key-go_home button:hover [data-testid="stMarkdownContainer"] {{ max-width:90px; opacity:1; margin-left:8px; }}
+.st-key-go_home button:hover [data-testid="stIconMaterial"] {{ transform:translateX(-2px); }}
+.st-key-go_home button:active {{ transform:scale(.95) !important; }}
 .tj-bar-title {{ font-size:19px; font-weight:500; color:{t['text']}; padding-left:10px; margin-left:2px;
     border-left:1px solid {hair}; line-height:1.2; white-space:nowrap; }}
 .st-key-hdr_sync button, .st-key-hdr_logout button {{ background:{raised} !important; border:1px solid {hair} !important;
@@ -712,6 +733,7 @@ def app_css(t, page):
 .tj-hero-m b {{ font-size:18px; font-weight:500 !important; color:{t['text']}; font-variant-numeric:tabular-nums; }}
 .tj-hero-m span {{ font-size:12px; color:{t['muted']}; }}
 .st-key-home_hero {{ margin-bottom:40px; }}
+.st-key-home_hero [data-testid="stHorizontalBlock"] {{ margin-top:18px; }}
 .tj-h2 {{ font-size:22px; font-weight:500; color:{t['text']}; margin:20px 0 4px; }}
 .tj-h2-sub {{ font-size:13.5px; color:{t['muted']}; margin-bottom:16px; }}
 .tj-foot {{ display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:46px; padding:18px 0 6px;
@@ -2367,15 +2389,8 @@ def _accounts_filter():
 
 if _PG != "home":
     # Barre de page : retour à l'accueil, titre, comptes, réglages. Pas de panneau ni d'onglets.
-    with st.container(horizontal=True, key="tj_bar", gap="small", vertical_alignment="center"):
-        st.button("Accueil", key="go_home", icon=":material/arrow_back:", on_click=_nav_go, args=("home",),
-                  help="Revenir à l'accueil")
-        with st.container(horizontal=True, key="tj_bar_r", gap="small", vertical_alignment="center",
-                          horizontal_alignment="right"):
-            _accounts_filter()
-            _display_menu()
-            if st.button("", icon=":material/sync:", key="hdr_sync", help="Synchroniser"):
-                force_reload(); st.rerun()
+    with st.container(key="tj_bar"):
+        st.button("Accueil", key="go_home", icon=":material/arrow_back:", on_click=_nav_go, args=("home",))
 
 # ── CHRONOMÈTRE GLOBAL : prochaine annonce majeure, visible quelle que soit la page ──
 if "_alert_prefs" not in st.session_state:
@@ -3941,19 +3956,12 @@ def render_home():
             f"<div class='tj-pill'><span class='tj-live'></span>{today} · {_html.escape(selection_label())}</div>"
             f"<div class='tj-hero-l'>Capital net</div>"
             f"<div class='tj-hero-v' style='color:{col_pnl}'>{fmt(total)}</div>"
-            f"<div class='tj-hero-m'>"
-            f"<div><b>{len(df_side)}</b><span>trades</span></div>"
-            f"<div><b>{wr:.0f} %</b><span>taux de réussite</span></div>"
-            f"<div><b>{pf or '—'}</b><span>profit factor</span></div>"
-            f"<div><b>{best}</b><span>meilleur mois</span></div>"
-            f"</div></div>", unsafe_allow_html=True)
+            f"</div>", unsafe_allow_html=True)
         if len(_allowed) > 1:
             _a, _b, _c = st.columns([1, 1, 1])
             with _b:
                 _accounts_filter()
 
-    st.session_state["_live_first"] = True
-    _home_live()
 
     st.markdown("<div class='tj-h2'>Espaces de travail</div>"
                 "<div class='tj-h2-sub'>Choisis un espace. Le bouton Accueil, en haut de chaque page, ramène ici.</div>",
@@ -4022,9 +4030,8 @@ def _heartbeat():
 
 if st.session_state.page == "home":
     render_home()
-else:
-    with st.container(key="tj_hb"):
-        _heartbeat()
+with st.container(key="tj_hb"):      # battement discret sur toutes les pages : la session reste active
+    _heartbeat()
 
 
 if st.session_state.page == "dashboard":
