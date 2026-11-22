@@ -2319,8 +2319,79 @@ def _connection_watchdog():
              + json.dumps(code) + ";window.parent.document.head.appendChild(s);}catch(e){" + code + "}</script>",
              height=0)
 
+
+def _paste_support():
+    """Ctrl+V : une image du presse-papiers est déposée dans la zone d'import de captures visible
+    (Captures ou Journal). Si la zone est repliée, elle est ouverte d'abord."""
+    import streamlit.components.v1 as _cp
+    code = r"""
+(function(){
+  var W = window.parent, D = W.document;
+  if (W.__tjPaste) return; W.__tjPaste = true;
+  function toast(msg){
+    var t = D.createElement('div'); t.textContent = msg;
+    t.style.cssText = 'position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(10px);z-index:999999;'
+      + 'background:#111;color:#fff;font:500 13px IBM Plex Sans,system-ui,sans-serif;padding:9px 16px;border-radius:10px;'
+      + 'box-shadow:0 10px 30px rgba(0,0,0,.35);opacity:0;transition:all .25s ease';
+    D.body.appendChild(t);
+    requestAnimationFrame(function(){ t.style.opacity = 1; t.style.transform = 'translateX(-50%)'; });
+    setTimeout(function(){ t.style.opacity = 0; setTimeout(function(){ t.remove(); }, 300); }, 2200);
+  }
+  function visible(el){ var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; }
+  function target(){
+    var ins = Array.prototype.slice.call(D.querySelectorAll('[data-testid="stFileUploader"] input[type=file]'))
+      .filter(function(i){ var a = (i.getAttribute('accept') || '').toLowerCase();
+        return a.indexOf('png') >= 0 || a.indexOf('image') >= 0; });
+    var vis = ins.filter(function(i){ return visible(i.closest('[data-testid="stFileUploader"]')); });
+    if (!vis.length) return null;
+    var cy = W.innerHeight / 2;           // la zone la plus proche du centre de l'écran
+    vis.sort(function(a, b){
+      var ra = a.closest('[data-testid="stFileUploader"]').getBoundingClientRect(),
+          rb = b.closest('[data-testid="stFileUploader"]').getBoundingClientRect();
+      return Math.abs(ra.top - cy) - Math.abs(rb.top - cy); });
+    return vis[0];
+  }
+  function drop(input, files){
+    var dt = new DataTransfer();
+    files.forEach(function(f){ dt.items.add(f); });
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', {bubbles: true}));
+    toast(files.length > 1 ? files.length + ' captures collées' : 'Capture collée');
+  }
+  D.addEventListener('paste', function(e){
+    var items = (e.clipboardData && e.clipboardData.items) || [];
+    var files = [];
+    for (var i = 0; i < items.length; i++){
+      if (items[i].kind === 'file' && items[i].type.indexOf('image/') === 0){
+        var f = items[i].getAsFile(); if (!f) continue;
+        var ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+        var d = new Date(), p = function(n){ return (n < 10 ? '0' : '') + n; };
+        var nm = 'capture_' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours())
+                 + p(d.getMinutes()) + p(d.getSeconds()) + (files.length ? '_' + files.length : '') + '.' + ext;
+        files.push(new File([f], nm, {type: f.type}));
+      }
+    }
+    if (!files.length) return;
+    var tag = (e.target && e.target.tagName) || '';
+    e.preventDefault();
+    var inp = target();
+    if (inp) { drop(inp, files); return; }
+    var sums = Array.prototype.slice.call(D.querySelectorAll('[data-testid="stExpander"] summary'))
+      .filter(function(s){ return /Importer des images|captures/i.test(s.textContent || ''); });
+    if (sums.length) {
+      sums[0].click();
+      setTimeout(function(){ var i2 = target(); if (i2) drop(i2, files); else toast("Ouvre la zone d'import puis recolle"); }, 450);
+    } else {
+      toast("Pas de zone d'import de captures sur cette page");
+    }
+  }, true);
+})();"""
+    _cp.html("<script>try{var s=window.parent.document.createElement('script');s.textContent="
+             + json.dumps(code) + ";window.parent.document.head.appendChild(s);}catch(e){}</script>", height=0)
+
 with st.container(key="tj_watchdog"):
     _connection_watchdog()
+    _paste_support()
 st.markdown("<style>.st-key-tj_watchdog{position:fixed!important;left:-10000px;width:1px;height:1px;overflow:hidden}</style>",
             unsafe_allow_html=True)
 
@@ -6185,6 +6256,7 @@ elif st.session_state.page == "journal":
 
                 # Captures d'écran du trade sélectionné
                 st.markdown("##### Captures d'écran du setup")
+                st.caption("Ctrl+V colle directement une capture du presse-papiers ici.")
                 _sid = str(sel_id)
                 _shots = shots_state()
                 _cur = _shots.get(_sid, [])
@@ -9127,7 +9199,8 @@ elif st.session_state.page == "captures":
 
         # ── Import : commentaire de groupe + commentaire par image ──
         _nup = st.session_state.get("_free_up_n", 0)
-        with st.expander("Importer des images", expanded=not _vis, icon=":material/add_photo_alternate:"):
+        with st.expander("Importer des images", expanded=not _vis):
+            st.caption("Glisse des fichiers, clique pour parcourir, ou colle une capture avec Ctrl+V (Cmd+V sur Mac).")
             _ups = st.file_uploader("Images (PNG, JPG, WEBP)", type=["png", "jpg", "jpeg", "webp"],
                                     accept_multiple_files=True, key=f"free_up_{_nup}", label_visibility="collapsed")
             if _ups:
