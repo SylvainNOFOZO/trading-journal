@@ -1432,6 +1432,10 @@ def alert_prefs_set(user, prefs):
     return kv_save("alert_prefs", allp)
 
 
+def scope_accounts():
+    """Comptes retenus à l'accueil : le seul périmètre sur lequel portent tous les onglets et tous les filtres."""
+    return _resolve_scope(None)
+
 def _resolve_scope(sel):
     """Normalise sel (str 'Tous'/compte, liste de comptes, ou None) en liste
     de comptes effectivement affichés, toujours restreinte aux droits."""
@@ -1583,10 +1587,14 @@ def get_df(mode_filter=None):
         return pd.DataFrame()                      # lecteur ou utilisateur sans compte : aucun trade
     if allowed:
         df = df[df["trade_mode"].isin(allowed)]
-    # Filtrer sur les comptes sélectionnés (un, plusieurs, ou tous)
-    scope = _resolve_scope(mode_filter)
-    if scope and set(scope) != set(allowed):
-        df = df[df["trade_mode"].isin(scope)]
+    # Périmètre global : uniquement les comptes cochés à l'accueil (rien de coché = tous les comptes autorisés).
+    # Aucun onglet, aucune recherche ne peut en sortir ; un filtre local ne peut que restreindre davantage.
+    home = scope_accounts()
+    df = df[df["trade_mode"].isin(home)]
+    if mode_filter not in (None, "Tous"):
+        loc = [m for m in ([mode_filter] if isinstance(mode_filter, str) else list(mode_filter)) if m in home]
+        if loc:
+            df = df[df["trade_mode"].isin(loc)]
     return df
 
 
@@ -3814,8 +3822,13 @@ def trade_filters(prefix, df_all):
         f_from, f_to = period_filter("Période", d_min, d_max, f"{prefix}per")
         f_sym = check_filter("Actifs", sorted(df_all["symbol"].dropna().astype(str).unique().tolist()),
                              f"{prefix}_sym", f"{prefix}fs", icon=":material/candlestick_chart:")
-        f_mode = check_filter("Comptes", allowed_accounts(), f"{prefix}_mode", f"{prefix}fm",
-                              icon=":material/account_balance_wallet:")
+        _scope_opts = scope_accounts()
+        if len(_scope_opts) > 1:              # sous-filtre limité aux comptes retenus à l'accueil
+            f_mode = check_filter("Comptes", _scope_opts, f"{prefix}_mode", f"{prefix}fm",
+                                  icon=":material/account_balance_wallet:")
+            f_mode = [m for m in (f_mode or []) if m in _scope_opts]
+        else:
+            f_mode = []
         f_dir = check_filter("Direction", ["LONG", "SHORT"], f"{prefix}_dir", f"{prefix}fd", icon=":material/swap_vert:")
         f_strat = check_filter("Stratégies", sorted(df_all["strategy"].dropna().astype(str).unique().tolist())
                                if "strategy" in df_all.columns else [], f"{prefix}_strat", f"{prefix}fst",
@@ -5994,8 +6007,9 @@ elif st.session_state.page == "journal":
         st.markdown(
             f"<div style='display:flex;align-items:baseline;gap:12px'>"
             f"<span style='font-size:22px;font-weight:800;color:{_tj['text']}'>Journal des Trades</span>"
-            f"<span style='font-size:12px;color:{_tj['muted']}'>{_n_all:,} trades enregistrés · comptes autorisés</span></div>"
-            .replace(",", " "), unsafe_allow_html=True)
+            f"<span style='font-size:12px;color:{_tj['muted']}'>{_n_all:,} trades · "
+            f"{_html.escape(selection_label())} (compte(s) retenu(s) à l'accueil)</span></div>"
+            .replace(",", " ", 1), unsafe_allow_html=True)
     with _jh2:
         if st.button("Exporter", icon=":material/download:", key="jr_export_open", use_container_width=True,
                      disabled=df_all.empty):
@@ -6118,7 +6132,9 @@ elif st.session_state.page == "journal":
                 st.caption("Comptes actuels : " + " · ".join(f"{k} {v}" for k, v in _from.items()))
                 m1, m2 = st.columns([2, 1], vertical_alignment="bottom")
                 with m1:
-                    _to = st.selectbox("Basculer vers le compte", TRADE_MODES, key="jq_mv_to")
+                    _to = st.selectbox("Basculer vers le compte (tous les comptes, même non cochés à l'accueil)",
+                                       TRADE_MODES, key="jq_mv_to",
+                                       format_func=lambda a: a + ("" if a in scope_accounts() else " · non coché à l'accueil"))
                 _n_mv = int((_mv_df["trade_mode"].fillna(DEFAULT_ACCOUNT) != _to).sum())
                 _ok_mv = st.checkbox(f"Je confirme : {_n_mv} trade(s) passeront sur « {_to} »", key="jq_mv_ok",
                                      disabled=_n_mv == 0)
@@ -6134,8 +6150,8 @@ elif st.session_state.page == "journal":
                         st.session_state["_jq_msg"] = (f"{_n_mv} trade(s) basculé(s) vers « {_to} »."
                                                        + ("" if _okc else " (sauvegarde locale, vérifie la connexion)"))
                         st.rerun()
-                if not set(TRADE_MODES).issubset(set(allowed_accounts())):
-                    st.caption("Les trades basculés vers un compte que tu ne vois pas disparaîtront de tes résultats.")
+                if _to not in scope_accounts():
+                    st.caption(f"« {_to} » n'est pas coché à l'accueil : les trades basculés quitteront les résultats affichés.")
             with tab1:
                 _cap = df.head(500)
                 labels_one = [f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel Indépendant')}  ·  "
@@ -9297,7 +9313,7 @@ elif st.session_state.page == "captures":
                       if is_admin() else "Consultation limitée à vos comptes."))
 
         _shots = shots_state()
-        _allowed = allowed_accounts()
+        _allowed = scope_accounts()          # comptes retenus à l'accueil uniquement
         # Index des trades par id
         _by_id = {str(t["id"]): t for t in st.session_state.trades}
 
