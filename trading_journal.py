@@ -113,7 +113,7 @@ THEME_NAMES = ["Graphite", "Papier", "Noir Vert"]
 DEFAULT_THEME = "Graphite"         # design par défaut
 LOGIN_THEME   = "Graphite"         # design de la page de connexion
 DEFAULT_ACCOUNT = "Réel Indépendant"   # compte affiché à l'ouverture de l'app
-DEFAULT_BG      = "Bitcoin"            # fond d'écran par défaut
+DEFAULT_BG      = "Aucun"              # fond d'écran par défaut : aucun (uni)
 
 # ── FONDS D'ÉCRAN (photos libres de droits, licence Unsplash) ─────────────────
 # Rempli avec des photos dont la licence gratuite a été vérifiée. "Aucun" = pas d'image.
@@ -592,6 +592,20 @@ def app_css(t, page):
 .stApp button[data-variant="pills"] p, .stApp button[data-variant="pills"] span {{ color:{t['text']} !important; }}
 .stApp button[data-variant="pills"]:hover {{ border-color:{t['muted']} !important; }}
 .stApp button[data-variant="pills"][data-selected="true"] {{ background:{t['accent']}1f !important; border-color:{t['accent']} !important; }}
+/* Zone de saisie du chat : fond et texte du thème */
+[data-testid="stChatInput"], [data-testid="stChatInput"] > div, [data-testid="stChatInput"] [data-baseweb="textarea"],
+[data-testid="stChatInput"] [data-baseweb="base-input"] {{ background:{raised} !important; border-color:{hair} !important; }}
+[data-testid="stChatInput"] {{ border:1px solid {hair} !important; border-radius:14px !important; }}
+[data-testid="stChatInput"]:focus-within {{ border-color:{t['accent']} !important; }}
+[data-testid="stChatInput"] textarea {{ background:transparent !important; color:{t['text']} !important;
+    -webkit-text-fill-color:{t['text']} !important; caret-color:{t['accent']} !important; font-size:14.5px !important; }}
+[data-testid="stChatInput"] textarea::placeholder {{ color:{t['muted']} !important; -webkit-text-fill-color:{t['muted']} !important; opacity:1; }}
+[data-testid="stChatInput"] button {{ background:{t['accent']} !important; border-radius:10px !important; }}
+[data-testid="stChatInput"] button svg {{ color:{t['btn_text']} !important; fill:{t['btn_text']} !important; }}
+[data-testid="stChatInput"] button:disabled {{ background:{hair} !important; }}
+[data-testid="stChatMessage"] {{ background:transparent !important; }}
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {{ background:{raised} !important; border:1px solid {hair}; border-radius:12px; }}
+[data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li {{ color:{t['text']} !important; }}
 /* Plus de panneau latéral */
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {{ display:none !important; }}
 [data-testid="stMainBlockContainer"] {{ padding-top:28px !important; max-width:1440px; }}
