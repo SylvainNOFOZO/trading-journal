@@ -560,7 +560,7 @@ def app_css(t, page):
         f'[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > :nth-child({i}){{animation-delay:{(i-1)*28}ms}}'
         for i in range(1, 11))
     tiles = "".join(f".st-key-tile_{k}{{animation-delay:{80 + j*45}ms}}" for j, k in enumerate(
-        ["dashboard", "journal", "analyse", "calendar", "sessions", "captures", "add", "import", "users"]))
+        ["dashboard", "journal", "veille", "analyse", "calendar", "sessions", "captures", "add", "import", "users"]))
     vivid = ""
     if t.get("split"):   # deux aplats nets, sans dégradé : blanc puis vert en biais
         vivid += (f".stApp{{background:linear-gradient(112deg,#ffffff 0 64%,{t['split']} 64% 100%) fixed !important}} "
@@ -586,6 +586,12 @@ def app_css(t, page):
 @keyframes tjFade {{ from {{ opacity:0; }} to {{ opacity:1; }} }}
 @keyframes tjPulse {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:.35; }} }}
 
+/* Pastilles de sélection (st.pills) lisibles dans tous les thèmes */
+.stApp button[data-variant="pills"] {{ background:{raised} !important; border:1px solid {hair} !important;
+    color:{t['text']} !important; border-radius:999px !important; transition:border-color .2s ease, background-color .2s ease !important; }}
+.stApp button[data-variant="pills"] p, .stApp button[data-variant="pills"] span {{ color:{t['text']} !important; }}
+.stApp button[data-variant="pills"]:hover {{ border-color:{t['muted']} !important; }}
+.stApp button[data-variant="pills"][data-selected="true"] {{ background:{t['accent']}1f !important; border-color:{t['accent']} !important; }}
 /* Plus de panneau latéral */
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {{ display:none !important; }}
 [data-testid="stMainBlockContainer"] {{ padding-top:28px !important; max-width:1440px; }}
@@ -666,7 +672,7 @@ def app_css(t, page):
 [class*="st-key-tile_"] [class*="st-key-open_"] .stButton, [class*="st-key-tile_"] [class*="st-key-open_"] button {{
     width:100% !important; height:100% !important; opacity:0 !important; cursor:pointer; border-radius:16px !important; }}
 .st-key-tile_dashboard, .st-key-tile_journal {{ min-height:268px; }}
-.st-key-tile_add, .st-key-tile_import, .st-key-tile_users {{ min-height:0; padding:16px 18px; }}
+.st-key-tile_add, .st-key-tile_import, .st-key-tile_users, .st-key-tile_sessions, .st-key-tile_captures {{ min-height:0; padding:16px 18px; }}
 .tj-t-head {{ display:flex; align-items:flex-start; justify-content:space-between; }}
 .tj-t-ic {{ width:40px; height:40px; border-radius:12px; display:grid; place-items:center; background:{raised};
     border:1px solid {hair}; color:{t['text']}; transition:background-color .3s ease, color .3s ease, transform .45s {ease}; }}
@@ -1263,7 +1269,7 @@ def force_reload():
 # ── INIT SESSION ────────────────────────────────────────────────────────────
 if "trades" not in st.session_state:
     st.session_state.trades = load_and_migrate()
-_VALID_PAGES = ("home", "dashboard", "journal", "add", "import", "analyse", "calendar", "sessions", "captures", "users")
+_VALID_PAGES = ("home", "dashboard", "journal", "add", "import", "analyse", "veille", "calendar", "sessions", "captures", "users")
 if "page"        not in st.session_state:
     _qp = st.query_params.get("p", "home")
     st.session_state.page = _qp if _qp in _VALID_PAGES and _qp not in ("add",) else "home"
@@ -2310,6 +2316,7 @@ if is_admin():
     ]
 _NAV += [
     ("analyse",   "Analyse & News", ":material/newspaper:"),
+    ("veille",    "Veille", ":material/radar:"),
     ("calendar",  "Calendrier", ":material/calendar_month:"),
     ("sessions",  "Sessions", ":material/schedule:"),
     ("captures",  "Captures", ":material/image:"),
@@ -3833,6 +3840,7 @@ _ICONS = {
     "calendar":  "<rect x='3' y='4' width='18' height='17' rx='2'/><path d='M16 2.5v3M8 2.5v3M3 10h18'/>",
     "sessions":  "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
     "captures":  "<rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/>",
+    "veille":    "<circle cx='12' cy='12' r='9'/><circle cx='12' cy='12' r='4.5'/><path d='M12 12l6.5-6.5'/>",
     "users":     "<path d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/>",
     "go":        "<path d='M7 17 17 7M8 7h9v9'/>",
 }
@@ -3986,12 +3994,18 @@ def render_home():
                 for _, r in last.iterrows()) + "</div>"
         _tile("journal", "Journal", f"{len(df_side)} trades · recherche et export", lst)
 
-    # Ligne 2 : analyse, calendrier, sessions, captures
-    r2 = st.columns(4, gap="medium")
+    # Ligne 2 : veille (large), analyse, calendrier
+    r2 = st.columns([1.4, 1, 1], gap="medium")
     with r2[0]:
+        _n48 = len(rag_recent(48)) if rag_sync(background=True)["docs"] else 0
+        _ai_ok = ai_allowed()
+        _tile("veille", "Veille", "Synthèse macro automatique et assistant IA connecté à RAG Finance",
+              f"<div class='tj-t-stat'><b>{_n48}</b><span>articles en 48 h</span>"
+              f"<span>· chat IA {'disponible' if _ai_ok else 'non activé'}</span></div>")
+    with r2[1]:
         _tile("analyse", "Analyse & News", "Calendrier macro, biais de marché et surprises",
               "<div class='tj-t-stat'><span class='tj-live'></span><span>Données mises à jour en continu</span></div>")
-    with r2[1]:
+    with r2[2]:
         days = ""
         if not df_side.empty:
             dd = df_side.groupby("date")["pnl"].sum().sort_index().tail(20)
@@ -4005,10 +4019,11 @@ def render_home():
             days = (f"<div class='tj-t-stat'><b style='color:{t['win'] if mp >= 0 else t['loss']}'>{fmt(mp)}</b>"
                     f"<span>ce mois-ci</span></div>") + days
         _tile("calendar", "Calendrier", "P&L jour par jour", days)
-    with r2[2]:
-        _tile("sessions", "Sessions", "Résultats selon l'heure et la session de marché")
-    with r2[3]:
-        _tile("captures", "Captures", "Images, groupes et commentaires")
+    r2b = st.columns(2, gap="medium")
+    with r2b[0]:
+        _tile("sessions", "Sessions", "Résultats selon l'heure et la session de marché", compact=True)
+    with r2b[1]:
+        _tile("captures", "Captures", "Images, groupes et commentaires", compact=True)
 
     if is_admin():
         st.markdown("<div class='tj-section' style='margin-top:18px'>Gestion</div>", unsafe_allow_html=True)
@@ -4027,6 +4042,509 @@ def render_home():
 def _heartbeat():
     """Signal discret sur les pages autres que l'accueil : la session reste active."""
     st.markdown(f"<span data-hb='{int(datetime.utcnow().timestamp())}'></span>", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VEILLE : base documentaire RAG Finance (connexion vivante), synthèse macro, chat IA OpenRouter
+# ══════════════════════════════════════════════════════════════════════════════
+import re as _re_v
+
+def _secret(name, default=""):
+    v = os.environ.get(name, "")
+    if v:
+        return v
+    try:
+        return st.secrets.get(name, default)
+    except Exception:
+        return default
+
+def _rag_conn():
+    """Table rag_documents de RAG Finance Hub. Projet Supabase dédié (RAG_SUPABASE_URL / RAG_SUPABASE_KEY)
+    ou, à défaut, le même projet que le journal."""
+    url = _secret("RAG_SUPABASE_URL") or _sb_url
+    key = _secret("RAG_SUPABASE_KEY") or _sb_key
+    if not url or not key or not str(url).startswith("https://"):
+        return None, None
+    return f"{str(url).rstrip('/')}/rest/v1/rag_documents", {"apikey": key, "Authorization": f"Bearer {key}"}
+
+_RAG_STOP = set("""le la les un une des du de d l et en à au aux pour par sur dans avec sans ce ces cette son sa ses leur leurs
+qui que quoi dont où est sont été être a ont avait plus moins pas ne se s y il elle ils elles on nous vous je tu
+the a an and or of to in on at for by with from as is are was were be been it its this that these those than then
+but not no into over after before about will would can could has have had they their there what which who how
+selon après avant entre comme mais aussi très tout tous toute toutes fait faire peut encore depuis lors cours""".split())
+
+def _rag_tok(txt):
+    return [w for w in _re_v.findall(r"[a-zà-ÿ0-9]{3,}", str(txt).lower()) if w not in _RAG_STOP]
+
+@st.cache_resource(show_spinner=False)
+def _rag_store():
+    import threading
+    return {"docs": {}, "checked": 0.0, "max_scraped": "", "lock": threading.Lock(), "err": "", "idx": None, "ver": 0, "running": False}
+
+RAG_REFRESH_S = 300      # nouvelle lecture de la base toutes les 5 minutes
+RAG_KEEP = 1500          # documents gardés en mémoire (les plus récents)
+
+def _rag_fetch(s, force=False):
+    import time as _t
+    ep, hdr = _rag_conn()
+    params = [("select", "id,domain,title,content,url,source,published,scraped_at,lang"),
+              ("order", "scraped_at.desc"), ("limit", "800" if (force or not s["docs"]) else "400")]
+    if s["max_scraped"] and not force:
+        params.append(("scraped_at", f"gt.{s['max_scraped']}"))
+    try:
+        r = requests.get(ep, headers=hdr, params=params, timeout=25)
+        if r.status_code == 200:
+            rows = r.json() or []
+            with s["lock"]:
+                for d in rows:
+                    d["content"] = str(d.get("content") or "")[:2500]
+                    s["docs"][d.get("id") or d.get("url")] = d
+                if rows:
+                    s["max_scraped"] = max([s["max_scraped"]] + [str(d.get("scraped_at") or "") for d in rows])
+                if len(s["docs"]) > RAG_KEEP:
+                    keep = sorted(s["docs"].values(), key=lambda d: str(d.get("scraped_at") or ""), reverse=True)[:RAG_KEEP]
+                    s["docs"] = {(d.get("id") or d.get("url")): d for d in keep}
+                if rows:
+                    s["idx"] = None; s["ver"] += 1
+            s["err"] = ""
+        else:
+            s["err"] = f"HTTP {r.status_code}"
+    except Exception as e:
+        s["err"] = type(e).__name__
+    s["checked"] = _t.time(); s["running"] = False
+
+def rag_sync(force=False, background=False):
+    """Connexion dynamique à RAG Finance Hub : premier chargement des documents récents, puis toutes les
+    5 minutes seulement les nouveaux (scraped_at plus récent que le dernier vu). La base évolue, l'app suit.
+    Une fois la base en mémoire, les lectures suivantes se font en arrière-plan sans bloquer la page."""
+    import time as _t, threading
+    s = _rag_store()
+    if _rag_conn()[0] is None:
+        s["err"] = "non configurée"
+        return s
+    due = force or (_t.time() - s["checked"] >= RAG_REFRESH_S)
+    if not due or s.get("running"):
+        return s
+    s["running"] = True
+    if (s["docs"] and not force) or background:
+        threading.Thread(target=_rag_fetch, args=(s, force), daemon=True).start()
+    else:
+        _rag_fetch(s, force)
+    return s
+
+def _rag_index():
+    """Index BM25 en mémoire, reconstruit quand de nouveaux documents arrivent."""
+    from collections import Counter
+    import math
+    s = rag_sync()
+    if s["idx"] is not None:
+        return s["idx"]
+    with s["lock"]:
+        docs = list(s["docs"].values())
+    toks = [Counter(_rag_tok(f"{d.get('title','')} {d.get('title','')} {d.get('content','')}")) for d in docs]
+    df = Counter()
+    for c in toks:
+        df.update(c.keys())
+    n = max(1, len(docs)); avg = (sum(sum(c.values()) for c in toks) / n) if docs else 1.0
+    idf = {w: math.log(1 + (n - k + 0.5) / (k + 0.5)) for w, k in df.items()}
+    s["idx"] = {"docs": docs, "toks": toks, "idf": idf, "avg": avg or 1.0}
+    return s["idx"]
+
+def rag_search(query, k=6):
+    ix = _rag_index()
+    q = _rag_tok(query)
+    if not q or not ix["docs"]:
+        return []
+    k1, b = 1.4, 0.75
+    out = []
+    for d, c in zip(ix["docs"], ix["toks"]):
+        L = sum(c.values()) or 1
+        sc = 0.0
+        for w in q:
+            f = c.get(w)
+            if f:
+                sc += ix["idf"].get(w, 0) * f * (k1 + 1) / (f + k1 * (1 - b + b * L / ix["avg"]))
+        if sc > 0:
+            out.append((sc, d))
+    out.sort(key=lambda x: -x[0])
+    return [d for _, d in out[:k]]
+
+def rag_recent(hours=48):
+    s = rag_sync()
+    lim = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    with s["lock"]:
+        _all = list(s["docs"].values())
+    docs = [d for d in _all if str(d.get("published") or d.get("scraped_at") or "")[:19] >= lim[:19]]
+    return sorted(docs, key=lambda d: str(d.get("published") or d.get("scraped_at") or ""), reverse=True)
+
+
+# ── Instantané macro (mêmes calculs que Analyse & News) ─────────────────────────
+def veille_macro():
+    mx = macro_get()
+    try:
+        ev3 = mx_events_frame(_fetch_calendar("all")[0])
+    except Exception:
+        ev3 = pd.DataFrame()
+    try:
+        evr = mx_events_frame(mx["rates"])
+    except Exception:
+        evr = pd.DataFrame()
+    ev = (pd.concat([x for x in (ev3, evr) if not x.empty]).drop_duplicates(subset=["title", "country", "date"])
+          if (not ev3.empty or not evr.empty) else pd.DataFrame())
+    pol = mx_policy(mx, evr); fed = mx_fed_pricing(mx); stance = mx_stance(pol, ev, fed)
+    reg_sc, reg_lab, reg_comps = mx_risk_regime(mx)
+    strength = mx_strength(mx)
+    surp = {c: mx_surprise_index(ev, c) for c in MX_CCYS}
+    comp = {}
+    for c in MX_CCYS:
+        st_sc = stance.get(c, (None,))[0]; su = surp.get(c, (None, 0))[0]; fs = None
+        if not strength.empty and "1 mois" in strength.columns:
+            v = strength.loc[c, "1 mois"]
+            if v is not None and not pd.isna(v):
+                fs = float(np.tanh(v / 1.5) * 100)
+        parts = [(x, w) for x, w in ((st_sc, 0.45), (su, 0.30), (fs, 0.25)) if x is not None]
+        comp[c] = (sum(x * w for x, w in parts) / sum(w for _, w in parts)) if parts else None
+    now = datetime.utcnow()
+    upcoming, recent = pd.DataFrame(), pd.DataFrame()
+    if not ev3.empty:
+        upcoming = ev3[(ev3["dt"] >= now) & (ev3["dt"] <= now + timedelta(hours=72)) & (ev3["impact"] == "High")].sort_values("dt")
+        recent = ev3[(ev3["dt"] <= now) & (ev3["dt"] >= now - timedelta(hours=72)) & ev3["zs"].notna()].sort_values("dt", ascending=False)
+    def last(sk, yk=None):
+        s = mx["yahoo"].get(yk) if yk else None
+        if s is None and sk:
+            s = mx["fred"].get(sk)
+        if s is None or len(s) < 2:
+            return None, None
+        return float(s.iloc[-1]), float(s.iloc[-1] - s.iloc[-6]) if len(s) > 6 else None
+    return {"regime": (reg_sc, reg_lab, reg_comps), "stance": stance, "surp": surp, "comp": comp, "pol": pol,
+            "strength": strength, "upcoming": upcoming, "recent": recent, "loading": mx["loading"],
+            "vix": last("VIXCLS", "^VIX"), "dxy": last("DTWEXBGS", "DX-Y.NYB"), "curve": last("T10Y2Y")}
+
+def _pair_bias(sym, comp):
+    s = str(sym).upper().replace("/", "")
+    if len(s) >= 6 and s[:3] in comp and s[3:6] in comp and comp[s[:3]] is not None and comp[s[3:6]] is not None:
+        return s[:3] + s[3:6], comp[s[:3]] - comp[s[3:6]]
+    return None, None
+
+def veille_auto_text(snap, df):
+    """Synthèse rédigée à partir des chiffres : chaque phrase s'appuie sur une donnée de l'app."""
+    out = []
+    sc, lab, comps = snap["regime"]
+    if sc is not None:
+        drv = sorted(comps, key=lambda c: -abs(c[1]))[:2]
+        dtx = " et ".join(f"{n.lower()} ({'soutient' if z > 0 else 'pèse'})" for n, z, _ in drv)
+        tone = {"Risk-On": "l'appétit pour le risque domine", "Risk-Off": "les marchés sont en mode défensif",
+                "Neutre": "le sentiment est partagé"}[lab]
+        out.append(("Contexte", f"Régime {lab} ({sc:+.0f}) : {tone}. Principaux moteurs : {dtx}."))
+    vix, dxy = snap["vix"], snap["dxy"]
+    bits = []
+    if vix[0] is not None:
+        bits.append(f"VIX à {vix[0]:.1f}" + ("" if vix[1] is None else f" ({vix[1]:+.1f} sur 5 séances)")
+                    + (", volatilité élevée" if vix[0] >= 25 else (", volatilité basse" if vix[0] <= 14 else "")))
+    if dxy[0] is not None and dxy[1] is not None:
+        bits.append(f"dollar {'en hausse' if dxy[1] > 0 else 'en baisse'} sur la semaine")
+    if snap["curve"][0] is not None:
+        bits.append(f"courbe 10 ans - 2 ans à {snap['curve'][0]*100:+.0f} pb"
+                    + (" (inversée)" if snap["curve"][0] < 0 else ""))
+    if bits:
+        out.append(("Baromètres", "; ".join(bits).capitalize() + "."))
+    comp = {c: v for c, v in snap["comp"].items() if v is not None}
+    if len(comp) >= 2:
+        rk = sorted(comp, key=lambda c: -comp[c])
+        hi, lo = rk[0], rk[-1]
+        hk = [c for c, (s_, l_, _) in snap["stance"].items() if l_ == "Hawkish"]
+        dv = [c for c, (s_, l_, _) in snap["stance"].items() if l_ == "Dovish"]
+        txt = (f"Devise la plus soutenue : {hi} ({comp[hi]:+.0f}), la plus fragile : {lo} ({comp[lo]:+.0f}). "
+               f"Paire où les fondamentaux divergent le plus : {hi}/{lo}.")
+        if hk: txt += f" Banques centrales restrictives : {', '.join(hk)}."
+        if dv: txt += f" Accommodantes : {', '.join(dv)}."
+        out.append(("Devises", txt))
+    rc = snap["recent"]
+    if rc is not None and not rc.empty:
+        big = rc[rc["z"].abs() >= 1.0].head(5)
+        if len(big):
+            lines = []
+            for _, r in big.iterrows():
+                sens = "au-dessus" if r["z"] > 0 else "en dessous"
+                eff = "favorable" if r["zs"] > 0 else "défavorable"
+                lines.append(f"{r['country']} {r['title']} {sens} du consensus ({r['z']:+.1f}σ), {eff} à la devise")
+            out.append(("Publications des 72 dernières heures", " ; ".join(lines) + "."))
+        else:
+            out.append(("Publications des 72 dernières heures", "Pas de surprise marquante : les chiffres sont proches du consensus."))
+    up = snap["upcoming"]
+    if up is not None and not up.empty:
+        lines = [f"{_fmt_local(r['date'])[0]} {r['country']} {r['title']}"
+                 + (f" (consensus {r['forecast']})" if str(r.get('forecast') or '').strip() not in ('', 'nan') else "")
+                 for _, r in up.head(6).iterrows()]
+        out.append(("À surveiller (72 h, fort impact)", " ; ".join(lines) + "."))
+    if df is not None and not df.empty:
+        top = df.assign(_d=pd.to_datetime(df["date"], errors="coerce"))
+        top = top[top["_d"] >= top["_d"].max() - pd.Timedelta(days=30)]["symbol"].value_counts().head(4).index.tolist()
+        lines = []
+        for sym in top:
+            pr, b = _pair_bias(sym, snap["comp"])
+            if pr:
+                orient = "haussiers" if b >= 15 else ("baissiers" if b <= -15 else "neutres")
+                lines.append(f"{sym} : fondamentaux {orient} ({b:+.0f})")
+        if lines:
+            out.append(("Vos instruments du mois", " ; ".join(lines) + ". Écart de biais base moins cotation, à confirmer par la technique."))
+    return out
+
+
+# ── Synthèse IA : accès, modèles OpenRouter, contexte, actions ──────────────────
+def ai_access_map():
+    if "_ai_access" not in st.session_state:
+        v = kv_load("ai_access", {})
+        st.session_state["_ai_access"] = v if isinstance(v, dict) else {}
+    return st.session_state["_ai_access"]
+
+def ai_allowed(user=None):
+    if is_admin():
+        return True
+    user = user or st.session_state.get("auth_user", "")
+    return bool(kv_load("ai_access", {}).get(user))      # relu à chaque fois : un retrait d'accès est immédiat
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def or_models():
+    try:
+        r = requests.get("https://openrouter.ai/api/v1/models", timeout=20)
+        if r.status_code != 200:
+            return []
+        out = []
+        for m in r.json().get("data", []):
+            p = m.get("pricing") or {}
+            try:
+                pin, pout = float(p.get("prompt") or 0), float(p.get("completion") or 0)
+            except Exception:
+                pin, pout = 0.0, 0.0
+            free = (pin == 0 and pout == 0) or str(m.get("id", "")).endswith(":free")
+            out.append({"id": m.get("id"), "name": m.get("name") or m.get("id"), "free": free,
+                        "pin": pin * 1e6, "pout": pout * 1e6, "ctx": m.get("context_length") or 0})
+        return sorted(out, key=lambda x: (not x["free"], x["name"].lower()))
+    except Exception:
+        return []
+
+def ai_memory_get(user):
+    v = kv_load(f"ai_mem_{user}", [])
+    return v if isinstance(v, list) else []
+
+def ai_context(question, sources):
+    """Mémoire de travail de l'IA : journal, macro, actualités RAG pertinentes, notes mémorisées."""
+    parts = []
+    user = st.session_state.get("auth_user", "")
+    mem = ai_memory_get(user)
+    if mem:
+        parts.append("MÉMOIRE (faits retenus) :\n" + "\n".join(f"- {m.get('text','')}" for m in mem[-25:]))
+    if "Journal" in sources:
+        df = get_df()
+        if df.empty:
+            parts.append("JOURNAL : aucun trade.")
+        else:
+            gp = df.loc[df["pnl"] > 0, "pnl"].sum(); gl = -df.loc[df["pnl"] < 0, "pnl"].sum()
+            hdr = (f"JOURNAL ({selection_label()}) : {len(df)} trades du {df['date'].min()} au {df['date'].max()}, "
+                   f"P&L net {df['pnl'].sum():.2f} $, réussite {(df['pnl'] > 0).mean()*100:.0f} %, "
+                   f"profit factor {gp/gl:.2f}" if gl > 0 else f"JOURNAL : {len(df)} trades, P&L {df['pnl'].sum():.2f} $")
+            g = df.groupby("symbol")["pnl"].agg(["count", "sum", lambda x: (x > 0).mean() * 100]).sort_values("count", ascending=False).head(10)
+            sy = "; ".join(f"{i} {int(r['count'])} trades {r['sum']:+.0f} $ {r.iloc[2]:.0f} %" for i, r in g.iterrows())
+            st_ = ""
+            if "strategy" in df.columns:
+                g2 = df.groupby("strategy")["pnl"].agg(["count", "sum"]).sort_values("count", ascending=False).head(6)
+                st_ = "; ".join(f"{i or '—'} {int(r['count'])} trades {r['sum']:+.0f} $" for i, r in g2.iterrows())
+            m = df.assign(_m=df["date"].astype(str).str[:7]).groupby("_m")["pnl"].sum().tail(6)
+            mo = "; ".join(f"{k} {v:+.0f} $" for k, v in m.items())
+            cols = [c for c in ("id", "date", "time", "symbol", "direction", "trade_mode", "pnl", "strategy", "mood", "notes") if c in df.columns]
+            syms = [s for s in df["symbol"].astype(str).unique() if s and s.lower() in question.lower()]
+            sel = df[df["symbol"].isin(syms)] if syms else df
+            last = sel.sort_values(["date"] + (["time"] if "time" in sel.columns else []), ascending=False).head(25 if syms else 15)
+            rows = "\n".join(" | ".join(str(r[c])[:70] if c == "notes" else str(r[c]) for c in cols) for _, r in last.iterrows())
+            parts.append(f"{hdr}\nPar symbole : {sy}\nPar stratégie : {st_}\nP&L mensuel : {mo}\n"
+                         f"Trades récents{(' sur ' + ', '.join(syms)) if syms else ''} ({' | '.join(cols)}) :\n{rows}")
+    if "Macro" in sources:
+        try:
+            snap = veille_macro()
+            parts.append("MACRO (moteur de l'app) :\n" + "\n".join(f"{t} : {x}" for t, x in veille_auto_text(snap, None)))
+            parts.append("Biais par devise (-100 à +100) : " + ", ".join(
+                f"{c} {v:+.0f}" for c, v in snap["comp"].items() if v is not None))
+        except Exception:
+            pass
+    if "Actualités" in sources:
+        docs = rag_search(question, k=6)
+        if not docs:
+            docs = rag_recent(24)[:5]
+        if docs:
+            parts.append("ACTUALITÉS (RAG Finance Hub) :\n" + "\n\n".join(
+                f"[{i+1}] {d.get('source','')} · {str(d.get('published') or '')[:10]} · {d.get('title','')}\n"
+                f"{str(d.get('content',''))[:900]}\nURL : {d.get('url','')}" for i, d in enumerate(docs)))
+    return "\n\n".join(parts)
+
+AI_SYSTEM = """Tu es l'assistant du Trading Journal de l'utilisateur : analyste marchés, macro et coach de trading.
+Réponds en français, de façon précise et structurée. Appuie-toi d'abord sur le CONTEXTE ci-dessous (journal,
+moteur macro de l'app, actualités RAG). Cite les actualités par leur numéro [1], [2] et donne l'URL en fin de réponse.
+Si une information manque, dis-le au lieu de l'inventer. Pas de conseil d'investissement personnalisé présenté comme
+certain : présente des scénarios et des niveaux de confiance.
+
+ACTIONS DANS L'APP. Tu peux proposer des actions ; l'utilisateur les valide d'un clic. Ajoute chaque action à la fin,
+dans un bloc ```action contenant un seul objet JSON. Types disponibles :
+- {"type":"filter_trades","symbol":"EURUSD","date_from":"2026-10-01","date_to":"2026-10-31","result":"win|loss","limit":50}
+- {"type":"update_trade","id":123,"fields":{"notes":"...","strategy":"...","mood":"Neutre"}}   (mood parmi : MOODS)
+- {"type":"append_note","id":123,"text":"..."}
+- {"type":"add_trade","date":"2026-11-20","time":"14:30","symbol":"EURUSD","direction":"Buy|Sell","pnl":12.5,
+   "entry":1.08,"exit":1.085,"sl":0,"tp":0,"strategy":"","mood":"Neutre","notes":"","trade_mode":"ACCOUNT"}
+- {"type":"delete_trade","id":123}
+- {"type":"remember","text":"fait durable à retenir sur l'utilisateur ou sa méthode"}
+- {"type":"open_page","page":"dashboard|journal|analyse|calendar|sessions|captures|veille"}
+N'utilise que des id présents dans le contexte. Ne propose une action que si elle est utile ou demandée."""
+
+def _ai_messages(history, question, ctx):
+    sys = AI_SYSTEM.replace("MOODS", ", ".join(MOODS)).replace("ACCOUNT", DEFAULT_ACCOUNT)
+    sys += f"\n\nDate du jour : {datetime.utcnow():%Y-%m-%d %H:%M} UTC.\n\n=== CONTEXTE ===\n{ctx}"
+    msgs = [{"role": "system", "content": sys}]
+    for h in history[-12:]:
+        msgs.append({"role": h["role"], "content": h["content"]})
+    msgs.append({"role": "user", "content": question})
+    return msgs
+
+def or_stream(model, messages):
+    key = _secret("OPENROUTER_API_KEY")
+    if not key:
+        yield "La clé OpenRouter n'est pas configurée : ajoute OPENROUTER_API_KEY dans les secrets Streamlit."
+        return
+    try:
+        r = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                          headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                                   "HTTP-Referer": "https://trading-journal.streamlit.app", "X-Title": "Trading Journal"},
+                          json={"model": model, "messages": messages, "stream": True, "temperature": 0.3},
+                          stream=True, timeout=(15, 180))
+        if r.status_code != 200:
+            try:
+                msg = r.json().get("error", {}).get("message", r.text[:300])
+            except Exception:
+                msg = r.text[:300]
+            yield f"Erreur OpenRouter ({r.status_code}) : {msg}"
+            return
+        r.encoding = "utf-8"
+        for line in r.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                j = json.loads(data)
+            except Exception:
+                continue
+            if j.get("error"):
+                yield f"\n\nErreur du modèle : {j['error'].get('message', '')}"
+                break
+            delta = ((j.get("choices") or [{}])[0].get("delta") or {}).get("content")
+            if delta:
+                yield delta
+    except Exception as e:
+        yield f"\n\nConnexion à OpenRouter interrompue ({type(e).__name__})."
+
+_AI_ACT_RX = _re_v.compile(r"```action\s*(\{.*?\})\s*```", _re_v.S)
+
+def ai_split_actions(text):
+    acts = []
+    for m in _AI_ACT_RX.finditer(text or ""):
+        try:
+            a = json.loads(m.group(1))
+            if isinstance(a, dict) and a.get("type"):
+                acts.append(a)
+        except Exception:
+            pass
+    return _AI_ACT_RX.sub("", text or "").strip(), acts
+
+_AI_WRITE = {"update_trade", "append_note", "add_trade", "delete_trade"}
+_AI_FIELDS = {"notes", "strategy", "mood", "sl", "tp", "entry", "exit", "pnl", "symbol", "direction", "date", "time", "trade_mode"}
+
+def ai_describe(a):
+    t = a.get("type")
+    if t == "filter_trades":
+        f = ", ".join(f"{k} {v}" for k, v in a.items() if k != "type")
+        return f"Afficher les trades ({f or 'tous'})"
+    if t == "update_trade":
+        return f"Modifier le trade {a.get('id')} : " + ", ".join(f"{k} = {str(v)[:60]}" for k, v in (a.get("fields") or {}).items())
+    if t == "append_note":
+        return f"Ajouter une note au trade {a.get('id')} : {str(a.get('text',''))[:120]}"
+    if t == "add_trade":
+        return f"Ajouter un trade : {a.get('date')} {a.get('symbol')} {a.get('direction')} {a.get('pnl')} $"
+    if t == "delete_trade":
+        return f"Supprimer le trade {a.get('id')}"
+    if t == "remember":
+        return f"Mémoriser : {a.get('text','')}"
+    if t == "open_page":
+        return f"Ouvrir la page {a.get('page')}"
+    return json.dumps(a, ensure_ascii=False)
+
+def ai_filter(a):
+    df = get_df()
+    if df.empty:
+        return df
+    if a.get("symbol"):
+        df = df[df["symbol"].astype(str).str.upper().str.contains(str(a["symbol"]).upper().replace("/", ""), regex=False)]
+    if a.get("date_from"):
+        df = df[df["date"].astype(str) >= str(a["date_from"])]
+    if a.get("date_to"):
+        df = df[df["date"].astype(str) <= str(a["date_to"])]
+    if a.get("result") == "win":
+        df = df[df["pnl"] > 0]
+    elif a.get("result") == "loss":
+        df = df[df["pnl"] < 0]
+    cols = [c for c in ("id", "date", "time", "symbol", "direction", "trade_mode", "pnl", "strategy", "mood", "notes") if c in df.columns]
+    return df.sort_values("date", ascending=False)[cols].head(int(a.get("limit") or 50))
+
+def ai_apply(a):
+    """Exécute une action validée par l'utilisateur. Écritures réservées à l'admin."""
+    t = a.get("type")
+    user = st.session_state.get("auth_user", "")
+    if t in _AI_WRITE and not is_admin():
+        return False, "Action réservée à l'administrateur."
+    trades = st.session_state.trades
+    def _find(i):
+        try:
+            i = int(i)
+        except Exception:
+            return None
+        return next((x for x in trades if x.get("id") == i), None)
+    if t == "update_trade":
+        tr = _find(a.get("id"))
+        if not tr: return False, "Trade introuvable."
+        for k, v in (a.get("fields") or {}).items():
+            if k in _AI_FIELDS:
+                tr[k] = v
+        ok = cloud_save(trades); return True, "Trade modifié." + ("" if ok else " (sauvegarde locale)")
+    if t == "append_note":
+        tr = _find(a.get("id"))
+        if not tr: return False, "Trade introuvable."
+        tr["notes"] = (str(tr.get("notes") or "").rstrip() + ("\n" if tr.get("notes") else "") + str(a.get("text", ""))).strip()
+        ok = cloud_save(trades); return True, "Note ajoutée." + ("" if ok else " (sauvegarde locale)")
+    if t == "add_trade":
+        try:
+            nt = {"id": int(datetime.now().timestamp() * 1000), "date": str(a["date"]), "time": str(a.get("time") or "00:00"),
+                  "symbol": str(a["symbol"]).upper(), "direction": a.get("direction", "Buy"),
+                  "trade_mode": a.get("trade_mode") if a.get("trade_mode") in TRADE_MODES else DEFAULT_ACCOUNT,
+                  "entry": float(a.get("entry") or 0), "exit": float(a.get("exit") or 0), "sl": float(a.get("sl") or 0),
+                  "tp": float(a.get("tp") or 0), "pnl": float(a.get("pnl") or 0), "strategy": a.get("strategy", ""),
+                  "mood": a.get("mood") if a.get("mood") in MOODS else "Neutre", "notes": a.get("notes", "")}
+            nt["datetime"] = f"{nt['date']}T{nt['time']}"
+        except Exception:
+            return False, "Champs du trade incomplets (date, symbole, P&L)."
+        trades.append(nt); ok = cloud_save(trades)
+        return True, f"Trade ajouté (id {nt['id']})." + ("" if ok else " (sauvegarde locale)")
+    if t == "delete_trade":
+        tr = _find(a.get("id"))
+        if not tr: return False, "Trade introuvable."
+        st.session_state.trades = [x for x in trades if x is not tr]
+        ok = cloud_save(st.session_state.trades); return True, "Trade supprimé." + ("" if ok else " (sauvegarde locale)")
+    if t == "remember":
+        mem = ai_memory_get(user)
+        mem.append({"text": str(a.get("text", ""))[:400], "ts": datetime.utcnow().isoformat(timespec="seconds")})
+        kv_save(f"ai_mem_{user}", mem[-60:]); return True, "Mémorisé."
+    if t == "open_page":
+        if a.get("page") in _VALID_PAGES and a.get("page") != "add":
+            _nav_go(a["page"]); return True, "page"
+        return False, "Page inconnue."
+    return False, "Action non reconnue."
 
 if st.session_state.page == "home":
     render_home()
@@ -7538,6 +8056,207 @@ elif st.session_state.page == "calendar":
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE : UTILISATEURS (ADMIN) — comptes, permissions, capital de départ
 # ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE : VEILLE (synthèse automatique + synthèse IA)
+# ══════════════════════════════════════════════════════════════════════════════
+elif st.session_state.page == "veille":
+    _tv = get_theme()
+    st.markdown(f"<div style='display:flex;align-items:baseline;gap:12px;flex-wrap:wrap'><h1 style='margin:0'>Veille</h1>"
+                f"<span style='font-size:13px;color:{_tv['muted']}'>macro, actualités RAG Finance et assistant IA</span></div>",
+                unsafe_allow_html=True)
+    st.markdown(f"""<style>
+.tj-vcard {{ background:{_tv['card']}; border:1px solid {_tv['border']}; border-radius:12px; padding:14px 18px; margin-bottom:10px; }}
+.tj-vcard h4 {{ font-size:13px !important; color:{_tv['muted']} !important; margin:0 0 6px !important; font-weight:500 !important; }}
+.tj-vcard p {{ font-size:14px; color:{_tv['text']}; margin:0; line-height:1.55; }}
+.tj-news a {{ color:{_tv['text']}; text-decoration:none; }} .tj-news a:hover {{ color:{_tv['accent']}; }}
+.tj-news div {{ padding:8px 0; border-top:1px solid {_tv['border']}; font-size:13.5px; }}
+.tj-news small {{ color:{_tv['muted']}; font-size:12px; }}
+.tj-kw {{ display:inline-block; font-size:12px; color:{_tv['text']}; background:{_tv.get('raised', _tv['bg2'])};
+    border:1px solid {_tv['border']}; border-radius:6px; padding:2px 8px; margin:0 6px 6px 0; }}
+</style>""", unsafe_allow_html=True)
+    tab_auto, tab_ai = st.tabs(["Synthèse automatique", "Synthèse IA"])
+
+    # ── SYNTHÈSE AUTOMATIQUE ─────────────────────────────────────────────────
+    with tab_auto:
+        _snap = veille_macro()
+        if _snap["loading"]:
+            st.caption("Données macro en cours de chargement en arrière-plan : la synthèse se complète toute seule.")
+        cA, cB = st.columns([1.25, 1], gap="large")
+        with cA:
+            st.markdown("#### Lecture macro")
+            secs = veille_auto_text(_snap, get_df())
+            if not secs:
+                st.caption("Pas encore assez de données macro pour rédiger la synthèse.")
+            for t_, x_ in secs:
+                st.markdown(f"<div class='tj-vcard'><h4>{_html.escape(t_)}</h4><p>{_html.escape(x_)}</p></div>",
+                            unsafe_allow_html=True)
+        with cB:
+            st.markdown("#### Actualités · RAG Finance")
+            _rs = rag_sync()
+            import time as _tm
+            if _rs["err"] == "non configurée":
+                st.info("Base RAG Finance non reliée. Ajoute RAG_SUPABASE_URL et RAG_SUPABASE_KEY dans les secrets "
+                        "Streamlit (projet Supabase de RAG Finance Hub). Sans eux, l'app essaie le projet du journal.")
+            else:
+                _age = int((_tm.time() - _rs["checked"]) / 60) if _rs["checked"] else None
+                _c1, _c2 = st.columns([3, 1], vertical_alignment="center")
+                with _c1:
+                    st.caption(f"{len(_rs['docs'])} documents en mémoire · lu il y a {_age if _age is not None else '—'} min · "
+                               f"nouvelle lecture toutes les {RAG_REFRESH_S // 60} min"
+                               + (f" · erreur : {_rs['err']}" if _rs["err"] else ""))
+                with _c2:
+                    if st.button("Actualiser", icon=":material/sync:", key="rag_force", use_container_width=True):
+                        rag_sync(force=True); st.rerun()
+                rec = rag_recent(48)
+                if not rec:
+                    st.caption("Aucun article publié ces 48 dernières heures dans la base.")
+                else:
+                    from collections import Counter as _Ct
+                    dom = _Ct(str(d.get("domain") or "Autre") for d in rec)
+                    kw = _Ct(w for d in rec for w in set(_rag_tok(d.get("title", ""))) if not w.isdigit())
+                    st.markdown(f"<div style='font-size:13px;color:{_tv['muted']};margin:4px 0 6px'>{len(rec)} articles en 48 h · "
+                                + " · ".join(f"{k} {v}" for k, v in dom.most_common(6)) + "</div>"
+                                + "".join(f"<span class='tj-kw'>{_html.escape(w)} {n}</span>" for w, n in kw.most_common(14)),
+                                unsafe_allow_html=True)
+                    _dsel = st.pills("Domaine", ["Tous"] + [k for k, _ in dom.most_common(8)], default="Tous",
+                                     key="veille_dom", label_visibility="collapsed")
+                    lst = [d for d in rec if _dsel in (None, "Tous") or str(d.get("domain") or "Autre") == _dsel][:14]
+                    st.markdown("<div class='tj-news'>" + "".join(
+                        f"<div><a href='{_html.escape(str(d.get('url') or '#'))}' target='_blank' rel='noopener'>"
+                        f"{_html.escape(str(d.get('title') or ''))}</a><br><small>{_html.escape(str(d.get('source') or ''))} · "
+                        f"{_html.escape(str(d.get('domain') or ''))} · {str(d.get('published') or '')[:16].replace('T', ' ')}</small></div>"
+                        for d in lst) + "</div>", unsafe_allow_html=True)
+
+    # ── SYNTHÈSE IA (chat OpenRouter) ────────────────────────────────────────
+    with tab_ai:
+        _user = st.session_state.get("auth_user", "")
+        if is_admin():
+            with st.expander("Accès au chat par utilisateur"):
+                _acc = kv_load("ai_access", {}) or {}
+                _others = [u for u in users_load() if u.get("role") != "admin" and u.get("username")]
+                if not _others:
+                    st.caption("Aucun autre utilisateur.")
+                def _acc_set(u):
+                    m = kv_load("ai_access", {}) or {}
+                    m[u] = bool(st.session_state.get(f"aiacc_{u}"))
+                    kv_save("ai_access", m)
+                for u in _others:
+                    n = u["username"]
+                    st.toggle(n, value=bool(_acc.get(n)), key=f"aiacc_{n}", on_change=_acc_set, args=(n,),
+                              help="Activé : la personne peut utiliser le chat. Désactivé : accès coupé à sa prochaine action.")
+        if not ai_allowed():
+            st.info("Le chat IA n'est pas activé pour ton compte. L'administrateur peut te donner l'accès.")
+        else:
+            if not _secret("OPENROUTER_API_KEY"):
+                st.warning("Clé OpenRouter absente : ajoute OPENROUTER_API_KEY dans les secrets Streamlit "
+                           "(Settings → Secrets de l'app). Elle reste côté serveur, jamais affichée.")
+            _models = or_models()
+            m1, m2, m3 = st.columns([1, 1.3, 2.4], vertical_alignment="bottom")
+            with m1:
+                _free = st.toggle("Gratuits uniquement", value=True, key="ai_free")
+            with m2:
+                _q = st.text_input("Rechercher un modèle", key="ai_q", placeholder="claude, gpt, llama, qwen…")
+            _ms = [m for m in _models if (m["free"] or not _free) and (not _q or _q.lower() in (m["id"] + m["name"]).lower())]
+            with m3:
+                if _ms:
+                    _ids = [m["id"] for m in _ms]; _byid = {m["id"]: m for m in _ms}
+                    _cur = st.session_state.get("ai_model")
+                    _sel = st.selectbox(f"Modèle ({len(_ms)} sur {len(_models)})", _ids,
+                                        index=_ids.index(_cur) if _cur in _ids else 0, key="ai_model_sel",
+                                        format_func=lambda i: f"{_byid[i]['name']} · " + (
+                                            "gratuit" if _byid[i]["free"] else
+                                            f"{_byid[i]['pin']:.2f} $ / {_byid[i]['pout']:.2f} $ par M tokens"))
+                    st.session_state["ai_model"] = _sel
+                else:
+                    st.selectbox("Modèle", ["Aucun modèle (liste OpenRouter indisponible ou filtre trop strict)"],
+                                 disabled=True, key="ai_model_none")
+                    _sel = None
+            s1, s2 = st.columns([3, 1], vertical_alignment="center")
+            with s1:
+                _srcs = st.pills("Mémoire utilisée", ["Journal", "Macro", "Actualités"], selection_mode="multi",
+                                 default=["Journal", "Macro", "Actualités"], key="ai_srcs")
+            with s2:
+                if st.button("Nouvelle conversation", icon=":material/add_comment:", key="ai_new", use_container_width=True):
+                    st.session_state["ai_hist"] = []; kv_save(f"ai_chat_{_user}", []); st.rerun()
+
+            if "ai_hist" not in st.session_state:
+                h = kv_load(f"ai_chat_{_user}", [])
+                st.session_state["ai_hist"] = h if isinstance(h, list) else []
+            hist = st.session_state["ai_hist"]
+
+            def _render_actions(i, msg):
+                for j, a in enumerate(msg.get("actions") or []):
+                    done = (msg.get("done") or {}).get(str(j))
+                    t_ = a.get("type")
+                    with st.container(border=True):
+                        st.markdown(f"<span style='font-size:13px'>{_html.escape(ai_describe(a))}</span>", unsafe_allow_html=True)
+                        if t_ == "filter_trades":
+                            _r = ai_filter(a)
+                            st.caption(f"{len(_r)} trade(s)")
+                            if len(_r):
+                                st.dataframe(_r, hide_index=True, use_container_width=True, height=min(360, 38 + 35 * len(_r)))
+                            continue
+                        if done:
+                            st.caption(done); continue
+                        if t_ in _AI_WRITE and not is_admin():
+                            st.caption("Réservé à l'administrateur."); continue
+                        lbl = {"open_page": "Ouvrir", "remember": "Mémoriser", "delete_trade": "Supprimer"}.get(t_, "Appliquer")
+                        b1, b2, _ = st.columns([1, 1, 4])
+                        if b1.button(lbl, key=f"aiact_{i}_{j}", type="primary"):
+                            ok, res = ai_apply(a)
+                            if res == "page":
+                                st.rerun()
+                            msg.setdefault("done", {})[str(j)] = ("Fait · " if ok else "Échec · ") + res
+                            kv_save(f"ai_chat_{_user}", hist[-40:]); st.rerun()
+                        if b2.button("Ignorer", key=f"aiign_{i}_{j}"):
+                            msg.setdefault("done", {})[str(j)] = "Ignorée"
+                            kv_save(f"ai_chat_{_user}", hist[-40:]); st.rerun()
+
+            box = st.container(height=560, border=False)
+            with box:
+                if not hist:
+                    st.markdown(f"<div style='color:{_tv['muted']};font-size:14px;padding:30px 4px'>Pose une question sur tes trades, "
+                                f"la macro ou l'actualité. Exemples : « Quels sont mes pires créneaux horaires ce mois-ci ? », "
+                                f"« Que disent les news sur le yen et comment ça touche mes positions USDJPY ? », "
+                                f"« Ajoute une note au dernier trade EURUSD ».</div>", unsafe_allow_html=True)
+                for i, msg in enumerate(hist):
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+                        if msg["role"] == "assistant":
+                            if msg.get("model"):
+                                st.caption(msg["model"])
+                            _render_actions(i, msg)
+            _prompt = st.chat_input("Écris ton message…", key="ai_input", disabled=not _sel)
+            if _prompt and _sel:
+                hist.append({"role": "user", "content": _prompt})
+                with box:
+                    with st.chat_message("user"):
+                        st.markdown(_prompt)
+                    with st.chat_message("assistant"):
+                        with st.spinner("Lecture du journal, de la macro et des actualités…"):
+                            _ctx = ai_context(_prompt, _srcs or [])
+                        _full = st.write_stream(or_stream(_sel, _ai_messages(hist[:-1], _prompt, _ctx)))
+                _txt, _acts = ai_split_actions(_full if isinstance(_full, str) else "".join(_full))
+                hist.append({"role": "assistant", "content": _txt or "(réponse vide)", "actions": _acts, "model": _sel})
+                for a in _acts:                      # la mémoire s'enregistre sans clic supplémentaire
+                    if a.get("type") == "remember":
+                        ai_apply(a)
+                        hist[-1].setdefault("done", {})[str(_acts.index(a))] = "Mémorisé"
+                kv_save(f"ai_chat_{_user}", hist[-40:])
+                st.rerun()
+
+            with st.expander("Mémoire de l'assistant"):
+                _mem = ai_memory_get(_user)
+                if not _mem:
+                    st.caption("Rien de mémorisé. Demande par exemple : « retiens que je ne trade pas le vendredi après 16 h ».")
+                for k, m_ in enumerate(reversed(_mem)):
+                    c1, c2 = st.columns([8, 1], vertical_alignment="center")
+                    c1.markdown(f"<span style='font-size:13px'>{_html.escape(m_.get('text',''))}</span>", unsafe_allow_html=True)
+                    if c2.button("", icon=":material/delete:", key=f"aimem_del_{k}", help="Oublier"):
+                        _real = len(_mem) - 1 - k
+                        kv_save(f"ai_mem_{_user}", [x for n, x in enumerate(_mem) if n != _real]); st.rerun()
+
+
 elif st.session_state.page == "users":
     if not is_admin():
         st.error("Accès réservé à l'administrateur."); st.stop()
