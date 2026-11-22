@@ -3094,6 +3094,10 @@ MX_FRED = {
     "VIXCLS": ("VIX", "pts", "lvl"), "BAMLH0A0HYM2": ("Spread High Yield", "pb", "bp"),
     "BAMLC0A0CM": ("Spread Investment Grade", "pb", "bp"), "M2SL": ("Masse monétaire M2", "% a/a", "yoy"),
     "NFCI": ("Conditions financières (Chicago Fed)", "idx", "lvl"), "DTWEXBGS": ("Dollar large (Fed)", "idx", "lvl"),
+    # Taux réels, nowcast, Japon, pétrole (contexte de l'assistant IA)
+    "DFII10": ("US 10 ans réel (TIPS)", "%", "lvl"), "T10YIE": ("Inflation anticipée 10 ans (breakeven)", "%", "lvl"),
+    "GDPNOW": ("GDPNow (Atlanta Fed)", "%", "lvl"), "IRLTLT01JPM156N": ("JGB 10 ans", "%", "lvl"),
+    "DCOILBRENTEU": ("Brent", "$", "lvl"),
 }
 MX_YAHOO = {
     "DX-Y.NYB": "DXY", "^VIX": "VIX", "^GSPC": "S&P 500", "^NDX": "Nasdaq 100", "GC=F": "Or",
@@ -3101,6 +3105,8 @@ MX_YAHOO = {
     "EURUSD=X": "EURUSD", "GBPUSD=X": "GBPUSD", "USDJPY=X": "USDJPY", "USDCHF=X": "USDCHF",
     "USDCAD=X": "USDCAD", "AUDUSD=X": "AUDUSD", "NZDUSD=X": "NZDUSD",
     "HYG": "ETF High Yield", "LQD": "ETF Investment Grade", "IEF": "ETF Trésor 7-10 ans",
+    "^VIX9D": "VIX 9 jours", "^VIX3M": "VIX 3 mois", "^MOVE": "MOVE (vol. obligataire)", "BZ=F": "Brent",
+    "HG=F": "Cuivre", "SI=F": "Argent", "CNY=X": "USDCNY", "000001.SS": "Shanghai Composite", "^N225": "Nikkei 225",
 }
 MX_FX = {"EUR": ("EURUSD=X", 1), "GBP": ("GBPUSD=X", 1), "JPY": ("USDJPY=X", -1), "CHF": ("USDCHF=X", -1),
          "CAD": ("USDCAD=X", -1), "AUD": ("AUDUSD=X", 1), "NZD": ("NZDUSD=X", 1)}
@@ -3298,19 +3304,48 @@ def macro_bis_rates(start):
     return _bis_policy_raw(start)
 
 
-MX_TTL = {"fred": 6 * 3600, "yahoo": 30 * 60, "bis": 12 * 3600, "rates": 6 * 3600, "treasury": 6 * 3600}
+MX_TTL = {"fred": 6 * 3600, "yahoo": 30 * 60, "bis": 12 * 3600, "rates": 6 * 3600, "treasury": 6 * 3600,
+          "cot": 12 * 3600}
 MX_RETRY = 10 * 60          # une source en échec n'est retentée qu'après 10 min
 MX_SRC_LABEL = {"fred": "FRED", "yahoo": "Yahoo Finance", "bis": "BIS (taux directeurs)",
-                "rates": "Décisions de taux (calendrier)", "treasury": "Trésor US (courbe des taux)"}
+                "rates": "Décisions de taux (calendrier)", "treasury": "Trésor US (courbe des taux)",
+                "cot": "CFTC (positionnement COT)"}
 
 
 @st.cache_resource(show_spinner=False)
 def _mx_store():
     """Mémoire partagée par toutes les sessions du serveur : les données ne sont chargées qu'une fois."""
     import threading
-    return {"fred": {}, "yahoo": {}, "bis": {}, "rates": [], "treasury": {}, "ts": {}, "fail_ts": {},
+    return {"fred": {}, "yahoo": {}, "bis": {}, "rates": [], "treasury": {}, "cot": {}, "ts": {}, "fail_ts": {},
             "missing": {}, "errors": {}, "running": False, "lock": threading.Lock(), "started": 0.0, "fred_key": ""}
 
+
+
+# ── Positionnement CFTC (Commitments of Traders, rapport hebdomadaire, sans clé) ──
+MX_COT = {"Or": "088691", "Dollar index": "098662", "S&P 500 E-mini": "13874A", "EUR": "099741",
+          "JPY": "097741", "GBP": "096742", "AUD": "232741", "CAD": "090741", "Pétrole WTI": "067651"}
+
+def _cot_raw():
+    ok, ko = {}, []
+    for name, code in MX_COT.items():
+        try:
+            r = requests.get("https://publicreporting.cftc.gov/resource/6dca-aqww.json",
+                             params={"$where": f"cftc_contract_market_code='{code}'",
+                                     "$order": "report_date_as_yyyy_mm_dd DESC", "$limit": "8"},
+                             headers=_UA, timeout=20)
+            r.raise_for_status()
+            rows = []
+            for x in r.json():
+                lo, sh = float(x.get("noncomm_positions_long_all") or 0), float(x.get("noncomm_positions_short_all") or 0)
+                rows.append({"date": str(x.get("report_date_as_yyyy_mm_dd", ""))[:10], "net": lo - sh,
+                             "oi": float(x.get("open_interest_all") or 0)})
+            if rows:
+                ok[name] = rows
+            else:
+                ko.append(name)
+        except Exception:
+            ko.append(name)
+    return ok, ko
 
 def _mx_worker(store, jobs):
     import time as _t
@@ -3328,6 +3363,8 @@ def _mx_worker(store, jobs):
                     ok, ko = _bis_policy_raw((date.today() - timedelta(days=800)).isoformat()), []
                 elif kind == "treasury":
                     ok, ko = _treasury_raw(), []
+                elif kind == "cot":
+                    ok, ko = _cot_raw()
                 else:
                     evs, _src = _fetch_calendar_raw("rates")
                     ok = [e for e in (evs or []) if any(k in str(e.get("title", "")).lower() for k in _MX_RATE_RX)]
@@ -3336,6 +3373,7 @@ def _mx_worker(store, jobs):
                     if kind == "rates":
                         store["rates"] = ok
                     else:
+                        store.setdefault(kind, {})
                         merged = dict(store[kind]); merged.update(ok); store[kind] = merged
                     store["ts"][kind] = _t.time()
                     store["missing"][kind] = list(ko)
@@ -3377,6 +3415,7 @@ def macro_get(force=False):
             fred["DFEDTARU"] = us + 0.125; subs.append("DFEDTARU ← BIS")
     missing = {MX_SRC_LABEL[k]: v for k, v in store["missing"].items() if v}
     return {"fred": fred, "yahoo": store["yahoo"], "bis": store["bis"], "rates": store["rates"],
+            "cot": store.get("cot", {}), "ts": dict(store["ts"]),
             "missing": missing, "loading": store["running"], "subs": subs,
             "empty": not (store["fred"] or store["yahoo"] or store["bis"])}
 
@@ -4178,6 +4217,12 @@ def rag_search(query, k=6):
             if f:
                 sc += ix["idf"].get(w, 0) * f * (k1 + 1) / (f + k1 * (1 - b + b * L / ix["avg"]))
         if sc > 0:
+            try:                                   # bonus de récence : un article frais compte davantage
+                age = (datetime.utcnow() - pd.to_datetime(str(d.get("published") or d.get("scraped_at")))
+                       .tz_localize(None)).total_seconds() / 86400
+                sc *= 1 + 1 / (1 + max(age, 0) / 7)
+            except Exception:
+                pass
             out.append((sc, d))
     out.sort(key=lambda x: -x[0])
     return [d for _, d in out[:k]]
@@ -4304,6 +4349,217 @@ def veille_auto_text(snap, df):
     return out
 
 
+# ── Bloc de données macro pour l'assistant : niveaux, variations, structure, positionnement, méthode ──
+def _sv(s):
+    return None if s is None or len(s) == 0 else s.dropna().sort_index()
+
+def _ln(label, s, unit="", d=2, scale=1.0):
+    s = _sv(s)
+    if s is None or len(s) < 2:
+        return f"{label} : indisponible"
+    v = float(s.iloc[-1]) * scale
+    def ch(n):
+        return None if len(s) <= n else (float(s.iloc[-1]) - float(s.iloc[-1 - n])) * scale
+    c5, c20 = ch(5), ch(20)
+    return (f"{label} : {v:.{d}f}{unit} au {s.index[-1]:%Y-%m-%d}"
+            + (f", 5 séances {c5:+.{d}f}" if c5 is not None else "") + (f", 20 séances {c20:+.{d}f}" if c20 is not None else ""))
+
+def _corr(a, b, n, diff_b=False):
+    a, b = _sv(a), _sv(b)
+    if a is None or b is None:
+        return None
+    ra = a.pct_change()
+    rb = b.diff() if diff_b else b.pct_change()
+    j = pd.concat([ra, rb], axis=1, join="inner").dropna().tail(n)
+    return None if len(j) < n * 0.7 else float(j.iloc[:, 0].corr(j.iloc[:, 1]))
+
+def _regime_at(mx, cutoff):
+    cut = {"fred": {k: v[v.index <= cutoff] for k, v in mx["fred"].items() if v is not None},
+           "yahoo": {k: v[v.index <= cutoff] for k, v in mx["yahoo"].items() if v is not None}}
+    try:
+        return mx_risk_regime(cut)[0]
+    except Exception:
+        return None
+
+def ai_macro_block():
+    import time as _t
+    mx = macro_get(); F, Y = mx["fred"], mx["yahoo"]
+    snap = veille_macro()
+    L = [f"Calcul : {datetime.utcnow():%Y-%m-%d %H:%M} UTC."]
+    fresh = []
+    for k, lab in MX_SRC_LABEL.items():
+        ts = mx.get("ts", {}).get(k)
+        fresh.append(f"{lab} {'lu il y a ' + str(int((_t.time() - ts) / 60)) + ' min' if ts else 'non chargé'}")
+    L.append("Fraîcheur des sources : " + " ; ".join(fresh) + ".")
+    # Régime et sa trajectoire
+    sc, lab, comps = snap["regime"]
+    ref = _sv(Y.get("^GSPC")) if Y.get("^GSPC") is not None else _sv(Y.get("DX-Y.NYB"))
+    traj = []
+    if ref is not None and len(ref) > 25:
+        for n in (20, 10, 5):
+            v = _regime_at(mx, ref.index[-1 - n])
+            if v is not None:
+                traj.append(f"il y a {n} séances {v:+.0f}")
+    if sc is not None:
+        L.append(f"RÉGIME : {lab} {sc:+.0f} (échelle -100 à +100)" + (f" ; trajectoire : {', '.join(traj)}" if traj else "") + ".")
+        L.append("Composantes (z-scores signés, + = risk-on) : " + "; ".join(f"{n} {z:+.2f} ({h})" for n, z, h in comps)
+                 + ". Formule : tanh(moyenne des z / 1,2) x 100, poids égaux, z sur 1 an (2 ans pour NFCI).")
+    # Crédit, taux, inflation anticipée
+    L.append("CRÉDIT ET TAUX :")
+    for lb, sid, u, d, sc_ in (("Spread High Yield (OAS)", "BAMLH0A0HYM2", " pb", 0, 100), ("Spread Investment Grade (OAS)", "BAMLC0A0CM", " pb", 0, 100),
+                               ("US 2 ans", "DGS2", " %", 2, 1), ("US 10 ans", "DGS10", " %", 2, 1),
+                               ("US 10 ans réel (TIPS)", "DFII10", " %", 2, 1), ("Breakeven 10 ans", "T10YIE", " %", 2, 1),
+                               ("Breakeven 5 ans", "T5YIE", " %", 2, 1), ("Courbe 10 ans - 2 ans", "T10Y2Y", " pb", 0, 100),
+                               ("Courbe 10 ans - 3 mois", "T10Y3M", " pb", 0, 100), ("JGB 10 ans (mensuel)", "IRLTLT01JPM156N", " %", 2, 1),
+                               ("Conditions financières NFCI", "NFCI", "", 2, 1), ("GDPNow (croissance US estimée)", "GDPNOW", " %", 1, 1)):
+        L.append("- " + _ln(lb, F.get(sid), u, d, sc_))
+    if F.get("BAMLH0A0HYM2") is None and Y.get("HYG") is not None and Y.get("LQD") is not None:
+        L.append("- " + _ln("Ratio HYG / LQD (repli crédit)", (Y["HYG"] / Y["LQD"] * 100), "", 2))
+    # Volatilité
+    L.append("VOLATILITÉ :")
+    for lb, tk in (("VIX", "^VIX"), ("VIX 9 jours", "^VIX9D"), ("VIX 3 mois", "^VIX3M"), ("MOVE (vol. obligataire)", "^MOVE")):
+        L.append("- " + _ln(lb, Y.get(tk), "", 2))
+    v, v3, v9 = _sv(Y.get("^VIX")), _sv(Y.get("^VIX3M")), _sv(Y.get("^VIX9D"))
+    if v is not None and v3 is not None:
+        r = float(v.iloc[-1] / v3.iloc[-1])
+        L.append(f"- Structure VIX / VIX3M = {r:.2f} : " + ("backwardation (stress installé)" if r > 1 else "contango (stress qui reflue ou absent)")
+                 + (f" ; VIX9D / VIX = {float(v9.iloc[-1] / v.iloc[-1]):.2f}" if v9 is not None else ""))
+    # Dollar, matières premières, actions
+    L.append("MARCHÉS :")
+    for lb, tk, d in (("DXY", "DX-Y.NYB", 2), ("S&P 500", "^GSPC", 0), ("Nasdaq 100", "^NDX", 0), ("Nikkei 225", "^N225", 0),
+                      ("Shanghai Composite", "000001.SS", 0), ("USDCNY", "CNY=X", 4), ("Brent", "BZ=F", 2), ("WTI", "CL=F", 2),
+                      ("Cuivre", "HG=F", 3), ("Argent", "SI=F", 2), ("Bitcoin", "BTC-USD", 0)):
+        L.append("- " + _ln(lb, Y.get(tk), "", d))
+    g = _sv(Y.get("GC=F"))
+    if g is not None and len(g) > 60:
+        last = float(g.iloc[-1])
+        ma = {n: float(g.tail(n).mean()) for n in (20, 50, 200) if len(g) >= n}
+        rsi = None
+        dlt = g.diff().tail(15)
+        up, dn = dlt.clip(lower=0).mean(), -dlt.clip(upper=0).mean()
+        if dn and dn > 0:
+            rsi = 100 - 100 / (1 + up / dn)
+        L.append(f"OR (contrat GC=F, proche du spot XAU) : {last:.1f} au {g.index[-1]:%Y-%m-%d} ; "
+                 + ", ".join(f"MM{n} {m:.1f}" for n, m in ma.items())
+                 + (f" ; écart à la MM200 {(last / ma[200] - 1) * 100:+.1f} %" if 200 in ma else "")
+                 + f" ; plus haut/bas 20 séances {g.tail(20).max():.1f} / {g.tail(20).min():.1f}"
+                 + f" ; 60 séances {g.tail(60).max():.1f} / {g.tail(60).min():.1f}"
+                 + f" ; 1 an {g.tail(252).max():.1f} / {g.tail(252).min():.1f}"
+                 + (f" ; RSI 14 {rsi:.0f}" if rsi is not None else "")
+                 + f" ; variation 5 séances {(last / float(g.iloc[-6]) - 1) * 100:+.1f} %, 20 séances {(last / float(g.iloc[-21]) - 1) * 100:+.1f} %.")
+    # Corrélations
+    cr = []
+    for lb, a, b, n, dfb in (("or / DXY", Y.get("GC=F"), Y.get("DX-Y.NYB"), 20, False), ("or / DXY", Y.get("GC=F"), Y.get("DX-Y.NYB"), 60, False),
+                             ("or / taux réel 10 ans", Y.get("GC=F"), F.get("DFII10"), 20, True), ("or / taux réel 10 ans", Y.get("GC=F"), F.get("DFII10"), 60, True),
+                             ("EURUSD / US 2 ans", Y.get("EURUSD=X"), F.get("DGS2"), 60, True), ("USDJPY / US 10 ans", Y.get("USDJPY=X"), F.get("DGS10"), 60, True),
+                             ("S&P 500 / VIX", Y.get("^GSPC"), Y.get("^VIX"), 20, False)):
+        c = _corr(a, b, n, dfb)
+        if c is not None:
+            cr.append(f"{lb} {n} j {c:+.2f}")
+    if cr:
+        L.append("CORRÉLATIONS (rendements quotidiens ; variations pour les taux) : " + " ; ".join(cr) + ".")
+    # Devises
+    L.append("DEVISES. Biais global = 45 % orientation monétaire + 30 % indice de surprise + 25 % force de marché 1 mois "
+             "(chaque composante de -100 à +100, relative à son propre historique ; la force est mesurée contre la moyenne du panier des 8 devises) :")
+    for c in MX_CCYS:
+        p = snap["pol"].get(c, {}); stc = snap["stance"].get(c, (None, "Indisponible", ""))
+        su = snap["surp"].get(c, (None, 0)); fs = None
+        if not snap["strength"].empty and "1 mois" in snap["strength"].columns:
+            x = snap["strength"].loc[c, "1 mois"]; fs = None if pd.isna(x) else float(x)
+        nd = p.get("next_date")
+        L.append(f"- {c} ({p.get('cb', '')}) : biais {snap['comp'][c]:+.0f}" if snap["comp"].get(c) is not None else f"- {c} : biais indisponible")
+        L[-1] += (f" ; taux {p['rate']:.2f} %" if p.get("rate") is not None else "") \
+                 + (f" ({p['chg6m'] * 100:+.0f} pb sur 6 mois)" if p.get("chg6m") is not None else "") \
+                 + f" ; politique {stc[1]}" + (f" {stc[0]:+.0f}" if stc[0] is not None else "") + (f" [{stc[2]}]" if stc[2] else "") \
+                 + (f" ; surprise 30 j {su[0]:+.0f} sur {su[1]} publications" if su[0] is not None else "") \
+                 + (f" ; force 1 mois {fs:+.2f} %" if fs is not None else "") \
+                 + (f" ; prochaine décision {pd.Timestamp(nd):%Y-%m-%d}" if nd is not None else "") \
+                 + (f" (consensus {p['next_cons']:.2f} %)" if p.get("next_cons") is not None else "")
+    comp = {c: v for c, v in snap["comp"].items() if v is not None}
+    if len(comp) >= 2:
+        hi, lo = max(comp, key=comp.get), min(comp, key=comp.get)
+        L.append(f"Divergence maximale : {hi}/{lo}, écart {comp[hi] - comp[lo]:.0f} points (biais de la base moins biais de la cotation).")
+    # Calendrier
+    ev3 = mx_events_frame(_fetch_calendar("all")[0]) if True else pd.DataFrame()
+    if not ev3.empty:
+        now = datetime.utcnow()
+        up = ev3[(ev3["dt"] >= now) & (ev3["dt"] <= now + timedelta(hours=96)) & ev3["impact"].isin(["High", "Medium"])].sort_values("dt").head(14)
+        if len(up):
+            L.append("CALENDRIER 96 h (date UTC, devise, événement, importance, consensus, précédent, surprises passées du même indicateur) :")
+            for _, r in up.iterrows():
+                past = ev3[(ev3["title"] == r["title"]) & (ev3["country"] == r["country"]) & ev3["z"].notna()].sort_values("dt").tail(5)
+                hist = ", ".join(f"{z:+.1f}σ" for z in past["z"])
+                L.append(f"- {r['dt']:%Y-%m-%d %H:%M} {r['country']} {r['title']} [{r['impact']}] consensus {r.get('forecast') or '—'}, "
+                         f"précédent {r.get('previous') or '—'}" + (f", surprises passées {hist}" if hist else ""))
+    # Positionnement
+    cot = mx.get("cot") or {}
+    if cot:
+        L.append("POSITIONNEMENT CFTC (non-commerciaux, net = long - short, rapport hebdomadaire) :")
+        for name, rows in cot.items():
+            if not rows:
+                continue
+            net = [x["net"] for x in rows]; cur = rows[0]
+            pct = (cur["net"] / cur["oi"] * 100) if cur["oi"] else None
+            rng = (max(net) - min(net)) or 1
+            L.append(f"- {name} au {cur['date']} : net {cur['net']:+,.0f} contrats"
+                     + (f" ({pct:+.1f} % de l'intérêt ouvert)" if pct is not None else "")
+                     + (f", variation hebdo {cur['net'] - rows[1]['net']:+,.0f}" if len(rows) > 1 else "")
+                     + f", position dans la fourchette 8 semaines {(cur['net'] - min(net)) / rng * 100:.0f} %")
+    L.append("NON DISPONIBLE DANS L'APP (ne pas inventer) : put/call et gamma des dealers, skew, dot plot de la Fed, taux de fret et transits "
+             "de Suez, calendrier politique, PMI et crédit chinois détaillés, adjudications et échéances d'options.")
+    return "\n".join(L)
+
+
+def ai_journal_block(df):
+    """Exécution : sessions, heures, rythme, drawdown, R et excursions (si le script MT5 a enrichi les trades)."""
+    if df is None or df.empty:
+        return ""
+    L = []
+    d = df.copy()
+    d["_dt"] = pd.to_datetime(d["date"].astype(str) + " " + d.get("time", pd.Series(["00:00"] * len(d), index=d.index)).astype(str),
+                              errors="coerce")
+    wins, losses = d.loc[d["pnl"] > 0, "pnl"], d.loc[d["pnl"] < 0, "pnl"]
+    eq = d.sort_values("_dt")["pnl"].cumsum()
+    dd = float((eq - eq.cummax()).min()) if len(eq) else 0.0
+    cap = st.session_state.get("account_capital") or {}
+    capv = sum(float(v or 0) for k, v in cap.items() if k in set(d["trade_mode"])) if isinstance(cap, dict) else 0
+    L.append(f"Gain moyen {wins.mean():.2f} $, perte moyenne {losses.mean():.2f} $, ratio gain/perte "
+             f"{(wins.mean() / -losses.mean()) if len(losses) and len(wins) else float('nan'):.2f}, drawdown max {dd:.2f} $"
+             + (f" sur un capital déclaré de {capv:,.0f} $ ({dd / capv * 100:.1f} %)" if capv else " (capital de départ non renseigné)") + ".")
+    h = d["_dt"].dt.hour
+    ses = pd.cut(h, [-1, 6, 12, 16, 23], labels=["Asie (0-7 h)", "Londres (7-13 h)", "Chevauchement Londres-NY (13-17 h)", "New York (17-24 h)"])
+    g = d.groupby(ses, observed=True)["pnl"].agg(["count", "sum", lambda x: (x > 0).mean() * 100])
+    L.append("Par session (heure du trade dans le journal) : " + "; ".join(f"{i} {int(r['count'])} trades {r['sum']:+.0f} $ {r.iloc[2]:.0f} %" for i, r in g.iterrows()))
+    wd = d.groupby(d["_dt"].dt.dayofweek)["pnl"].agg(["count", "sum"])
+    L.append("Par jour : " + "; ".join(f"{['lun','mar','mer','jeu','ven','sam','dim'][int(i)]} {int(r['count'])} trades {r['sum']:+.0f} $" for i, r in wd.iterrows()))
+    perday = d.groupby("date")["pnl"].agg(["count", "sum"])
+    L.append(f"Trades par jour : moyenne {perday['count'].mean():.1f}, médiane {perday['count'].median():.0f}, max {perday['count'].max()}. "
+             "Journées les plus chargées : " + "; ".join(f"{i} {int(r['count'])} trades {r['sum']:+.0f} $" for i, r in perday.sort_values("count", ascending=False).head(5).iterrows()))
+    if "direction" in d.columns:
+        gd = d.groupby(d["direction"].astype(str).str.upper().str[:4])["pnl"].agg(["count", "sum"])
+        L.append("Par sens : " + "; ".join(f"{i} {int(r['count'])} trades {r['sum']:+.0f} $" for i, r in gd.iterrows()))
+    for c in ("commission", "swap", "fees"):
+        if c in d.columns:
+            L.append(f"Coûts {c} cumulés : {pd.to_numeric(d[c], errors='coerce').sum():.2f} $")
+    try:
+        rk = risk_analysis(df)
+        bits = []
+        if rk.get("sl_cov") is not None: bits.append(f"stop renseigné sur {rk['sl_cov']:.0f} % des trades")
+        if rk.get("rr_plan_med") is not None: bits.append(f"R:R prévu médian {rk['rr_plan_med']:.2f}")
+        if rk.get("R_med") is not None: bits.append(f"R réalisé médian {rk['R_med']:+.2f}")
+        if rk.get("R_win_med") is not None: bits.append(f"R médian des gagnants {rk['R_win_med']:+.2f}")
+        if rk.get("exit_eff") is not None: bits.append(f"efficacité de sortie {rk['exit_eff']:.0f} % du MFE")
+        if rk.get("near_miss") is not None: bits.append(f"{rk['near_miss']:.0f} % des gagnants sont passés à 0,8 R du stop")
+        if rk.get("stopped_mfe_1R") is not None: bits.append(f"{rk['stopped_mfe_1R']:.0f} % des trades stoppés avaient d'abord gagné 1 R")
+        if rk.get("e_ratio") is not None: bits.append(f"e-ratio {rk['e_ratio']:.2f}")
+        if rk.get("loss_max_ratio") is not None: bits.append(f"plus grosse perte = {rk['loss_max_ratio']:.1f} x la perte moyenne")
+        bits.append(f"MAE/MFE disponibles sur {rk.get('n_excursion', 0)} trades")
+        L.append("Risque et exécution : " + " ; ".join(bits) + ".")
+    except Exception:
+        pass
+    L.append("Champs absents du journal : risque initial en % du capital, thèse écrite avant l'entrée, trade planifié ou improvisé, respect du stop.")
+    return "\n".join(L)
+
 # ── Synthèse IA : accès, modèles OpenRouter, contexte, actions ──────────────────
 def ai_access_map():
     if "_ai_access" not in st.session_state:
@@ -4370,23 +4626,30 @@ def ai_context(question, sources):
             sel = df[df["symbol"].isin(syms)] if syms else df
             last = sel.sort_values(["date"] + (["time"] if "time" in sel.columns else []), ascending=False).head(25 if syms else 15)
             rows = "\n".join(" | ".join(str(r[c])[:70] if c == "notes" else str(r[c]) for c in cols) for _, r in last.iterrows())
+            try:
+                parts.append("EXÉCUTION :\n" + ai_journal_block(df))
+            except Exception:
+                pass
             parts.append(f"{hdr}\nPar symbole : {sy}\nPar stratégie : {st_}\nP&L mensuel : {mo}\n"
                          f"Trades récents{(' sur ' + ', '.join(syms)) if syms else ''} ({' | '.join(cols)}) :\n{rows}")
     if "Macro" in sources:
         try:
-            snap = veille_macro()
-            parts.append("MACRO (moteur de l'app) :\n" + "\n".join(f"{t} : {x}" for t, x in veille_auto_text(snap, None)))
-            parts.append("Biais par devise (-100 à +100) : " + ", ".join(
-                f"{c} {v:+.0f}" for c, v in snap["comp"].items() if v is not None))
-        except Exception:
-            pass
+            parts.append("MACRO (moteur de l'app, données chiffrées) :\n" + ai_macro_block())
+        except Exception as e:
+            parts.append(f"MACRO : calcul impossible ({type(e).__name__}).")
     if "Actualités" in sources:
         docs = rag_search(question, k=6)
         if not docs:
             docs = rag_recent(24)[:5]
+        _all = list(rag_sync()["docs"].values())
+        if _all:
+            _newest = max(str(x.get("published") or x.get("scraped_at") or "") for x in _all)[:16].replace("T", " ")
+            _n7 = len(rag_recent(24 * 7))
+            parts.append(f"FRAÎCHEUR RAG : {len(_all)} documents en mémoire, article le plus récent {_newest} UTC, "
+                         f"{_n7} articles sur 7 jours. Si c'est ancien, signale que le collecteur RAG Finance ne tourne plus.")
         if docs:
             parts.append("ACTUALITÉS (RAG Finance Hub) :\n" + "\n\n".join(
-                f"[{i+1}] {d.get('source','')} · {str(d.get('published') or '')[:10]} · {d.get('title','')}\n"
+                f"[{i+1}] {d.get('source','')} · publié {str(d.get('published') or '')[:16].replace('T', ' ')} UTC · {d.get('title','')}\n"
                 f"{str(d.get('content',''))[:900]}\nURL : {d.get('url','')}" for i, d in enumerate(docs)))
     return "\n\n".join(parts)
 
