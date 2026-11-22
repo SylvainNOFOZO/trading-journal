@@ -2292,7 +2292,7 @@ def _connection_watchdog():
     import streamlit.components.v1 as _cw
     code = r"""
 (function(){
-  var W = window.parent, D = W.document;
+  var W = window, D = W.document;   // le script est injecté dans la page de l'app : window = l'app
   if (W.__tjWatchdog) return; W.__tjWatchdog = true;
   var bad = 0, last = Date.now();
   function state(){ var a = D.querySelector('[data-testid="stApp"]');
@@ -2316,7 +2316,8 @@ def _connection_watchdog():
   D.addEventListener('visibilitychange', function(){ if (!D.hidden) { bad = 0; last = Date.now(); } });
 })();"""
     _cw.html("<script>try{var s=window.parent.document.createElement('script');s.textContent="
-             + json.dumps(code) + ";window.parent.document.head.appendChild(s);}catch(e){" + code + "}</script>",
+             + json.dumps(code) + ";window.parent.document.head.appendChild(s);}catch(e){try{window.parent.Function("
+             + json.dumps(code) + ")();}catch(e2){}}</script>",
              height=0)
 
 
@@ -2326,7 +2327,7 @@ def _paste_support():
     import streamlit.components.v1 as _cp
     code = r"""
 (function(){
-  var W = window.parent, D = W.document;
+  var W = window, D = W.document;   // le script est injecté dans la page de l'app : window = l'app
   if (W.__tjPaste) return; W.__tjPaste = true;
   function toast(msg){
     var t = D.createElement('div'); t.textContent = msg;
@@ -2371,8 +2372,11 @@ def _paste_support():
         files.push(new File([f], nm, {type: f.type}));
       }
     }
-    if (!files.length) return;
-    var tag = (e.target && e.target.tagName) || '';
+    if (!files.length) {
+      var tg = (e.target && e.target.tagName) || '';
+      if (tg !== 'INPUT' && tg !== 'TEXTAREA' && target()) toast("Le presse-papiers ne contient pas d'image");
+      return;
+    }
     e.preventDefault();
     var inp = target();
     if (inp) { drop(inp, files); return; }
@@ -2387,7 +2391,8 @@ def _paste_support():
   }, true);
 })();"""
     _cp.html("<script>try{var s=window.parent.document.createElement('script');s.textContent="
-             + json.dumps(code) + ";window.parent.document.head.appendChild(s);}catch(e){}</script>", height=0)
+             + json.dumps(code) + ";window.parent.document.head.appendChild(s);}catch(e){try{window.parent.Function("
+             + json.dumps(code) + ")();}catch(e2){}}</script>", height=0)
 
 with st.container(key="tj_watchdog"):
     _connection_watchdog()
