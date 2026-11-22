@@ -4403,25 +4403,57 @@ def _ai_messages(history, question, ctx):
     msgs.append({"role": "user", "content": question})
     return msgs
 
-def or_stream(model, messages):
+AI_ERR = "\u2063ERR\u2063"      # marqueur interne : la réponse est une erreur (non enregistrée)
+
+def or_fallbacks(model, n=4):
+    """Modèles de secours : si le modèle choisi est gratuit, d'autres gratuits (plus grand contexte d'abord)."""
+    ms = or_models()
+    cur = next((m for m in ms if m["id"] == model), None)
+    if cur is None or not cur["free"]:
+        return []
+    pool = [m for m in ms if m["free"] and m["id"] != model and m["ctx"] >= 16000]
+    pool.sort(key=lambda m: -m["ctx"])
+    return [m["id"] for m in pool[:n]]
+
+def or_stream(model, messages, fallbacks=None):
+    """Réponse en flux. Si un modèle est saturé (429) ou en panne (5xx), on bascule sur le suivant."""
+    import time as _t
     key = _secret("OPENROUTER_API_KEY")
     if not key:
-        yield "La clé OpenRouter n'est pas configurée : ajoute OPENROUTER_API_KEY dans les secrets Streamlit."
+        yield AI_ERR + "La clé OpenRouter n'est pas configurée : ajoute OPENROUTER_API_KEY dans les secrets Streamlit."
         return
-    try:
-        r = requests.post("https://openrouter.ai/api/v1/chat/completions",
-                          headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
-                                   "HTTP-Referer": "https://trading-journal.streamlit.app", "X-Title": "Trading Journal"},
-                          json={"model": model, "messages": messages, "stream": True, "temperature": 0.3},
-                          stream=True, timeout=(15, 180))
+    chain = [model] + [m for m in (fallbacks or []) if m != model]
+    last_err = ""
+    for k, mdl in enumerate(chain):
+        try:
+            r = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                              headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                                       "HTTP-Referer": "https://trading-journal.streamlit.app", "X-Title": "Trading Journal"},
+                              json={"model": mdl, "messages": messages, "stream": True, "temperature": 0.3},
+                              stream=True, timeout=(15, 180))
+        except Exception as e:
+            last_err = f"connexion impossible ({type(e).__name__})"; continue
         if r.status_code != 200:
             try:
-                msg = r.json().get("error", {}).get("message", r.text[:300])
+                last_err = f"{r.status_code} : " + str(r.json().get("error", {}).get("message", ""))[:200]
             except Exception:
-                msg = r.text[:300]
-            yield f"Erreur OpenRouter ({r.status_code}) : {msg}"
-            return
+                last_err = f"{r.status_code}"
+            if r.status_code in (402,):
+                yield AI_ERR + ("Crédit OpenRouter insuffisant pour ce modèle payant. Choisis un modèle gratuit "
+                                "ou recharge le compte OpenRouter.")
+                return
+            if r.status_code in (401, 403):
+                yield AI_ERR + "Clé OpenRouter refusée : vérifie OPENROUTER_API_KEY dans les secrets."
+                return
+            _t.sleep(0.6)
+            continue                                   # 429 / 5xx / modèle indisponible : modèle suivant
+        if k > 0:
+            st.session_state["_ai_used"] = mdl
+            yield f"*{model} est saturé, réponse de {mdl}.*\n\n"
+        else:
+            st.session_state["_ai_used"] = mdl
         r.encoding = "utf-8"
+        got = False
         for line in r.iter_lines(decode_unicode=True):
             if not line or not line.startswith("data:"):
                 continue
@@ -4433,13 +4465,21 @@ def or_stream(model, messages):
             except Exception:
                 continue
             if j.get("error"):
-                yield f"\n\nErreur du modèle : {j['error'].get('message', '')}"
-                break
+                if not got:
+                    last_err = str(j["error"].get("message", ""))[:200]
+                    break
+                yield f"\n\n*Réponse interrompue par le fournisseur.*"
+                return
             delta = ((j.get("choices") or [{}])[0].get("delta") or {}).get("content")
             if delta:
+                got = True
                 yield delta
-    except Exception as e:
-        yield f"\n\nConnexion à OpenRouter interrompue ({type(e).__name__})."
+        if got:
+            return
+    yield AI_ERR + ("Tous les modèles essayés sont saturés pour le moment"
+                    + (f" (dernier message : {last_err})" if last_err else "")
+                    + ". Les modèles gratuits sont partagés par tous les utilisateurs d'OpenRouter : réessaie dans "
+                      "une minute ou choisis-en un autre.")
 
 _AI_ACT_RX = _re_v.compile(r"```action\s*(\{.*?\})\s*```", _re_v.S)
 
@@ -8183,6 +8223,15 @@ elif st.session_state.page == "veille":
                 h = kv_load(f"ai_chat_{_user}", [])
                 st.session_state["ai_hist"] = h if isinstance(h, list) else []
             hist = st.session_state["ai_hist"]
+            if any(str(m.get("content", "")).startswith("Erreur OpenRouter") for m in hist):   # anciennes erreurs
+                _clean = []
+                for m in hist:
+                    if m["role"] == "assistant" and str(m.get("content", "")).startswith("Erreur OpenRouter"):
+                        if _clean and _clean[-1]["role"] == "user":
+                            _clean.pop()
+                        continue
+                    _clean.append(m)
+                hist[:] = _clean; kv_save(f"ai_chat_{_user}", hist[-40:])
 
             def _render_actions(i, msg):
                 for j, a in enumerate(msg.get("actions") or []):
@@ -8226,7 +8275,16 @@ elif st.session_state.page == "veille":
                             if msg.get("model"):
                                 st.caption(msg["model"])
                             _render_actions(i, msg)
+            if st.session_state.get("_ai_err"):
+                st.warning(st.session_state.pop("_ai_err"))
+            if st.session_state.get("ai_retry"):
+                if st.button("Renvoyer : " + st.session_state["ai_retry"][:80], icon=":material/refresh:", key="ai_retry_btn"):
+                    st.session_state["_ai_resend"] = st.session_state.pop("ai_retry"); st.rerun()
             _prompt = st.chat_input("Écris ton message…", key="ai_input", disabled=not _sel)
+            if not _prompt and st.session_state.get("_ai_resend"):
+                _prompt = st.session_state.pop("_ai_resend")
+            if _prompt:
+                st.session_state.pop("ai_retry", None)
             if _prompt and _sel:
                 hist.append({"role": "user", "content": _prompt})
                 with box:
@@ -8235,9 +8293,28 @@ elif st.session_state.page == "veille":
                     with st.chat_message("assistant"):
                         with st.spinner("Lecture du journal, de la macro et des actualités…"):
                             _ctx = ai_context(_prompt, _srcs or [])
-                        _full = st.write_stream(or_stream(_sel, _ai_messages(hist[:-1], _prompt, _ctx)))
+                        st.session_state["_ai_used"] = _sel
+                        _gen = or_stream(_sel, _ai_messages(hist[:-1], _prompt, _ctx), or_fallbacks(_sel))
+                        _first = next(_gen, "")
+                        if _first.startswith(AI_ERR):
+                            _full = None
+                            st.session_state["_ai_err"] = _first.replace(AI_ERR, "")
+                        else:
+                            def _chain():
+                                yield _first
+                                yield from _gen
+                            _full = st.write_stream(_chain())
+                if _full is None:                    # erreur : rien n'est gardé, la question reste à renvoyer
+                    hist.pop(); st.session_state["ai_retry"] = _prompt
+                    st.rerun()
                 _txt, _acts = ai_split_actions(_full if isinstance(_full, str) else "".join(_full))
-                hist.append({"role": "assistant", "content": _txt or "(réponse vide)", "actions": _acts, "model": _sel})
+                if AI_ERR in _txt:
+                    st.session_state["_ai_err"] = _txt.split(AI_ERR, 1)[1]
+                    _txt = _txt.split(AI_ERR, 1)[0].strip()
+                if not _txt:
+                    hist.pop(); st.session_state["ai_retry"] = _prompt; st.rerun()
+                hist.append({"role": "assistant", "content": _txt, "actions": _acts,
+                             "model": st.session_state.get("_ai_used", _sel)})
                 for a in _acts:                      # la mémoire s'enregistre sans clic supplémentaire
                     if a.get("type") == "remember":
                         ai_apply(a)
