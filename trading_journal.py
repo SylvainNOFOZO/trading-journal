@@ -6043,6 +6043,8 @@ elif st.session_state.page == "journal":
         st.info("Aucun trade ne correspond à cette recherche.")
         st.stop()
 
+    if st.session_state.get("_jq_msg"):
+        st.success(st.session_state.pop("_jq_msg"))
     _tot = df["pnl"].sum(); _wr = (df["pnl"] > 0).mean() * 100
     _cf = _tj["win"] if _tot >= 0 else _tj["loss"]
     st.markdown(
@@ -6106,7 +6108,34 @@ elif st.session_state.page == "journal":
     # ══ MODIFIER / SUPPRIMER (admin) : uniquement sur les résultats de la recherche ═══
     if is_admin():
         with st.expander(f"Modifier ou supprimer · {len(df)} trade(s) de la recherche"):
-            tab1, tab2 = st.tabs(["Un trade", "Plusieurs trades (page affichée)"])
+            tab1, tab2, tab3 = st.tabs(["Un trade", "Plusieurs trades (page affichée)", "Changer de compte"])
+            with tab3:
+                _mv_scope = st.radio("Trades concernés", [f"Tous les résultats de la recherche ({len(df)})",
+                                                          f"Page affichée ({len(df_page)})"],
+                                     horizontal=True, key="jq_mv_scope")
+                _mv_df = df if _mv_scope.startswith("Tous") else df_page
+                _from = _mv_df["trade_mode"].fillna(DEFAULT_ACCOUNT).value_counts()
+                st.caption("Comptes actuels : " + " · ".join(f"{k} {v}" for k, v in _from.items()))
+                m1, m2 = st.columns([2, 1], vertical_alignment="bottom")
+                with m1:
+                    _to = st.selectbox("Basculer vers le compte", TRADE_MODES, key="jq_mv_to")
+                _n_mv = int((_mv_df["trade_mode"].fillna(DEFAULT_ACCOUNT) != _to).sum())
+                _ok_mv = st.checkbox(f"Je confirme : {_n_mv} trade(s) passeront sur « {_to} »", key="jq_mv_ok",
+                                     disabled=_n_mv == 0)
+                with m2:
+                    if st.button("Basculer", icon=":material/swap_horiz:", type="primary", key="jq_mv_go",
+                                 use_container_width=True, disabled=not (_ok_mv and _n_mv)):
+                        _ids = set(_mv_df["id"].tolist())
+                        for t in st.session_state.trades:
+                            if t["id"] in _ids:
+                                t["trade_mode"] = _to
+                        _okc = cloud_save(st.session_state.trades)
+                        st.session_state.pop("jq_mv_ok", None)
+                        st.session_state["_jq_msg"] = (f"{_n_mv} trade(s) basculé(s) vers « {_to} »."
+                                                       + ("" if _okc else " (sauvegarde locale, vérifie la connexion)"))
+                        st.rerun()
+                if not set(TRADE_MODES).issubset(set(allowed_accounts())):
+                    st.caption("Les trades basculés vers un compte que tu ne vois pas disparaîtront de tes résultats.")
             with tab1:
                 _cap = df.head(500)
                 labels_one = [f"{r['date']}  ·  {r['symbol']}  ·  {r.get('trade_mode','Réel Indépendant')}  ·  "
@@ -8747,12 +8776,52 @@ elif st.session_state.page == "users":
             with _cc:
                 new_caps[acc] = st.number_input(
                     acc, min_value=0.0, step=100.0,
-                    value=float(caps.get(acc, 0) or 0), key=f"cap_{acc}")
+                    value=float(caps.get(acc, 0) or 0), key=f"cap_{acc}_{st.session_state.get('_cap_ver', 0)}")
         if st.form_submit_button("Enregistrer les capitaux", icon=":material/save:",
                                  type="primary"):
             st.session_state.account_capital = new_caps
             ok = capital_save(new_caps)
             st.success("Capitaux enregistrés." if ok else "Enregistré en session (sync à vérifier).")
+
+    st.markdown("#### Ajouter au capital (versement ou retrait)")
+    st.caption("Le montant s'ajoute au capital du compte. Un montant négatif enregistre un retrait.")
+    if st.session_state.get("_cap_msg"):
+        st.success(st.session_state.pop("_cap_msg"))
+    with st.form("capital_inc_form", clear_on_submit=True):
+        i1, i2, i3 = st.columns([1.6, 1, 1])
+        with i1:
+            inc_acc = st.selectbox("Compte", TRADE_MODES, key="cap_inc_acc")
+        with i2:
+            inc_amt = st.number_input("Montant ($)", value=0.0, step=100.0, key="cap_inc_amt")
+        with i3:
+            inc_date = st.date_input("Date", value=date.today(), key="cap_inc_date")
+        inc_note = st.text_input("Note (facultatif)", key="cap_inc_note", placeholder="Versement, retrait, bonus…")
+        if st.form_submit_button("Ajouter", icon=":material/add_card:", type="primary"):
+            if not inc_amt:
+                st.error("Indique un montant différent de zéro.")
+            else:
+                caps_now = dict(st.session_state.get("account_capital", {}))
+                before = float(caps_now.get(inc_acc, 0) or 0)
+                after = max(0.0, before + float(inc_amt))
+                caps_now[inc_acc] = after
+                st.session_state.account_capital = caps_now
+                st.session_state["_cap_ver"] = st.session_state.get("_cap_ver", 0) + 1   # le formulaire du dessus se met à jour
+                ok = capital_save(caps_now)
+                moves = kv_load("capital_moves", []) or []
+                moves.append({"account": inc_acc, "amount": float(inc_amt), "date": str(inc_date),
+                              "note": inc_note.strip(), "before": before, "after": after,
+                              "by": st.session_state.get("auth_user", ""), "ts": datetime.utcnow().isoformat(timespec="seconds")})
+                kv_save("capital_moves", moves[-500:])
+                st.session_state["_cap_msg"] = (f"{inc_acc} : capital {before:,.2f} USD → {after:,.2f} USD"
+                                                + ("" if ok else " (sauvegarde locale, vérifie la connexion)"))
+                st.rerun()
+    _mv = kv_load("capital_moves", []) or []
+    if _mv:
+        with st.expander(f"Historique des mouvements de capital ({len(_mv)})"):
+            st.dataframe(pd.DataFrame(list(reversed(_mv)))[["date", "account", "amount", "before", "after", "note", "by"]]
+                         .rename(columns={"date": "Date", "account": "Compte", "amount": "Montant", "before": "Avant",
+                                          "after": "Après", "note": "Note", "by": "Par"}),
+                         hide_index=True, use_container_width=True)
 
     st.markdown("---")
 
