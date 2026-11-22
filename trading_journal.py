@@ -606,6 +606,11 @@ def app_css(t, page):
 [data-testid="stChatMessage"] {{ background:transparent !important; }}
 [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {{ background:{raised} !important; border:1px solid {hair}; border-radius:12px; }}
 [data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li {{ color:{t['text']} !important; }}
+/* Bouton secondaire d'un formulaire : surface relevée, texte lisible */
+[data-testid="stFormSubmitButton"] > button[kind="secondaryFormSubmit"] {{ background:{raised} !important; color:{t['text']} !important;
+    border:1px solid {hair} !important; }}
+[data-testid="stFormSubmitButton"] > button[kind="secondaryFormSubmit"] p,
+[data-testid="stFormSubmitButton"] > button[kind="secondaryFormSubmit"] [data-testid="stMarkdownContainer"] p {{ color:{t['text']} !important; }}
 /* Plus de panneau latéral */
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {{ display:none !important; }}
 [data-testid="stMainBlockContainer"] {{ padding-top:28px !important; max-width:1440px; }}
@@ -1528,6 +1533,12 @@ def get_capital(mode_filter=None):
 def is_admin():
     return st.session_state.get("auth_role") == "admin"
 
+def is_viewer():
+    """Lecteur : aucun compte, aucun trade ; seulement les onglets d'information (Analyse & News, Veille)."""
+    return st.session_state.get("auth_role") == "viewer"
+
+VIEWER_PAGES = ("home", "analyse", "veille")
+
 def selection_label():
     """Libellé lisible du périmètre de comptes actuellement affiché."""
     allowed = allowed_accounts()
@@ -1568,6 +1579,8 @@ def get_df(mode_filter=None):
     if df.empty: return df
     if "trade_mode" not in df.columns: df["trade_mode"] = "Réel Indépendant"
     allowed = allowed_accounts()
+    if not is_admin() and not allowed:
+        return pd.DataFrame()                      # lecteur ou utilisateur sans compte : aucun trade
     if allowed:
         df = df[df["trade_mode"].isin(allowed)]
     # Filtrer sur les comptes sélectionnés (un, plusieurs, ou tous)
@@ -1743,6 +1756,8 @@ def allowed_accounts():
     """Comptes de trading que l'utilisateur connecté a le droit de voir."""
     if st.session_state.get("auth_role") == "admin":
         return list(TRADE_MODES)
+    if st.session_state.get("auth_role") == "viewer":
+        return []
     acc = st.session_state.get("auth_accounts", [])
     return [a for a in acc if a in TRADE_MODES]
 
@@ -2337,10 +2352,14 @@ _NAV += [
 ]
 if is_admin():
     _NAV += [("users", "Utilisateurs", ":material/manage_accounts:")]
+if is_viewer():
+    _NAV = [x for x in _NAV if x[0] in VIEWER_PAGES]
 _NAV_LBL = {k: l for k, l, _ in _NAV}
 
 # Garde-fou : une page réservée admin demandée par un non-admin retombe sur l'accueil
 if not is_admin() and st.session_state.page in ("add", "import", "users"):
+    st.session_state.page = "home"
+if is_viewer() and st.session_state.page not in VIEWER_PAGES:
     st.session_state.page = "home"
 if st.session_state.page != "home" and st.session_state.page not in _NAV_LBL:
     st.session_state.page = "home"
@@ -3992,7 +4011,7 @@ def render_home():
     with st.container(horizontal=True, key="home_top", vertical_alignment="center", gap="small"):
         st.markdown(f"<div class='tj-home-top'><div class='tj-mark'>{_logo_svg(t['bg'], 18)}</div>"
                     f"<div class='tj-brand'>Trading Journal<small>{_html.escape(user)} · "
-                    f"{'Admin' if is_admin() else 'Utilisateur'}</small></div></div>", unsafe_allow_html=True)
+                    f"{'Admin' if is_admin() else ('Lecteur' if is_viewer() else 'Utilisateur')}</small></div></div>", unsafe_allow_html=True)
         with st.container(horizontal=True, key="home_top_r", vertical_alignment="center", gap="small",
                           horizontal_alignment="right"):
             _theme_buttons()
@@ -4001,6 +4020,30 @@ def render_home():
                 force_reload(); st.rerun()
             if st.button("", icon=":material/logout:", key="hdr_logout", help="Déconnexion"):
                 logout()
+
+    if is_viewer():
+        _vs = veille_macro(); _rsc, _rlab, _ = _vs["regime"]
+        _rc = t["muted"] if _rsc is None else (t["win"] if _rsc >= 20 else (t["loss"] if _rsc <= -20 else t["orange"]))
+        st.markdown(
+            f"<div class='tj-hero'><div class='tj-pill'><span class='tj-live'></span>{today} · espace d'information</div>"
+            f"<div class='tj-hero-l'>Régime de marché</div>"
+            + (f"<div class='tj-hero-v' style='color:{_rc}'>{_html.escape(_rlab)} {_rsc:+.0f}</div>" if _rsc is not None else
+               f"<div style='font-size:20px;color:{t['muted']};margin-top:10px'>Données de marché en cours de chargement…</div>")
+            + "</div>", unsafe_allow_html=True)
+        st.markdown("<div class='tj-h2'>Espaces</div><div class='tj-h2-sub'>Analyse des marchés et veille. "
+                    "Le bouton en haut à gauche de chaque page ramène ici.</div>", unsafe_allow_html=True)
+        _v1, _v2 = st.columns([1.4, 1], gap="medium")
+        with _v1:
+            _n48 = len(rag_recent(48)) if rag_sync(background=True)["docs"] else 0
+            _tile("veille", "Veille", "Synthèse macro automatique, actualités RAG Finance"
+                  + (" et assistant IA" if ai_allowed() else ""),
+                  f"<div class='tj-t-stat'><b>{_n48}</b><span>articles en 48 h</span></div>")
+        with _v2:
+            _tile("analyse", "Analyse & News", "Calendrier macro, biais de marché et surprises",
+                  "<div class='tj-t-stat'><span class='tj-live'></span><span>Données mises à jour en continu</span></div>")
+        st.markdown(f"<footer class='tj-foot'><span>{_logo_svg(t['muted'], 14)} Trading Journal</span>"
+                    f"<span>{loc:%H:%M} · UTC+1</span></footer>", unsafe_allow_html=True)
+        return
 
     with st.container(key="home_hero"):
         pf = ""
@@ -4604,7 +4647,7 @@ def ai_context(question, sources):
     mem = ai_memory_get(user)
     if mem:
         parts.append("MÉMOIRE (faits retenus) :\n" + "\n".join(f"- {m.get('text','')}" for m in mem[-25:]))
-    if "Journal" in sources:
+    if "Journal" in sources and not is_viewer():
         df = get_df()
         if df.empty:
             parts.append("JOURNAL : aucun trade.")
@@ -8490,8 +8533,9 @@ elif st.session_state.page == "veille":
                     _sel = None
             s1, s2 = st.columns([3, 1], vertical_alignment="center")
             with s1:
-                _srcs = st.pills("Mémoire utilisée", ["Journal", "Macro", "Actualités"], selection_mode="multi",
-                                 default=["Journal", "Macro", "Actualités"], key="ai_srcs")
+                _src_opts = ["Macro", "Actualités"] if is_viewer() else ["Journal", "Macro", "Actualités"]
+                _srcs = st.pills("Mémoire utilisée", _src_opts, selection_mode="multi",
+                                 default=_src_opts, key="ai_srcs")
             with s2:
                 if st.button("Nouvelle conversation", icon=":material/add_comment:", key="ai_new", use_container_width=True):
                     st.session_state["ai_hist"] = []; kv_save(f"ai_chat_{_user}", []); st.rerun()
@@ -8721,8 +8765,13 @@ elif st.session_state.page == "users":
         with cu2:
             nu_pass = st.text_input("Mot de passe", type="password",
                                     help="À transmettre à l'utilisateur de façon sécurisée")
+        nu_kind = st.radio("Type d'accès", ["Trader : comptes et journal", "Lecteur : onglets d'information uniquement"],
+                           horizontal=True, help="Un lecteur ne voit aucun compte ni aucun trade : seulement l'accueil, "
+                                                 "Analyse & News et Veille (le chat IA reste soumis à ton autorisation).")
+        nu_viewer = nu_kind.startswith("Lecteur")
         nu_accounts = st.multiselect("Comptes visibles par cet utilisateur", TRADE_MODES,
-                                     default=[], help="L'utilisateur ne verra QUE ces comptes.")
+                                     default=[], help="L'utilisateur ne verra QUE ces comptes. Ignoré pour un lecteur.",
+                                     disabled=False)
         cc1, cc2 = st.columns([1, 1])
         with cc1:
             submit_new = st.form_submit_button("Créer le compte", icon=":material/person_add:",
@@ -8738,19 +8787,20 @@ elif st.session_state.page == "users":
                 st.error("Mot de passe : 6 caractères minimum.")
             elif any(x.get("username") == nu_name.strip() for x in users):
                 st.error("Ce nom d'utilisateur existe déjà.")
-            elif not nu_accounts:
-                st.error("Sélectionnez au moins un compte visible.")
+            elif not nu_accounts and not nu_viewer:
+                st.error("Sélectionnez au moins un compte visible (ou choisissez le type Lecteur).")
             else:
                 users.append({
                     "username": nu_name.strip(),
                     "password_hash": hash_password(nu_pass),
-                    "role": "user",
-                    "accounts": nu_accounts,
+                    "role": "viewer" if nu_viewer else "user",
+                    "accounts": [] if nu_viewer else nu_accounts,
                     "active": True,
                 })
                 if users_save(users):
                     st.success(f"Utilisateur « {nu_name.strip()} » créé "
-                               f"(accès : {', '.join(nu_accounts)}).")
+                               + ("(lecteur : onglets d'information uniquement)." if nu_viewer
+                                  else f"(accès : {', '.join(nu_accounts)})."))
                     st.rerun()
                 else:
                     st.error("Échec de la sauvegarde.")
@@ -8764,6 +8814,7 @@ elif st.session_state.page == "users":
         for i, u in enumerate(users):
             uname = u.get("username", "")
             is_adm = u.get("role") == "admin"
+            is_vw = u.get("role") == "viewer"
             active = u.get("active", True)
             status_col = _t["win"] if active else _t["loss"]
             with st.container():
@@ -8771,20 +8822,30 @@ elif st.session_state.page == "users":
                     f"<div style='background:{_t['card']};border:1px solid {_t['border']};"
                     f"border-radius:12px;padding:12px 16px;margin-bottom:4px'>"
                     f"<b style='color:{_t['text']}'>{uname}</b> "
-                    f"{'admin' if is_adm else ''} "
+                    f"{'admin' if is_adm else ('lecteur' if is_vw else '')} "
                     f"<span style='color:{status_col};font-size:12px'>"
                     f"● {'actif' if active else 'désactivé'}</span><br>"
                     f"<span style='color:{_t['muted']};font-size:12px'>Comptes : "
-                    f"{', '.join(u.get('accounts', [])) if not is_adm else 'tous (admin)'}</span></div>",
+                    f"{'tous (admin)' if is_adm else ('aucun · Analyse & News et Veille uniquement' if is_vw else ', '.join(u.get('accounts', [])))}</span></div>",
                     unsafe_allow_html=True)
                 if not is_adm:
                     e1, e2, e3, e4 = st.columns([2.4, 1.4, 1.4, 1.2])
                     with e1:
-                        new_acc = st.multiselect("Comptes", TRADE_MODES,
-                            default=[a for a in u.get("accounts", []) if a in TRADE_MODES],
-                            key=f"acc_{i}", label_visibility="collapsed")
+                        if is_vw:
+                            st.caption("Lecteur : aucun compte. Pour lui ouvrir des comptes, passe-le en trader.")
+                            new_acc = []
+                        else:
+                            new_acc = st.multiselect("Comptes", TRADE_MODES,
+                                default=[a for a in u.get("accounts", []) if a in TRADE_MODES],
+                                key=f"acc_{i}", label_visibility="collapsed")
                     with e2:
-                        if st.button("Enregistrer accès", key=f"save_acc_{i}",
+                        if is_vw:
+                            if st.button("Passer en trader", key=f"to_user_{i}", use_container_width=True):
+                                users[i]["role"] = "user"; users_save(users); st.rerun()
+                        elif st.button("Passer en lecteur", key=f"to_viewer_{i}", use_container_width=True,
+                                       help="Retire tous les comptes : il ne verra plus que les onglets d'information."):
+                            users[i]["role"] = "viewer"; users[i]["accounts"] = []; users_save(users); st.rerun()
+                        if not is_vw and st.button("Enregistrer accès", key=f"save_acc_{i}",
                                      use_container_width=True):
                             users[i]["accounts"] = new_acc
                             (st.success if users_save(users) else st.error)(
